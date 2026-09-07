@@ -32,8 +32,17 @@ class ComputerUseClient:
         return self
 
     async def __aexit__(self, *exc):
-        await self._session.__aexit__(*exc)
-        await self._stack.__aexit__(*exc)
+        # 嵌套 stdio client 退出时 anyio 可能抛 cancel-scope 冲突（TaskGroup 清理顺序）。
+        # 这类异常只发生在清理阶段、响应早已拿到，吞掉并记录，避免污染外层事件循环
+        # 导致整个 MCP server 进程崩溃（用户侧表现为后续工具 Not connected）。
+        try:
+            await self._session.__aexit__(*exc)
+        except Exception:
+            pass
+        try:
+            await self._stack.__aexit__(*exc)
+        except Exception:
+            pass
 
     async def _call(self, tool, args=None):
         if self._session is None:

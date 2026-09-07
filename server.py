@@ -297,9 +297,34 @@ async def list_windows():
 
 @mcp.tool()
 async def doctor():
-    """自检：报告 computer-use-linux 后端就绪状态。"""
-    async with ComputerUseClient() as client:
-        return await _unpack_result(await client._call("doctor"))
+    """自检：报告 agent-claw 各通道就绪状态（不依赖嵌套子进程）。"""
+    import shutil
+    import glob
+
+    checks = {}
+
+    # 1. AT-SPI 后端 binary 是否可执行
+    cul = shutil.which("computer-use-linux")
+    checks["atspi_binary"] = bool(cul)
+    checks["atspi_binary_path"] = cul
+
+    # 2. Chrome CDP 调试端口是否可达
+    try:
+        import urllib.request
+        with urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2) as r:
+            import json as _json
+            v = _json.loads(r.read())
+            checks["cdp_ready"] = True
+            checks["cdp_browser"] = v.get("Browser")
+    except Exception as e:
+        checks["cdp_ready"] = False
+        checks["cdp_error"] = str(e)[:120]
+
+    # 3. 模板仓库
+    checks["templates"] = sorted(
+        os.path.basename(p) for p in glob.glob(os.path.join(LOG_DIR, "..", "templates", "*.json")))
+
+    return {"status": "ok" if checks.get("cdp_ready") else "degraded", "checks": checks}
 
 
 # ---------------- DOM 通道（网页操作） ----------------
