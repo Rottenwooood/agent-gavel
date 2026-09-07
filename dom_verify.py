@@ -95,7 +95,13 @@ async def dom_act_and_verify(
             ok = True
         elif action == "focus":
             target = sel.get("input")
-            r = await client.focus_and_clear(target)
+            r = await client.focus(target)
+            ok = isinstance(r, dict) and r.get("ok")
+        elif action == "clear":
+            target = sel.get("input") or sel.get("target")
+            if not target:
+                raise ValueError("clear needs selectors.input")
+            r = await client.clear(target, trusted=trusted)
             ok = isinstance(r, dict) and r.get("ok")
         else:
             raise ValueError(f"unknown dom action: {action}")

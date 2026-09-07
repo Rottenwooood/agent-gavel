@@ -350,7 +350,9 @@ async def dom_step(
       set_value -> selectors.input + selectors.value 设值
       click     -> selectors.target 点击（可用 __text__: / __text_nth__:N:: 锚点）
       press_enter -> 当前焦点触发回车/form 提交
-      focus     -> selectors.input 聚焦并清空
+      clear     -> selectors.input 清空（trusted=True 时用真实 Ctrl+A+Backspace，
+                   对 React 受控组件有效）
+      focus     -> selectors.input 仅聚焦（不清空已填内容）
     page_features: {特征名: JS表达式}，动作后提取页面状态
     expected_feature: {特征名: {op: eq|neq|exists|not_exists|contains, value}}
     trusted: True 用 CDP 真实输入/点击/按键（isTrusted=true）。对 React 重渲染站点

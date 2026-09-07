@@ -149,16 +149,87 @@ class DomClient:
 
     async def focus_and_clear(self, selector):
         """聚焦元素并清空（如搜索框）。"""
+        return await self.clear(selector)
+
+    async def focus(self, selector):
+        """仅聚焦元素，不清空其值（操作前准备，保留已填内容）。"""
         el_js = _el_js(selector)
         return await self.eval_js(f"""
         (() => {{
             const el = {el_js};
             if (!el) return {{ok: false, error: 'not found: ' + {json.dumps(selector)}}};
             el.focus();
-            if (el.value !== undefined) {{ el.value = ''; }}
             return {{ok: true, tag: el.tagName}};
         }})()
         """)
+
+    async def _clear_trusted(self, selector):
+        """trusted 清空：focus → 全选 → Backspace 删除。
+
+        对 React 受控组件，el.value='' 不更新内部 state（合成赋值无效），
+        必须用真实键盘输入 Ctrl+A + Backspace 让框架收到真实删除事件。
+        """
+        el_js = _el_js(selector)
+        r = await self.eval_js(f"""
+        (() => {{
+            const el = {el_js};
+            if (!el) return {{ok: false, error: 'not found: ' + {json.dumps(selector)}}};
+            el.focus();
+            el.select();
+            return {{ok: true, has: (el.value || '')}};
+        }})()
+        """)
+        if not r or not r.get("ok"):
+            return r
+        # Ctrl+A 全选（受控组件需真实 keydown 触发 select-all 语义）
+        for key, code, vk in (("Control", "ControlLeft", 17),):
+            await self.cmd("Input.dispatchKeyEvent", {
+                "type": "keyDown", "key": key, "code": code,
+                "windowsVirtualKeyCode": vk, "modifiers": 0})
+        for key, code, vk in (("a", "KeyA", 65),):
+            await self.cmd("Input.dispatchKeyEvent", {
+                "type": "keyDown", "key": key, "code": code,
+                "windowsVirtualKeyCode": vk, "modifiers": 2})  # Ctrl held
+            await self.cmd("Input.dispatchKeyEvent", {
+                "type": "keyUp", "key": key, "code": code,
+                "windowsVirtualKeyCode": vk, "modifiers": 2})
+        for key, code, vk in (("Control", "ControlLeft", 17),):
+            await self.cmd("Input.dispatchKeyEvent", {
+                "type": "keyUp", "key": key, "code": code,
+                "windowsVirtualKeyCode": vk, "modifiers": 2})
+        # Backspace 删除选中内容
+        for t in ("keyDown", "keyUp"):
+            await self.cmd("Input.dispatchKeyEvent", {
+                "type": t, "key": "Backspace", "code": "Backspace",
+                "windowsVirtualKeyCode": 8})
+        return await self.eval_js(f"""
+        (() => {{
+            const el = {el_js};
+            if (!el) return {{ok: false, error: 'not found'}};
+            return {{ok: true, value: el.value}};
+        }})()
+        """)
+
+    async def clear(self, selector, trusted=False):
+        """清空输入框。
+
+        trusted=False：el.value=''（合成，快）。对受控组件无效。
+        trusted=True：真实键盘 Ctrl+A+Backspace（isTrusted=true），
+        框架能收到真实删除，知乎等必须用。
+        """
+        el_js = _el_js(selector)
+        if not trusted:
+            return await self.eval_js(f"""
+            (() => {{
+                const el = {el_js};
+                if (!el) return {{ok: false, error: 'not found: ' + {json.dumps(selector)}}};
+                el.focus();
+                if (el.value !== undefined) {{ el.value = ''; }}
+                el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                return {{ok: true, value: el.value}};
+            }})()
+            """)
+        return await self._clear_trusted(selector)
 
     async def set_value(self, selector, value, trusted=False):
         """设值。
@@ -181,18 +252,11 @@ class DomClient:
                 return {{ok: true, value: el.value}};
             }})()
             """)
-        # trusted 模式：focus → 清空 → 真实键入
-        focus_res = await self.eval_js(f"""
-        (() => {{
-            const el = {el_js};
-            if (!el) return {{ok: false, error: 'not found: ' + {json.dumps(selector)}}};
-            el.focus();
-            if (el.value !== undefined) {{ el.value = ''; }}
-            return {{ok: true}};
-        }})()
-        """)
-        if not focus_res or not focus_res.get("ok"):
-            return focus_res
+        # trusted 模式：真实清空 → 真实键入（清空不能用合成 el.value=''，
+        # 受控组件不更新 state，会残留旧值导致键入值拼接/冲突）
+        clear_res = await self._clear_trusted(selector)
+        if not clear_res or not clear_res.get("ok"):
+            return clear_res
         try:
             await self.cmd("Input.insertText", {"text": value})
         except Exception as e:
