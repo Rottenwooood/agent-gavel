@@ -38,12 +38,12 @@
       "action": "press_enter",
       "page_features": {
         "t": "document.title",
-        "u": "location.href"
+        "u_decoded": "decodeURIComponent(location.href)"
       },
       "expected_feature": {
-        "t": {
+        "u_decoded": {
           "op": "contains",
-          "value": "$QUERY"
+          "value": "word=$QUERY"
         }
       }
     }
