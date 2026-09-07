@@ -210,12 +210,12 @@ class DomClient:
         }})()
         """)
 
-    async def clear(self, selector, trusted=False):
+    async def clear(self, selector, trusted=True):
         """清空输入框。
 
+        trusted=True（默认）：真实键盘 Ctrl+A+Backspace（isTrusted=true），
+        框架能收到真实删除，知乎等受控组件必须用。
         trusted=False：el.value=''（合成，快）。对受控组件无效。
-        trusted=True：真实键盘 Ctrl+A+Backspace（isTrusted=true），
-        框架能收到真实删除，知乎等必须用。
         """
         el_js = _el_js(selector)
         if not trusted:
@@ -231,13 +231,14 @@ class DomClient:
             """)
         return await self._clear_trusted(selector)
 
-    async def set_value(self, selector, value, trusted=False):
+    async def set_value(self, selector, value, trusted=True):
         """设值。
 
-        trusted=False（默认）：直接设 DOM value + 触发 input/change 事件（合成事件，
-        isTrusted=false）。快，但对较真的框架（React 校验+重渲染）可能被冲掉。
-        trusted=True：先 focus，再用 CDP Input.insertText 真实键入（isTrusted=true，
-        走 IME/键盘输入通道，框架无法区分）。慢一点但可靠——知乎等站必须用这个。
+        trusted=True（默认）：真实清空 + CDP Input.insertText 真实键入
+        （isTrusted=true，走 IME/键盘输入通道，框架无法区分）。慢但可靠，
+        知乎等 React 重渲染站必须用。
+        trusted=False：直接设 DOM value + 触发 input/change 事件（合成，
+        isTrusted=false）。快，但较真的框架可能冲掉。
         """
         el_js = _el_js(selector)
         if not trusted:
@@ -269,12 +270,12 @@ class DomClient:
         }})()
         """)
 
-    async def click(self, selector, trusted=False):
+    async def click(self, selector, trusted=True):
         """点击元素（支持 __text__: 文本锚点）。
 
-        trusted=False：合成 el.click()（isTrusted=false），快。
-        trusted=True：CDP Input.dispatchMouseEvent 真实点击（isTrusted=true），
+        trusted=True（默认）：CDP Input.dispatchMouseEvent 真实点击（isTrusted=true），
         对合成 click 不响应的重框架站点可靠。
+        trusted=False：合成 el.click()（isTrusted=false），快。
         """
         el_js = _el_js(selector)
         if not trusted:
@@ -311,12 +312,12 @@ class DomClient:
                         "button": "left", "clickCount": 1})
         return {"ok": True, "point": pt}
 
-    async def press_enter(self, trusted=False):
+    async def press_enter(self, trusted=True):
         """在当前焦点元素上触发回车。
 
+        trusted=True（默认）：CDP Input.dispatchKeyEvent 发真实回车键
+        （isTrusted=true），对合成键盘不响应的框架可靠。
         trusted=False：合成 KeyboardEvent（isTrusted=false）+ 尝试 form submit，快。
-        trusted=True：CDP Input.dispatchKeyEvent 发真实回车键（isTrusted=true），
-        对合成键盘不响应的框架可靠。
         """
         if not trusted:
             return await self.eval_js("""

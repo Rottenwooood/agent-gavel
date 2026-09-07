@@ -49,7 +49,7 @@ async def dom_act_and_verify(
     wait_s: float = 8.0,
     debug: int = 0,
     log_prefix: str = "op",
-    trusted: bool = False,
+    trusted: bool = True,
 ):
     """执行网页动作 + 验证特征变化，一次调用返回。
 
