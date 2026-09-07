@@ -23,7 +23,6 @@ from catalog import evaluate_assertions
 from catalog_data import resolve_operation
 from diff import diff_snapshots, classify, meaningful_change
 from dom_verify import dom_act_and_verify
-from dom_sites import resolve_dom_op
 from normalize import normalize_nodes
 from wait import wait_until_stable
 
@@ -309,55 +308,59 @@ from dom_adapter import DomClient
 
 
 @mcp.tool()
-async def dom_run(
-    site: str,
-    operation: str,
-    params: dict = None,
+async def dom_step(
+    action: str,
+    selectors: dict = None,
+    page_features: dict = None,
+    expected_feature: dict = None,
     *,
     debug: int = 0,
-    wait_s: float = 8.0,
+    wait_s: float = 6.0,
 ):
-    """网页 DOM 操作闭环：navigate / type_search / submit_search。
+    """通用 DOM 单步闭环：对任意选择器执行一个动作并验证，不绑任何站点。
 
-    site: baidu | bing | google
-    operation: navigate(打开首页) | type_search(输入QUERY) | submit_search(回车)
-    params: {"QUERY": "..."}
-    debug: 1 保留 evidence 并写日志
+    这是 AI 现场试错/建流程的核心原语。action 是通用动作：
+      navigate  -> selectors.url 导航
+      set_value -> selectors.input + selectors.value 设值
+      click     -> selectors.target 点击（可用 __text__: / __text_nth__:N:: 锚点）
+      press_enter -> 当前焦点触发回车/form 提交
+      focus     -> selectors.input 聚焦并清空
+    page_features: {特征名: JS表达式}，动作后提取页面状态
+    expected_feature: {特征名: {op: eq|neq|exists|not_exists|contains, value}}
+    debug: 1 保留 evidence 并写日志。
+    例：设值并断言输入框内容：
+      dom_step("set_value",
+        selectors={"input":"#inp-query","value":"流浪地球"},
+        page_features={"v":"document.querySelector('#inp-query').value"},
+        expected_feature={"v":{"op":"eq","value":"流浪地球"}})
     """
-    op = resolve_dom_op(site, operation, params)
-    if op is None:
-        return {"status": "not_found", "site": site, "operation": operation,
-                "available_sites": list(_dom_sites())}
-    async with DomClient(page_url_match=None) as client:
-        # navigate 时页面会跳转，CDP target 可能重建，重试一次
-        if operation == "navigate":
-            # 若当前已是该站，直接复用；否则 location.href 导航
-            pass
+    async with DomClient() as client:
         return await dom_act_and_verify(
             client,
-            action=op["action"],
-            selectors=op["selectors"],
-            page_features=op.get("page_features"),
-            expected_feature=op.get("expected_feature"),
+            action=action,
+            selectors=selectors,
+            page_features=page_features,
+            expected_feature=expected_feature,
             wait_s=wait_s,
             debug=debug,
-            log_prefix=op.get("log_prefix", f"dom_{site}_{operation}"),
+            log_prefix="dom_step",
         )
-
-
-def _dom_sites():
-    from dom_sites import DOM_SITES
-    return list(DOM_SITES.keys())
 
 
 @mcp.tool()
 async def dom_navigate(site: str, url: str = None, *, debug: int = 0):
-    """导航浏览器到指定站点/URL（DOM 通道）。"""
-    from dom_sites import DOM_SITES
-    cfg = DOM_SITES.get(site)
-    target = url or (cfg["home"] if cfg else url)
+    """导航浏览器到指定站点/URL（DOM 通道）。
+
+    site: 已存模板的站点名（用其 home 跳转）或任意标识；url 给了则直接跳 url。
+    """
+    target = url
     if not target:
-        return {"status": "error", "error": "unknown site or url"}
+        from dom_templates import load_template
+        tmpl = load_template(site)
+        target = (tmpl or {}).get("home")
+    if not target:
+        return {"status": "error", "error": "no url and no template home for site",
+                "hint": "pass url= directly, or dom_save_template first"}
     async with DomClient() as client:
         # 直接导航并等加载
         await client.navigate(target)
