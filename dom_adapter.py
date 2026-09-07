@@ -38,13 +38,13 @@ def _el_js(selector):
         except ValueError:
             idx = 0
         return (f"Array.from(document.querySelectorAll('button, a[href], form, "
-                f"input, textarea, select')).filter(el => "
+                f"input, textarea, select, div, span')).filter(el => "
                 f"(el.textContent || el.value || el.placeholder || '').trim() === "
                 f"{json.dumps(target)})[{idx}]")
     if isinstance(selector, str) and selector.startswith("__text__:"):
         target = selector[len("__text__:"):]
         return (f"Array.from(document.querySelectorAll('button, a[href], form, "
-                f"input, textarea, select')).find(el => "
+                f"input, textarea, select, div, span')).find(el => "
                 f"(el.textContent || el.value || el.placeholder || '').trim() === "
                 f"{json.dumps(target)})")
     return f"document.querySelector({json.dumps(selector)})"
@@ -381,9 +381,35 @@ class DomClient:
             // 完整文本出现次数 + 记录每个文本已见过的实例数（用于组内编号）
             const textCount = {};
             const textSeen = {};
+            // 强交互特征(role/tabindex/onclick)——非语义元素(div/span 实现的
+            // tab、菜单、自定义按钮，React 站点很常见)只有当此才列为可交互；
+            // 仅 cursor:pointer 是弱特征(链接式 div 遍地)，不收避免噪音
+            const strongClick = (e) => {
+                if (e.children.length > 0) return false;
+                const txt = (e.textContent || e.value || '').trim();
+                if (txt.length > 30 || !txt) return false;
+                return e.getAttribute('role')
+                    || e.hasAttribute('tabindex')
+                    || e.onclick != null;
+            };
             const els = document.querySelectorAll(
-                'input, textarea, select, button, a[href], form');
-            const list = Array.prototype.slice.call(els);
+                'input, textarea, select, button, a[href], form, '
+                + 'div[role], span[role], [tabindex], [onclick], '
+                + 'div, span');
+            const list = Array.prototype.slice.call(els).filter(el => {
+                const tag = el.tagName.toLowerCase();
+                if ((tag === 'input' && el.type === 'hidden')) return false;
+                if (tag === 'div' || tag === 'span') {
+                    // 非语义元素只保留"叶子 + 强可点击特征(role/tabindex/onclick)"，
+                    // 避免页脚/文案等纯 pointer 元素的噪音
+                    return strongClick(el);
+                }
+                if (tag === 'form') {
+                    // 表单容器：自身文本超长说明只是包装(内容在子元素)，不作为可点击目标
+                    return (el.textContent || '').trim().length <= 30;
+                }
+                return true;
+            });
             for (const el of list) {
                 if (el.tagName.toLowerCase() === 'input' && el.type === 'hidden') continue;
                 const t = (el.textContent || el.value || el.placeholder || '').trim();
@@ -391,7 +417,7 @@ class DomClient:
             }
             const out = [];
             let seq = 0;
-            for (const el of els) {
+            for (const el of list) {
                 if (el.tagName.toLowerCase() === 'input' && el.type === 'hidden') continue;
                 const r = el.getBoundingClientRect();
                 const visible = r.width > 5 && r.height > 5;
@@ -418,8 +444,7 @@ class DomClient:
                     const s = `${tag}[name=${escAttr(name)}]`;
                     if (q1(s)) { selector = s; why = 'name'; unique = true; }
                 }
-                if (!selector && fullText
-                        && (tag === 'button' || tag === 'a' || tag === 'form')) {
+                if (!selector && fullText) {
                     const cnt = textCount[fullText] || 0;
                     same_text_count = cnt;
                     if (cnt === 1) {
