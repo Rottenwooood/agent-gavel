@@ -341,7 +341,17 @@ class DomClient:
                 "type": t, "key": k, "code": code,
                 "windowsVirtualKeyCode": 13, "nativeVirtualKeyCode": 13,
             })
-        return {"ok": True}
+        # 兜底：真实回车对"监听 keydown 的受控站"有效；但对"仅认 form 提交"的站
+        # (如豆瓣搜索框，无 keydown 监听)不触发。JS requestSubmit 覆盖后者。
+        # 两者叠加不冲突：已发真实回车，这里只补 form 语义提交。
+        return await self.eval_js("""
+        (() => {
+            const el = document.activeElement;
+            const form = el && el.closest ? el.closest('form') : null;
+            if (form && form.requestSubmit) { form.requestSubmit(); }
+            return {ok: true, submitted: !!(form && form.requestSubmit)};
+        })()
+        """)
 
     async def navigate(self, url):
         """导航到新 URL。用 CDP Page.navigate（比 JS location.href 可靠，
