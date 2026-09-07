@@ -1,4 +1,4 @@
-# agent-claw MCP 内测说明
+# agent-gavel MCP 内测说明
 
 一个给 AI 用的**浏览器/桌面操作 MCP**。核心思路一句话：**让 AI 操作网页像操作函数一样——动作发出去，程序立刻告诉它成没成，不用它再自己回头读一遍页面确认。**
 
@@ -14,7 +14,7 @@ AI 决定动作 → 执行 → 把整个页面快照返回给 AI → AI 再看�
 
 问题：**每次动作后都要把页面喂回给模型判断结果**——慢、费 token、且靠模型"看"容易漏。
 
-agent-claw 的做法是**声明式验证**：
+agent-gavel 的做法是**声明式验证**：
 
 ```
 AI 决定动作 + 同时声明"做完后页面应该长什么样" → 执行 → 程序自己断言 → 直接返回 pass/fail
@@ -26,7 +26,7 @@ AI 决定动作 + 同时声明"做完后页面应该长什么样" → 执行 →
 
 ```
 AI（opencode / 任何 MCP 客户端）
-  └─ agent-claw MCP server
+  └─ agent-gavel MCP server
        ├─ DOM 通道（网页）  ← 通过 Chrome 的 CDP 调试协议操作真实浏览器
        └─ AT-SPI 通道（桌面）← 通过系统无障碍树操作桌面应用（Windows 上对应 UI Automation）
 ```
@@ -40,7 +40,7 @@ AI（opencode / 任何 MCP 客户端）
 1. **合成事件**：用 JS 直接改 DOM、派发假事件。快，但 `isTrusted=false`——React 这类框架能识别出"不是真人操作"，会忽略或在下一次重渲染时**把你填的值冲掉**。这是很多自动化工具在知乎、SaaS 后台填表失效的根因。
 2. **真实输入**：通过 CDP 的 `Input` 通道模拟真实键盘/鼠标（`isTrusted=true`），页面无法区分这是真人还是程序。
 
-agent-claw **默认用真实输入**。代价是稍慢（毫秒级差异），换来的是 React 受控组件、各类防自动化框架下依然可靠。
+agent-gavel **默认用真实输入**。代价是稍慢（毫秒级差异），换来的是 React 受控组件、各类防自动化框架下依然可靠。
 
 ### 沉淀复用：模板
 
@@ -48,7 +48,7 @@ AI 现场把陌生站点跑通后，可以把"导航 → 切 tab → 填表 → 
 
 ## 二、对比其他类似插件/工具的特性
 
-| 维度 | agent-claw | 典型浏览器 agent（agent-browser / computer-use 类） |
+| 维度 | agent-gavel | 典型浏览器 agent（agent-browser / computer-use 类） |
 |---|---|---|
 | **验证方式** | **声明式断言**：动作时声明期望，程序判定 pass/fail，一次调用闭环 | 动作后把页面快照返回模型，模型自己判断（多一次往返、费 token） |
 | **输入方式** | 默认真实 CDP 输入（isTrusted=true），React/受控组件可靠 | 混合；合成事件对现代框架不稳 |
@@ -58,7 +58,7 @@ AI 现场把陌生站点跑通后，可以把"导航 → 切 tab → 填表 → 
 | **速度** | 动作步毫秒级返回（断言轮询，非固定等待）；模板 3 步搜索 ~3-4s（其中 ~3s 是页面加载） | 每步含模型看快照，通常数秒~数十秒 |
 | **依赖** | 一个本地 Chrome + Python 3.13，无云端 | 常需云端/付费 |
 
-**一句话差异**：别人是"AI 每步回头读页面确认"，agent-claw 是"动作时就把验收标准写死，程序替你验收"。后者省掉模型往返，也让失败能被可靠捕获（程序不会看漏）。
+**一句话差异**：别人是"AI 每步回头读页面确认"，agent-gavel 是"动作时就把验收标准写死，程序替你验收"。后者省掉模型往返，也让失败能被可靠捕获（程序不会看漏）。
 
 ## 三、使用流程
 
@@ -112,14 +112,14 @@ AI 现场把陌生站点跑通后，可以把"导航 → 切 tab → 填表 → 
 ### 1. 拉代码 + 装依赖
 
 ```bash
-git clone <你的仓库地址> ~/agent-claw
-cd ~/agent-claw
+git clone <你的仓库地址> ~/agent-gavel
+cd ~/agent-gavel
 uv sync   # 需要已装 uv；或 pip install -e .
 ```
 
 ### 2. 启动带调试端口的 Chrome
 
-agent-claw 通过 CDP 控制浏览器，需要 Chrome 以调试端口启动（用独立 profile，不影响日常浏览器）：
+agent-gavel 通过 CDP 控制浏览器，需要 Chrome 以调试端口启动（用独立 profile，不影响日常浏览器）：
 
 ```bash
 google-chrome --no-sandbox --disable-gpu \
@@ -136,16 +136,16 @@ google-chrome --no-sandbox --disable-gpu \
 ```json
 {
   "mcp": {
-    "agent-claw": {
+    "agent-gavel": {
       "type": "local",
-      "command": ["/home/<你>/agent-claw/run-mcp.sh"],
+      "command": ["/home/<你>/agent-gavel/run-mcp.sh"],
       "enabled": true
     }
   }
 }
 ```
 
-重启客户端，工具列表里应出现 `agent-claw_dom_*` 系列。
+重启客户端，工具列表里应出现 `agent-gavel_dom_*` 系列。
 
 ### 4. 快速自检
 

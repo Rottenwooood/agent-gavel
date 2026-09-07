@@ -26,9 +26,9 @@ from dom_verify import dom_act_and_verify
 from normalize import normalize_nodes
 from wait import wait_until_stable
 
-mcp = MCPServer("agent-claw")
+mcp = MCPServer("agent-gavel")
 
-LOG_DIR = os.environ.get("AGENT_CLAW_LOG_DIR", "/home/c6h4o2/agent-claw/logs")
+LOG_DIR = os.environ.get("AGENT_GAVEL_LOG_DIR", "/home/c6h4o2/agent-gavel/logs")
 
 
 def _write_call_log(call, result):
@@ -297,7 +297,7 @@ async def list_windows():
 
 @mcp.tool()
 async def doctor():
-    """自检：报告 agent-claw 各通道就绪状态（不依赖嵌套子进程）。"""
+    """自检：报告 agent-gavel 各通道就绪状态（不依赖嵌套子进程）。"""
     import shutil
     import glob
 

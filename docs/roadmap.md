@@ -1,10 +1,10 @@
-# agent-claw 开发路线图
+# agent-gavel 开发路线图
 
 > 定位快照：2026-09，核心机制已验证跑通，处于"从技术验证到产品化"的起点。
 
 ## 一句话定位
 
-agent-claw 是一个**验证驱动的多端操作框架**：让 AI 对桌面/浏览器执行动作后，由
+agent-gavel 是一个**验证驱动的多端操作框架**：让 AI 对桌面/浏览器执行动作后，由
 **程序断言**（而非再调一次模型）判定是否成功，从而把"执行→验证→反馈"压成一次调用。
 核心差异化：**预声明断言**（行业主流只有"diff 返回给模型"和"独立审计"两种，
 无人做"声明式断言 + 程序判定 + 省掉一次模型往返"）。
@@ -23,7 +23,7 @@ agent-claw 是一个**验证驱动的多端操作框架**：让 AI 对桌面/浏
 
 ```
 agent 核心（外部：opencode / subagent）
-  └─ agent-claw MCP server（server.py，~1700 行）
+  └─ agent-gavel MCP server（server.py，~1700 行）
        ├─ AT-SPI 桌面通道（adapter.py）      → 读控件树 / xdotool 注入
        ├─ DOM 网页通道（dom_adapter.py）     → Chrome CDP / JS 操作
        ├─ 验证框架（normalize/diff/wait/catalog）
@@ -48,7 +48,7 @@ agent 核心（外部：opencode / subagent）
 - [ ] server.py 已混 AT-SPI + DOM 两界，拆模块
 
 ### 第二层：大脑接入（真正"agent"而非工具库，关键一步）
-现在 agent-claw 是一组 MCP 工具，不是 agent——没有自己的目标/规划/记忆循环，
+现在 agent-gavel 是一组 MCP 工具，不是 agent——没有自己的目标/规划/记忆循环，
 全靠外部驱动。需要：
 - [ ] 接 pi 或 opencode 自身 agent 作大脑
 - [ ] 用户给目标 → 规划 → 调工具 → 验证 → 记忆沉淀 的完整循环

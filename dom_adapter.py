@@ -6,7 +6,7 @@ click/type_text/press_key 等，但来源不同：
   - dom_adapter.py: 读浏览器页面的 DOM
 
 DOM 状态被表达成与 AT-SPI 节点同构的列表（role=标签, name=文本,
-value=输入值），这样 agent-claw 的 normalize/diff/断言目录全部复用，
+value=输入值），这样 agent-gavel 的 normalize/diff/断言目录全部复用，
 无需为网页另写一套验证逻辑。
 
 运行前提：浏览器以 --remote-debugging-port 启动，本模块通过 CDP

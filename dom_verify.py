@@ -1,4 +1,4 @@
-"""DOM 版闭环执行器：复用 agent-claw 的验证框架，但操作网页 DOM。
+"""DOM 版闭环执行器：复用 agent-gavel 的验证框架，但操作网页 DOM。
 
 与 server.py 的 act_and_verify（AT-SPI/桌面）并列。共用：
   normalize / diff / wait / catalog 逻辑
@@ -17,7 +17,7 @@ import time
 
 from dom_adapter import DomClient
 
-LOG_DIR = os.environ.get("AGENT_CLAW_LOG_DIR", "/home/c6h4o2/agent-claw/logs")
+LOG_DIR = os.environ.get("AGENT_GAVEL_LOG_DIR", "/home/c6h4o2/agent-gavel/logs")
 
 
 def _write_log(prefix, call, result):
