@@ -160,51 +160,123 @@ class DomClient:
         }})()
         """)
 
-    async def set_value(self, selector, value):
-        """设值（直接设 DOM value + 触发 input 事件）。"""
+    async def set_value(self, selector, value, trusted=False):
+        """设值。
+
+        trusted=False（默认）：直接设 DOM value + 触发 input/change 事件（合成事件，
+        isTrusted=false）。快，但对较真的框架（React 校验+重渲染）可能被冲掉。
+        trusted=True：先 focus，再用 CDP Input.insertText 真实键入（isTrusted=true，
+        走 IME/键盘输入通道，框架无法区分）。慢一点但可靠——知乎等站必须用这个。
+        """
         el_js = _el_js(selector)
-        return await self.eval_js(f"""
+        if not trusted:
+            return await self.eval_js(f"""
+            (() => {{
+                const el = {el_js};
+                if (!el) return {{ok: false, error: 'not found: ' + {json.dumps(selector)}}};
+                el.focus();
+                el.value = {json.dumps(value)};
+                el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                el.dispatchEvent(new Event('change', {{bubbles: true}}));
+                return {{ok: true, value: el.value}};
+            }})()
+            """)
+        # trusted 模式：focus → 清空 → 真实键入
+        focus_res = await self.eval_js(f"""
         (() => {{
             const el = {el_js};
             if (!el) return {{ok: false, error: 'not found: ' + {json.dumps(selector)}}};
             el.focus();
-            el.value = {json.dumps(value)};
-            el.dispatchEvent(new Event('input', {{bubbles: true}}));
-            el.dispatchEvent(new Event('change', {{bubbles: true}}));
+            if (el.value !== undefined) {{ el.value = ''; }}
+            return {{ok: true}};
+        }})()
+        """)
+        if not focus_res or not focus_res.get("ok"):
+            return focus_res
+        try:
+            await self.cmd("Input.insertText", {"text": value})
+        except Exception as e:
+            return {"ok": False, "error": f"Input.insertText failed: {e}"}
+        return await self.eval_js(f"""
+        (() => {{
+            const el = {el_js};
+            if (!el) return {{ok: false, error: 'not found'}};
             return {{ok: true, value: el.value}};
         }})()
         """)
 
-    async def click(self, selector):
-        """点击元素（支持 __text__: 文本锚点）。"""
+    async def click(self, selector, trusted=False):
+        """点击元素（支持 __text__: 文本锚点）。
+
+        trusted=False：合成 el.click()（isTrusted=false），快。
+        trusted=True：CDP Input.dispatchMouseEvent 真实点击（isTrusted=true），
+        对合成 click 不响应的重框架站点可靠。
+        """
         el_js = _el_js(selector)
-        return await self.eval_js(f"""
+        if not trusted:
+            return await self.eval_js(f"""
+            (() => {{
+                const el = {el_js};
+                if (!el) return {{ok: false, error: 'not found: ' + {json.dumps(selector)}}};
+                el.scrollIntoView({{block: 'center'}});
+                el.click();
+                return {{ok: true}};
+            }})()
+            """)
+        # trusted 模式：真实鼠标点击。先求元素中心点坐标
+        pt = await self.eval_js(f"""
         (() => {{
             const el = {el_js};
-            if (!el) return {{ok: false, error: 'not found: ' + {json.dumps(selector)}}};
+            if (!el) return null;
             el.scrollIntoView({{block: 'center'}});
-            el.click();
-            return {{ok: true}};
+            const r = el.getBoundingClientRect();
+            return {{x: r.left + r.width / 2, y: r.top + r.height / 2,
+                     vw: window.innerWidth, vh: window.innerHeight}};
         }})()
         """)
+        if not pt:
+            return {"ok": False, "error": f"not found: {selector}"}
+        if not (0 <= pt["x"] <= pt["vw"] and 0 <= pt["y"] <= pt["vh"]):
+            return {"ok": False, "error": "element off-screen",
+                    "point": pt, "hint": "scroll it into view first"}
+        await self.cmd("Input.dispatchMouseEvent",
+                       {"type": "mousePressed", "x": pt["x"], "y": pt["y"],
+                        "button": "left", "clickCount": 1})
+        await self.cmd("Input.dispatchMouseEvent",
+                       {"type": "mouseReleased", "x": pt["x"], "y": pt["y"],
+                        "button": "left", "clickCount": 1})
+        return {"ok": True, "point": pt}
 
-    async def press_enter(self):
-        """在当前焦点元素上触发回车。"""
-        return await self.eval_js("""
-        (() => {
-            const el = document.activeElement;
-            if (!el) return {ok: false, error: 'no focus'};
-            const ev = new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true});
-            el.dispatchEvent(ev);
-            // 某些站点监听 keyup / 表单 submit
-            const ev2 = new KeyboardEvent('keyup', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true});
-            el.dispatchEvent(ev2);
-            // 若在 form 里，尝试 submit
-            const form = el.closest('form');
-            if (form && form.requestSubmit) { form.requestSubmit(); }
-            return {ok: true, tag: el.tagName};
-        })()
-        """)
+    async def press_enter(self, trusted=False):
+        """在当前焦点元素上触发回车。
+
+        trusted=False：合成 KeyboardEvent（isTrusted=false）+ 尝试 form submit，快。
+        trusted=True：CDP Input.dispatchKeyEvent 发真实回车键（isTrusted=true），
+        对合成键盘不响应的框架可靠。
+        """
+        if not trusted:
+            return await self.eval_js("""
+            (() => {
+                const el = document.activeElement;
+                if (!el) return {ok: false, error: 'no focus'};
+                const ev = new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true});
+                el.dispatchEvent(ev);
+                // 某些站点监听 keyup / 表单 submit
+                const ev2 = new KeyboardEvent('keyup', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true});
+                el.dispatchEvent(ev2);
+                // 若在 form 里，尝试 submit
+                const form = el.closest('form');
+                if (form && form.requestSubmit) { form.requestSubmit(); }
+                return {ok: true, tag: el.tagName};
+            })()
+            """)
+        # trusted 模式：真实按键事件。keyDown + char + keyUp（Enter）
+        for t, k, code in (("keyDown", "Enter", "Enter"), ("keyUp", "Enter", "Enter")):
+            await self.cmd("Input.dispatchKeyEvent", {
+                "type": t, "key": k, "code": code,
+                "windowsVirtualKeyCode": 13, "nativeVirtualKeyCode": 13,
+            })
+        return {"ok": True}
 
     async def navigate(self, url):
         """导航到新 URL。用 CDP Page.navigate（比 JS location.href 可靠，

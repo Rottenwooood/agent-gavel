@@ -49,6 +49,7 @@ async def dom_act_and_verify(
     wait_s: float = 8.0,
     debug: int = 0,
     log_prefix: str = "op",
+    trusted: bool = False,
 ):
     """执行网页动作 + 验证特征变化，一次调用返回。
 
@@ -56,6 +57,8 @@ async def dom_act_and_verify(
     selectors: {目标名: CSS选择器}，action 用
     page_features: 动作后应检查的页面特征，dict {名: JS表达式返回标量}
     expected_feature: 断言期望，{名: {op: eq|neq|exists|not_exists, value: ...}}
+    trusted: True 用 CDP 真实输入/点击/按键（isTrusted=true），对 React 重渲染
+        站点（知乎等）合成事件会被冲掉/忽略，必须开。默认 False 保速度。
     """
     start = time.monotonic()
     call = {
@@ -64,6 +67,7 @@ async def dom_act_and_verify(
         "page_features": page_features,
         "expected_feature": expected_feature,
         "debug": debug,
+        "trusted": trusted,
     }
     result = {}
 
@@ -74,16 +78,16 @@ async def dom_act_and_verify(
             target = sel.get("input")
             if not target:
                 raise ValueError("set_value needs selectors.input")
-            r = await client.set_value(target, sel.get("value", ""))
+            r = await client.set_value(target, sel.get("value", ""), trusted=trusted)
             ok = isinstance(r, dict) and r.get("ok")
         elif action == "click":
             target = sel.get("target") or sel.get("input")
             if not target:
                 raise ValueError("click needs selectors.target")
-            r = await client.click(target)
+            r = await client.click(target, trusted=trusted)
             ok = isinstance(r, dict) and r.get("ok")
         elif action == "press_enter":
-            r = await client.press_enter()
+            r = await client.press_enter(trusted=trusted)
             ok = isinstance(r, dict) and r.get("ok")
         elif action == "navigate":
             r = await client.navigate(sel.get("url", ""))

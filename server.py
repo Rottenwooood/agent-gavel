@@ -341,6 +341,7 @@ async def dom_step(
     *,
     debug: int = 0,
     wait_s: float = 6.0,
+    trusted: bool = False,
 ):
     """通用 DOM 单步闭环：对任意选择器执行一个动作并验证，不绑任何站点。
 
@@ -352,6 +353,9 @@ async def dom_step(
       focus     -> selectors.input 聚焦并清空
     page_features: {特征名: JS表达式}，动作后提取页面状态
     expected_feature: {特征名: {op: eq|neq|exists|not_exists|contains, value}}
+    trusted: True 用 CDP 真实输入/点击/按键（isTrusted=true）。对 React 重渲染站点
+      （知乎登录、部分 SaaS）合成事件会被框架冲掉/忽略，必须 trusted=True；
+      普通站（百度/B站）默认 False 更快。
     debug: 1 保留 evidence 并写日志。
     例：设值并断言输入框内容：
       dom_step("set_value",
@@ -369,6 +373,7 @@ async def dom_step(
             wait_s=wait_s,
             debug=debug,
             log_prefix="dom_step",
+            trusted=trusted,
         )
 
 
@@ -510,6 +515,7 @@ async def dom_run_template(name_or_site: str, params: dict = None, *,
                 wait_s=wait_s,
                 debug=debug,
                 log_prefix=f"tmpl_{filled.get('site')}_s{i}",
+                trusted=step.get("trusted", False),
             )
             results.append({"step": i, "action": step["action"], **r})
             if r.get("status") != "pass":
