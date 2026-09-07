@@ -493,6 +493,7 @@ class DomClient:
 
         导航后 JS context 会重建，立即 eval 会挂起/报错，所以先固定等
         settle_s 让 context 就绪，再轮询 readyState；eval 失败则重试。
+        readyState complete 后不再长等渲染——动作断言会轮询兜底。
         """
         import time
         await asyncio.sleep(settle_s)
@@ -501,8 +502,6 @@ class DomClient:
             try:
                 state = await self.eval_js("document.readyState")
                 if state == "complete":
-                    # 再等一拍让动态内容渲染
-                    await asyncio.sleep(0.8)
                     return True
             except Exception:
                 pass  # context 未就绪，重试

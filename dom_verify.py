@@ -113,47 +113,71 @@ async def dom_act_and_verify(
                 _write_log(log_prefix + "_" + action, call, result)
             return result
 
-        # ---- 稳定等待（页面动作常异步，等 2 拍）----
-        await asyncio.sleep(min(wait_s, 3.0))
-
-        # ---- 验证特征 ----
+        # ---- 验证特征（轮询直到满足或超时，不再固定等 3s）----
+        # 之前每个动作固定 sleep 3s 再断言——set_value 等立即生效的动作白等。
+        # 改为：动作后立即取特征做断言，pass 即返回；异步动作(提交/跳转)靠轮询
+        # 等到断言满足。无 expected_feature 时只短等一拍让页面反应。
         evidence = {}
-        if page_features:
-            for fname, expr in page_features.items():
-                try:
-                    evidence[fname] = await client.eval_js(expr)
-                except Exception as e:
-                    evidence[fname] = f"<error: {e}>"
-
+        deadline = time.monotonic() + wait_s
         status = "pass"
         detail = {"mode": "feature"}
-        if expected_feature:
-            # 检查每个期望
-            checks = []
-            all_pass = True
-            for fname, expect in expected_feature.items():
-                actual = evidence.get(fname)
-                op = expect.get("op", "eq")
-                if op == "eq":
-                    passed = (actual == expect.get("value"))
-                elif op == "neq":
-                    passed = (actual != expect.get("value"))
-                elif op == "exists":
-                    passed = (actual not in (None, "", False))
-                elif op == "not_exists":
-                    passed = (actual in (None, "", False))
-                elif op == "contains":
-                    passed = (expect.get("value") in str(actual))
+        if page_features:
+            first = True
+            while True:
+                ev = {}
+                try:
+                    for fname, expr in page_features.items():
+                        ev[fname] = await client.eval_js(expr)
+                except Exception:
+                    ev = {f: "<eval-error>" for f in page_features} if first else ev
+                if first:
+                    evidence = ev
+                    first = False
+
+                if expected_feature:
+                    checks = []
+                    all_pass = True
+                    for fname, expect in expected_feature.items():
+                        actual = ev.get(fname)
+                        op = expect.get("op", "eq")
+                        if op == "eq":
+                            passed = (actual == expect.get("value"))
+                        elif op == "neq":
+                            passed = (actual != expect.get("value"))
+                        elif op == "exists":
+                            passed = (actual not in (None, "", False))
+                        elif op == "not_exists":
+                            passed = (actual in (None, "", False))
+                        elif op == "contains":
+                            passed = (expect.get("value") in str(actual))
+                        else:
+                            passed = False
+                        checks.append({"feature": fname, "op": op,
+                                       "actual": actual,
+                                       "expected": expect.get("value"),
+                                       "passed": passed})
+                        if not passed:
+                            all_pass = False
+                    if all_pass:
+                        detail["checks"] = checks
+                        evidence = ev
+                        break
+                    detail["checks"] = checks
                 else:
-                    passed = False
-                checks.append({"feature": fname, "op": op,
-                               "actual": actual,
-                               "expected": expect.get("value"),
-                               "passed": passed})
-                if not passed:
-                    all_pass = False
-            status = "pass" if all_pass else "fail"
-            detail["checks"] = checks
+                    # 无断言：短等一拍让页面消化动作即可返回
+                    if not first:
+                        break
+                    await asyncio.sleep(0.5)
+                    continue
+
+                if time.monotonic() >= deadline:
+                    break  # 超时，保留最后一次 checks
+                await asyncio.sleep(0.25)
+
+            status = "pass" if (not expected_feature) or all_pass else "fail"
+        else:
+            # 无 page_features：动作后短等一拍（供异步副作用落地）
+            await asyncio.sleep(0.5)
 
         result = {
             "status": status,
