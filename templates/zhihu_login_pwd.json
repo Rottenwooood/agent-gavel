@@ -1,0 +1,69 @@
+{
+  "site": "zhihu-login-pwd",
+  "desc": "知乎密码登录表单填充：导航登录页→切\"密码登录\"tab→填手机号→填密码。适合自动化填表/测试场景(真实登录会触发人机验证需人工过)。",
+  "home": "https://www.zhihu.com/signin",
+  "steps": [
+    {
+      "action": "navigate",
+      "selectors": {
+        "url": "https://www.zhihu.com/signin"
+      },
+      "page_features": {
+        "t": "document.title"
+      },
+      "expected_feature": {
+        "t": {
+          "op": "contains",
+          "value": "知乎"
+        }
+      }
+    },
+    {
+      "action": "click",
+      "selectors": {
+        "target": "__text__:密码登录"
+      },
+      "page_features": {
+        "has_pwd": "!!document.querySelector(\"input[name='password']\")"
+      },
+      "expected_feature": {
+        "has_pwd": {
+          "op": "exists"
+        }
+      }
+    },
+    {
+      "action": "set_value",
+      "selectors": {
+        "input": "input[name='username']",
+        "value": "$USERNAME"
+      },
+      "page_features": {
+        "v": "(document.querySelector(\"input[name='username']\")||{}).value||''"
+      },
+      "expected_feature": {
+        "v": {
+          "op": "eq",
+          "value": "$USERNAME"
+        }
+      }
+    },
+    {
+      "action": "set_value",
+      "selectors": {
+        "input": "input[name='password']",
+        "value": "$PASSWORD"
+      },
+      "page_features": {
+        "v": "(document.querySelector(\"input[name='password']\")||{}).value||''"
+      },
+      "expected_feature": {
+        "v": {
+          "op": "eq",
+          "value": "$PASSWORD"
+        }
+      }
+    }
+  ],
+  "saved_at": "2026-09-08T02:22:02"
+}
