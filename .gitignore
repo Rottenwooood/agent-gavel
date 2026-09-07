@@ -8,3 +8,11 @@ wheels/
 
 # Virtual environments
 .venv
+*.txt
+
+# Runtime debug call logs (debug=1 dumps JSON per call)
+logs/
+
+# Python cache / build
+__pycache__/
+*.py[oc]
