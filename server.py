@@ -11,7 +11,9 @@
 """
 
 import asyncio
+import datetime
 import json
+import os
 import time
 
 from mcp.server.mcpserver import MCPServer
@@ -20,10 +22,27 @@ from adapter import ComputerUseClient
 from catalog import evaluate_assertions
 from catalog_data import resolve_operation
 from diff import diff_snapshots, classify, meaningful_change
+from dom_verify import dom_act_and_verify
+from dom_sites import resolve_dom_op
 from normalize import normalize_nodes
 from wait import wait_until_stable
 
 mcp = MCPServer("agent-claw")
+
+LOG_DIR = os.environ.get("AGENT_CLAW_LOG_DIR", "/home/c6h4o2/agent-claw/logs")
+
+
+def _write_call_log(call, result):
+    """debug=1 时：把一次调用(参数+完整返回)记录为独立日志文件。"""
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        fname = os.path.join(LOG_DIR, f"call_{ts}.json")
+        with open(fname, "w", encoding="utf-8") as f:
+            json.dump({"call": call, "result": result}, f,
+                      ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 
 def _unpack_result(res):
@@ -107,6 +126,7 @@ async def act_and_verify(
     window: str = None,
     verify: dict = None,
     timeout_s: float = 8.0,
+    debug: int = 0,
 ):
     """执行一个动作并验证其结果，一次调用返回。
 
@@ -116,35 +136,56 @@ async def act_and_verify(
     window: 目标窗口标题（activate_window 用）
     verify: {"mode": "auto"|"assert"|"none", "assertions": [...]}
     timeout_s: 稳定等待上限（秒）
+    debug: 0=精简返回(无 evidence)，1=含 evidence 并写完整调用日志
     """
     start = time.monotonic()
     action_args = action_args or {}
     verify = verify or {"mode": "auto"}
 
+    call_record = {
+        "tool": "act_and_verify",
+        "action": action,
+        "action_args": action_args,
+        "app_id": app_id,
+        "window": window,
+        "verify": verify,
+        "timeout_s": timeout_s,
+        "debug": debug,
+    }
+
     async with ComputerUseClient() as client:
-        # Step 1: 抓 before
-        before_norm = await _read_normalized(client, app_id=app_id)
+        # Step 1: 抓 before（归一化 + 保留 hash 供稳定等待复用为 seed）
+        before_raw = await client.read_state(app_id=app_id)
+        before_norm = normalize_nodes(before_raw)
 
         # Step 2: 执行动作
         try:
             action_result = await _execute_action(client, action, action_args, app_id=app_id)
         except Exception as e:
-            return {
+            result = {
                 "status": "not_executed",
                 "error": str(e),
                 "cost": {"elapsed_ms": int((time.monotonic() - start) * 1000)},
             }
+            if debug:
+                _write_call_log(call_record, result)
+            return result
 
-        # Step 3: 稳定等待
+        # Step 3: 稳定等待（复用 before 作 seed，避免首轮白等）
         async def fetch():
             return await client.read_state(app_id=app_id)
 
-        stable, polls, wait_ms, final_hash = await wait_until_stable(
+        stable, polls, wait_ms, final_hash, final_data = await wait_until_stable(
             fetch, timeout_s=timeout_s,
+            seed_hash=before_norm["signature"],
+            seed_data=before_raw,
         )
 
-        # Step 4+5: 判定 + ambiguous 升级
-        after_raw = await client.read_state(app_id=app_id)
+        # Step 4: 判定。after = 稳定等待最后一次抓取，无需重复读
+        if final_data is None:
+            after_raw = await client.read_state(app_id=app_id)
+        else:
+            after_raw = final_data
         after_norm = normalize_nodes(after_raw)
         # diff 只算一次，判定和 evidence 共用
         the_diff = diff_snapshots(before_norm["normalized"], after_norm["normalized"])
@@ -163,7 +204,7 @@ async def act_and_verify(
             shot = await client.screenshot(app_id=app_id, format="jpeg", quality=70)
             screenshot_ref = _unpack_result(shot)
 
-        return {
+        result = {
             "status": status,
             "action": {"name": action, "result": action_result},
             "verification": {
@@ -179,13 +220,26 @@ async def act_and_verify(
             },
         }
 
+        if debug:
+            # 日志：总是含 evidence + screenshot 完整结果
+            _write_call_log(call_record, result)
+            return result  # debug=1 保留完整结果给调用方
+        else:
+            # 精简：去掉 evidence（和截图路径），只留判定结论
+            slim = {k: v for k, v in result.items() if k != "evidence"}
+            slim["evidence"] = {"stripped": True,
+                                "note": "pass debug=1 to receive diff evidence"}
+            return slim
+
 
 @mcp.tool()
-async def run_operation(app: str, operation: str, params: dict = None, timeout_s: float = None):
+async def run_operation(app: str, operation: str, params: dict = None,
+                        timeout_s: float = None, debug: int = 0):
     """从操作目录查 app+operation 的断言模板，执行动作并验证。
 
     例：run_operation("firefox", "type_search", {"QUERY": "opencode"})
     目录里没有的 app/operation 返回 not_found。
+    debug: 1 时保留 evidence 并写完整调用日志。
     """
     op = resolve_operation(app, operation, params)
     if op is None:
@@ -209,6 +263,7 @@ async def run_operation(app: str, operation: str, params: dict = None, timeout_s
         app_id=app_id,
         verify=verify,
         timeout_s=timeout_s or op.get("timeout_s", 6.0),
+        debug=debug,
     )
 
 
@@ -246,6 +301,203 @@ async def doctor():
     """自检：报告 computer-use-linux 后端就绪状态。"""
     async with ComputerUseClient() as client:
         return await _unpack_result(await client._call("doctor"))
+
+
+# ---------------- DOM 通道（网页操作） ----------------
+
+from dom_adapter import DomClient
+
+
+@mcp.tool()
+async def dom_run(
+    site: str,
+    operation: str,
+    params: dict = None,
+    *,
+    debug: int = 0,
+    wait_s: float = 8.0,
+):
+    """网页 DOM 操作闭环：navigate / type_search / submit_search。
+
+    site: baidu | bing | google
+    operation: navigate(打开首页) | type_search(输入QUERY) | submit_search(回车)
+    params: {"QUERY": "..."}
+    debug: 1 保留 evidence 并写日志
+    """
+    op = resolve_dom_op(site, operation, params)
+    if op is None:
+        return {"status": "not_found", "site": site, "operation": operation,
+                "available_sites": list(_dom_sites())}
+    async with DomClient(page_url_match=None) as client:
+        # navigate 时页面会跳转，CDP target 可能重建，重试一次
+        if operation == "navigate":
+            # 若当前已是该站，直接复用；否则 location.href 导航
+            pass
+        return await dom_act_and_verify(
+            client,
+            action=op["action"],
+            selectors=op["selectors"],
+            page_features=op.get("page_features"),
+            expected_feature=op.get("expected_feature"),
+            wait_s=wait_s,
+            debug=debug,
+            log_prefix=op.get("log_prefix", f"dom_{site}_{operation}"),
+        )
+
+
+def _dom_sites():
+    from dom_sites import DOM_SITES
+    return list(DOM_SITES.keys())
+
+
+@mcp.tool()
+async def dom_navigate(site: str, url: str = None, *, debug: int = 0):
+    """导航浏览器到指定站点/URL（DOM 通道）。"""
+    from dom_sites import DOM_SITES
+    cfg = DOM_SITES.get(site)
+    target = url or (cfg["home"] if cfg else url)
+    if not target:
+        return {"status": "error", "error": "unknown site or url"}
+    async with DomClient() as client:
+        # 直接导航并等加载
+        await client.navigate(target)
+        await client.wait_page_load()
+        await asyncio.sleep(1.5)
+        r = {
+            "status": "pass",
+            "url": await client.eval_js("location.href"),
+            "title": await client.get_title(),
+        }
+        if debug:
+            _write_call_log({"tool": "dom_navigate", "site": site, "url": target}, r)
+        return r
+
+
+@mcp.tool()
+async def dom_explore(
+    tag: str = None,
+    text_contains: str = None,
+    head: int = None,
+    tail: int = None,
+    include_all: bool = False,
+):
+    """探索当前浏览器页面：返回可交互元素的锚点清单。
+
+    锚点分三类：id（#kw）、name（input[name=q]）、文本（__text__: 或
+    __text_nth__:N::，重复文本用组内序号区分）。
+
+    裁剪参数（给 agent 选择权，避免 200+ 元素全塞进上下文）：
+      tag: 只返回指定标签（input/button/a/form/select/textarea）
+      text_contains: 只返回文本含此关键词的元素
+      head: 只返回前 N 个（页面顶部元素）
+      tail: 只返回后 N 个（页面底部元素，如确认按钮/弹窗）
+      include_all: True 时返回全部（含 no-unique-selector），默认只返锚点
+    """
+    async with DomClient() as client:
+        items = await client.explore()
+        total = len(items)
+
+        # 过滤：默认只留 unique 锚点
+        if not include_all:
+            items = [it for it in items if it.get("selector")]
+        if tag:
+            items = [it for it in items if it.get("tag") == tag]
+        if text_contains:
+            items = [it for it in items
+                     if text_contains in (it.get("text") or "")]
+
+        head_total = len(items)
+        # 裁剪：head 或 tail 二选一
+        if head is not None and head > 0:
+            items = items[:head]
+        elif tail is not None and tail > 0:
+            items = items[-tail:]
+
+        return {
+            "url": await client.eval_js("location.href"),
+            "title": await client.get_title(),
+            "total_elements": total,
+            "after_filter": head_total,
+            "returned": len(items),
+            "head": head,
+            "tail": tail,
+            "elements": items,
+        }
+
+
+@mcp.tool()
+async def dom_save_template(site: str, desc: str, steps: list,
+                            home: str = None, name: str = None):
+    """把现场跑通的一套网页流程固化成可复用模板。
+
+    steps 每项 = {"action": navigate|set_value|click|press_enter|focus,
+                  "selectors": {...},
+                  "page_features": {特征名: JS表达式},   # 动作后提取
+                  "expected_feature": {特征名: {op, value}}}  # 断言
+    例：
+      [{"action":"navigate","selectors":{"url":"https://.../"},
+        "page_features":{"title":"document.title"},
+        "expected_feature":{"title":{"op":"exists"}}},
+       {"action":"set_value","selectors":{"input":"#q","value":"$QUERY"},
+        "page_features":{"input_value":"..."},
+        "expected_feature":{"input_value":{"op":"eq","value":"$QUERY"}}}]
+    """
+    from dom_templates import save_template
+    r = save_template(site, desc, steps, home=home, name=name)
+    r["status"] = "saved"
+    return r
+
+
+@mcp.tool()
+async def dom_list_templates():
+    """列出已保存的 DOM 流程模板。"""
+    from dom_templates import list_templates
+    return list_templates()
+
+
+@mcp.tool()
+async def dom_run_template(name_or_site: str, params: dict = None, *,
+                           debug: int = 0, wait_s: float = 6.0):
+    """执行已保存的 DOM 流程模板，逐步验证，任一步 fail 即停。
+
+    name_or_site: 模板文件名或 site 标识。
+    params: 替换模板里的 $VAR（如 {"QUERY": "..."}）。
+    debug: 1 保留 evidence 并写日志。
+    """
+    from dom_templates import load_template, _fill
+    tmpl = load_template(name_or_site)
+    if not tmpl:
+        return {"status": "not_found", "name": name_or_site,
+                "available": [t["file"] for t in _list_template_summaries()]}
+    filled = _fill(tmpl, params)
+    results = []
+    async with DomClient() as client:
+        for i, step in enumerate(filled.get("steps", [])):
+            r = await dom_act_and_verify(
+                client,
+                action=step["action"],
+                selectors=step.get("selectors"),
+                page_features=step.get("page_features"),
+                expected_feature=step.get("expected_feature"),
+                wait_s=wait_s,
+                debug=debug,
+                log_prefix=f"tmpl_{filled.get('site')}_s{i}",
+            )
+            results.append({"step": i, "action": step["action"], **r})
+            if r.get("status") != "pass":
+                return {
+                    "status": "fail",
+                    "failed_step": i,
+                    "desc": tmpl.get("desc"),
+                    "results": results,
+                }
+    return {"status": "pass", "desc": tmpl.get("desc"),
+            "steps_total": len(filled.get("steps", [])), "results": results}
+
+
+def _list_template_summaries():
+    from dom_templates import list_templates
+    return list_templates()
 
 
 if __name__ == "__main__":

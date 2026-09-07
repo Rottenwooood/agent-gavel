@@ -9,18 +9,26 @@ import time
 from normalize import quick_hash
 
 
-async def wait_until_stable(fetch_state, *, timeout_s=8.0, interval_s=0.5,
-                            required_consecutive=2):
+async def wait_until_stable(fetch_state, *, timeout_s=6.0, interval_s=0.3,
+                            required_consecutive=2, seed_hash=None,
+                            seed_data=None):
     """fetch_state: async 无参可调用，返回 state 原始数据（会被归一化比较）。
 
-    返回 (stable: bool, poll_count: int, elapsed_ms: int, final_hash: str)
+    seed_hash/seed_data: 若调用方已抓过 before，可传入作为第 0 次观察，
+    避免"动作后还要先白等一次才能对比"，省一次 fetch 和一次间隔。
+    返回 (stable, poll_count, elapsed_ms, final_hash, final_data)
     """
     start = time.monotonic()
     poll_count = 0
-    last_hash = None
-    consecutive = 0
+    last_hash = seed_hash
+    consecutive = 1 if seed_hash is not None else 0
+    last_data = seed_data
 
     while True:
+        elapsed = time.monotonic() - start
+        # 只有在已经有 seed 且没超时时才先 sleep，否则立即抓
+        if poll_count > 0:
+            await asyncio_sleep(interval_s)
         try:
             data = await fetch_state()
         except Exception:
@@ -33,14 +41,13 @@ async def wait_until_stable(fetch_state, *, timeout_s=8.0, interval_s=0.5,
         else:
             consecutive = 1
             last_hash = h
+        last_data = data
 
         elapsed = time.monotonic() - start
         if consecutive >= required_consecutive and last_hash is not None:
-            return True, poll_count, int(elapsed * 1000), last_hash
+            return True, poll_count, int(elapsed * 1000), last_hash, last_data
         if elapsed >= timeout_s:
-            return False, poll_count, int(elapsed * 1000), last_hash
-
-        await asyncio_sleep(interval_s)
+            return False, poll_count, int(elapsed * 1000), last_hash, last_data
 
 
 async def asyncio_sleep(seconds):
