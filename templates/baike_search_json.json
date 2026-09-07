@@ -1,0 +1,52 @@
+{
+  "site": "baike",
+  "desc": "百度百科搜索：打开首页→输入关键词→回车跳转词条页",
+  "home": "https://baike.baidu.com/",
+  "steps": [
+    {
+      "action": "navigate",
+      "selectors": {
+        "url": "https://baike.baidu.com/"
+      },
+      "page_features": {
+        "t": "document.title"
+      },
+      "expected_feature": {
+        "t": {
+          "op": "contains",
+          "value": "百度百科"
+        }
+      }
+    },
+    {
+      "action": "set_value",
+      "selectors": {
+        "input": "input",
+        "value": "$QUERY"
+      },
+      "page_features": {
+        "v": "document.querySelector('input').value"
+      },
+      "expected_feature": {
+        "v": {
+          "op": "eq",
+          "value": "$QUERY"
+        }
+      }
+    },
+    {
+      "action": "press_enter",
+      "page_features": {
+        "t": "document.title",
+        "u": "location.href"
+      },
+      "expected_feature": {
+        "t": {
+          "op": "contains",
+          "value": "$QUERY"
+        }
+      }
+    }
+  ],
+  "saved_at": "2026-09-08T01:34:42"
+}
