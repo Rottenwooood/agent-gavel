@@ -1,0 +1,23 @@
+{
+  "site": "runoob",
+  "desc": "菜鸟教程站内搜索 ?s=关键词",
+  "home": "https://www.runoob.com/",
+  "steps": [
+    {
+      "action": "navigate",
+      "selectors": {
+        "url": "https://www.runoob.com/?s=$QUERY"
+      },
+      "page_features": {
+        "title": "document.title"
+      },
+      "expected_feature": {
+        "title": {
+          "op": "contains",
+          "value": "$QUERY"
+        }
+      }
+    }
+  ],
+  "saved_at": "2026-09-07T22:33:01"
+}

@@ -1,0 +1,53 @@
+{
+  "site": "baidu",
+  "desc": "百度搜索任意关键词并确认结果页",
+  "home": "https://www.baidu.com",
+  "steps": [
+    {
+      "action": "navigate",
+      "selectors": {
+        "url": "https://www.baidu.com"
+      },
+      "page_features": {
+        "title": "document.title"
+      },
+      "expected_feature": {
+        "title": {
+          "op": "exists"
+        }
+      }
+    },
+    {
+      "action": "set_value",
+      "selectors": {
+        "input": "#kw",
+        "value": "$QUERY"
+      },
+      "page_features": {
+        "input_value": "(document.querySelector('#kw')||{}).value || ''"
+      },
+      "expected_feature": {
+        "input_value": {
+          "op": "eq",
+          "value": "$QUERY"
+        }
+      }
+    },
+    {
+      "action": "click",
+      "selectors": {
+        "target": "#su"
+      },
+      "page_features": {
+        "url": "location.href",
+        "has_result": "!!document.querySelector('.result, #content_left, .c-container')"
+      },
+      "expected_feature": {
+        "has_result": {
+          "op": "exists"
+        }
+      }
+    }
+  ],
+  "saved_at": "2026-09-07T22:14:10"
+}
