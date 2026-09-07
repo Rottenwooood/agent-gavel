@@ -1,12 +1,12 @@
 {
-  "site": "baidu",
-  "desc": "百度搜索任意关键词并确认结果页",
-  "home": "https://www.baidu.com",
+  "site": "google",
+  "desc": "Google 搜索任意关键词并确认结果页",
+  "home": "https://www.google.com",
   "steps": [
     {
       "action": "navigate",
       "selectors": {
-        "url": "https://www.baidu.com"
+        "url": "https://www.google.com"
       },
       "page_features": {
         "title": "document.title"
@@ -20,11 +20,11 @@
     {
       "action": "set_value",
       "selectors": {
-        "input": "#kw",
+        "input": "textarea[name='q'], input[name='q']",
         "value": "$QUERY"
       },
       "page_features": {
-        "input_value": "(document.querySelector('#kw')||{}).value || ''"
+        "input_value": "(document.querySelector('textarea[name=q], input[name=q]')||{}).value||''"
       },
       "expected_feature": {
         "input_value": {
@@ -36,11 +36,12 @@
     {
       "action": "click",
       "selectors": {
-        "target": "#su"
+        "target": "input[name='btnK'], button[aria-label*='Google 搜索'], button[aria-label*='Google Search']"
       },
       "page_features": {
+        "title": "document.title",
         "url": "location.href",
-        "has_result": "!!document.querySelector('.result, #content_left, .c-container')"
+        "has_result": "!!document.querySelector('#search, #rso')"
       },
       "expected_feature": {
         "has_result": {
@@ -49,5 +50,5 @@
       }
     }
   ],
-  "saved_at": "2026-09-07T22:14:10"
+  "saved_at": "2026-09-07T23:06:23"
 }

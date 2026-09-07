@@ -1,0 +1,52 @@
+{
+  "site": "douban",
+  "desc": "豆瓣电影搜索：设值 #inp-query + form 标准提交，断言标题含关键词",
+  "home": "https://search.douban.com/movie/subject_search",
+  "steps": [
+    {
+      "action": "navigate",
+      "selectors": {
+        "url": "https://search.douban.com/movie/subject_search"
+      },
+      "page_features": {
+        "title": "document.title"
+      },
+      "expected_feature": {
+        "title": {
+          "op": "exists"
+        }
+      }
+    },
+    {
+      "action": "set_value",
+      "selectors": {
+        "input": "#inp-query",
+        "value": "$QUERY"
+      },
+      "page_features": {
+        "input_value": "(document.querySelector('#inp-query')||{}).value || ''"
+      },
+      "expected_feature": {
+        "input_value": {
+          "op": "eq",
+          "value": "$QUERY"
+        }
+      }
+    },
+    {
+      "action": "press_enter",
+      "selectors": {},
+      "page_features": {
+        "title": "document.title",
+        "has_result": "!!document.querySelector('.item-root, .sc-bZQynM')"
+      },
+      "expected_feature": {
+        "title": {
+          "op": "contains",
+          "value": "$QUERY"
+        }
+      }
+    }
+  ],
+  "saved_at": "2026-09-07T22:54:18"
+}

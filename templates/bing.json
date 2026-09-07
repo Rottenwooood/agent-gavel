@@ -1,0 +1,54 @@
+{
+  "site": "bing",
+  "desc": "Bing 搜索任意关键词并确认结果页",
+  "home": "https://www.bing.com",
+  "steps": [
+    {
+      "action": "navigate",
+      "selectors": {
+        "url": "https://www.bing.com"
+      },
+      "page_features": {
+        "title": "document.title"
+      },
+      "expected_feature": {
+        "title": {
+          "op": "exists"
+        }
+      }
+    },
+    {
+      "action": "set_value",
+      "selectors": {
+        "input": "#sb_form_q",
+        "value": "$QUERY"
+      },
+      "page_features": {
+        "input_value": "(document.querySelector('#sb_form_q')||{}).value||''"
+      },
+      "expected_feature": {
+        "input_value": {
+          "op": "eq",
+          "value": "$QUERY"
+        }
+      }
+    },
+    {
+      "action": "click",
+      "selectors": {
+        "target": "#sb_form_go"
+      },
+      "page_features": {
+        "title": "document.title",
+        "url": "location.href",
+        "has_result": "!!document.querySelector('#b_results, .b_results')"
+      },
+      "expected_feature": {
+        "has_result": {
+          "op": "exists"
+        }
+      }
+    }
+  ],
+  "saved_at": "2026-09-07T23:06:23"
+}
