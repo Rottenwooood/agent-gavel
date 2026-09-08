@@ -31,6 +31,22 @@ def _write_log(prefix, call, result):
         pass
 
 
+def _passes(expect, actual):
+    """判定单个特征断言是否通过。expect: {op, value}，actual: JS 求值结果。"""
+    op = expect.get("op", "eq")
+    if op == "eq":
+        return (actual == expect.get("value"))
+    if op == "neq":
+        return (actual != expect.get("value"))
+    if op == "exists":
+        return (actual not in (None, "", False))
+    if op == "not_exists":
+        return (actual in (None, "", False))
+    if op == "contains":
+        return (expect.get("value") in str(actual))
+    return False
+
+
 def _strip_evidence(result):
     """debug=0 时去掉 evidence。"""
     if "evidence" in result:
@@ -50,6 +66,7 @@ async def dom_act_and_verify(
     debug: int = 0,
     log_prefix: str = "op",
     trusted: bool = True,
+    wait_mode: str = "poll",
 ):
     """执行网页动作 + 验证特征变化，一次调用返回。
 
@@ -59,6 +76,9 @@ async def dom_act_and_verify(
     expected_feature: 断言期望，{名: {op: eq|neq|exists|not_exists, value: ...}}
     trusted: True 用 CDP 真实输入/点击/按键（isTrusted=true），对 React 重渲染
         站点（知乎等）合成事件会被冲掉/忽略，必须开。默认 False 保速度。
+    wait_mode: poll(默认，Python 侧定时重查断言，兼容旧行为，对任何变化都稳)
+             | event(断言下沉页面，MutationObserver 唤醒，DOM 变化驱动的等待，
+               适合提交后等结果区出现等长等待；纯 JS 状态不碰 DOM 的用它无效)
     """
     start = time.monotonic()
     call = {
@@ -68,6 +88,7 @@ async def dom_act_and_verify(
         "expected_feature": expected_feature,
         "debug": debug,
         "trusted": trusted,
+        "wait_mode": wait_mode,
     }
     result = {}
 
@@ -113,15 +134,18 @@ async def dom_act_and_verify(
                 _write_log(log_prefix + "_" + action, call, result)
             return result
 
-        # ---- 验证特征（轮询直到满足或超时，不再固定等 3s）----
-        # 之前每个动作固定 sleep 3s 再断言——set_value 等立即生效的动作白等。
-        # 改为：动作后立即取特征做断言，pass 即返回；异步动作(提交/跳转)靠轮询
-        # 等到断言满足。无 expected_feature 时只短等一拍让页面反应。
-        evidence = {}
-        deadline = time.monotonic() + wait_s
-        status = "pass"
-        detail = {"mode": "feature"}
-        if page_features:
+        # ---- 验证特征 ----
+        # 事件驱动优先：wait_mode=event 且断言齐全时，把判定下沉页面，
+        # MutationObserver 驱动唤醒，一次调用等到底（无定时轮询）。
+        # event 对"整页导航"无效(导航杀死页面内 Promise)，此时 timeout 后
+        # 若 URL 已变则自动 fallback 到 poll 覆盖跳转类动作。
+
+        async def _poll_verify(remaining_s):
+            """轮询直到断言满足或超时。返回 (status, detail, evidence)。"""
+            evidence = {}
+            deadline = time.monotonic() + remaining_s
+            status = "pass"
+            detail = {"mode": "feature"}
             first = True
             while True:
                 ev = {}
@@ -133,26 +157,13 @@ async def dom_act_and_verify(
                 if first:
                     evidence = ev
                     first = False
-
                 if expected_feature:
                     checks = []
                     all_pass = True
                     for fname, expect in expected_feature.items():
                         actual = ev.get(fname)
-                        op = expect.get("op", "eq")
-                        if op == "eq":
-                            passed = (actual == expect.get("value"))
-                        elif op == "neq":
-                            passed = (actual != expect.get("value"))
-                        elif op == "exists":
-                            passed = (actual not in (None, "", False))
-                        elif op == "not_exists":
-                            passed = (actual in (None, "", False))
-                        elif op == "contains":
-                            passed = (expect.get("value") in str(actual))
-                        else:
-                            passed = False
-                        checks.append({"feature": fname, "op": op,
+                        passed = _passes(expect, actual)
+                        checks.append({"feature": fname, "op": expect.get("op", "eq"),
                                        "actual": actual,
                                        "expected": expect.get("value"),
                                        "passed": passed})
@@ -164,20 +175,57 @@ async def dom_act_and_verify(
                         break
                     detail["checks"] = checks
                 else:
-                    # 无断言：短等一拍让页面消化动作即可返回
                     if not first:
                         break
                     await asyncio.sleep(0.5)
                     continue
-
                 if time.monotonic() >= deadline:
-                    break  # 超时，保留最后一次 checks
+                    break
                 await asyncio.sleep(0.25)
-
             status = "pass" if (not expected_feature) or all_pass else "fail"
+            return status, detail, evidence
+
+        if wait_mode == "event" and page_features and expected_feature:
+            ev_pass = False
+            ev_res = None
+            try:
+                ev_res = await client.wait_event(page_features, expected_feature,
+                                                 timeout_s=wait_s)
+            except Exception:
+                # wait_event 的 eval 可能在整页导航时抛 'target navigated'。
+                # 这类异常说明页面跳走了，event 无效——fallback poll 覆盖。
+                ev_res = None
+            ev_pass = (isinstance(ev_res, dict) and ev_res.get("status") == "pass")
+            if ev_pass:
+                evidence = ev_res.get("values", {}) if isinstance(ev_res, dict) else {}
+                status = "pass"
+                checks = []
+                for fname, expect in (expected_feature or {}).items():
+                    actual = evidence.get(fname)
+                    checks.append({"feature": fname, "op": expect.get("op", "eq"),
+                                   "actual": actual,
+                                   "expected": expect.get("value"),
+                                   "passed": _passes(expect, actual)})
+                detail = {"mode": "event", "checks": checks}
+            else:
+                # 非 pass：可能页面导航(Promise 在旧 context 销毁)。event 对
+                # 整页跳转类动作无效，立即 fallback poll 等新页面(不等满 timeout)。
+                remaining = wait_s - (time.monotonic() - start)
+                remaining = max(remaining, 0.3)
+                status, detail, evidence = await _poll_verify(remaining)
+                if status == "pass":
+                    detail["mode"] = "event->poll_fallback"
         else:
-            # 无 page_features：动作后短等一拍（供异步副作用落地）
-            await asyncio.sleep(0.5)
+            # ---- 轮询直到满足或超时，不再固定等 3s）----
+            # 之前每个动作固定 sleep 3s 再断言——set_value 等立即生效的动作白等。
+            # 改为：动作后立即取特征做断言，pass 即返回；异步动作(提交/跳转)靠轮询
+            # 等到断言满足。无 expected_feature 时只短等一拍让页面反应。
+            if page_features:
+                status, detail, evidence = await _poll_verify(wait_s)
+            else:
+                # 无 page_features：动作后短等一拍（供异步副作用落地）
+                await asyncio.sleep(0.5)
+                status, detail, evidence = "pass", {"mode": "feature"}, {}
 
         result = {
             "status": status,

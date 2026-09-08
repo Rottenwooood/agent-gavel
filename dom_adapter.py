@@ -507,3 +507,66 @@ class DomClient:
                 pass  # context 未就绪，重试
             await asyncio.sleep(0.4)
         return False
+
+    async def wait_event(self, page_features, expected_feature, timeout_s=6.0):
+        """事件驱动等待：把断言下沉到页面，用 MutationObserver 唤醒，一次调用等到底。
+
+        适用于"动作后页面会异步变化、且变化会反映到 DOM"的场景（提交后结果区
+        出现、loading 消失等）。页面内：
+          - 立即判一次；不满足则 MutationObserver 监听 body 子树，
+            DOM 变化时重判；满足即 resolve，返回当前各 feature 实际值。
+          - timeout_s 超时 resolve，返回最后一次实际值。
+        返回 {"status": "pass"|"timeout", "values": {feature: actual}}。
+        判定逻辑在此方法内下沉为页面 JS（eq/neq/exists/not_exists/contains）。
+        """
+        import json as _json
+        feats = _json.dumps(page_features or {}, ensure_ascii=False)
+        exps = _json.dumps(expected_feature or {}, ensure_ascii=False)
+        timeout_ms = int(timeout_s * 1000)
+        js = r"""
+        (async () => {
+          const page_features = %s;
+          const expected = %s;
+          const timeoutMs = %d;
+          const evalFeat = (name, expr) => { try { return eval(expr); } catch (e) { return undefined; } };
+          const checkPass = (values) => {
+            for (const name in expected) {
+              const expect = expected[name];
+              const actual = values[name];
+              const op = expect.op || 'eq';
+              let passed;
+              if (op === 'eq') passed = (actual === expect.value);
+              else if (op === 'neq') passed = (actual !== expect.value);
+              else if (op === 'exists') passed = !(actual === undefined || actual === null || actual === '' || actual === false);
+              else if (op === 'not_exists') passed = (actual === undefined || actual === null || actual === '' || actual === false);
+              else if (op === 'contains') passed = String(actual).indexOf(expect.value) !== -1;
+              else passed = false;
+              if (!passed) return false;
+            }
+            return true;
+          };
+          const collect = () => {
+            const values = {};
+            for (const name in page_features) values[name] = evalFeat(name, page_features[name]);
+            return values;
+          };
+          const values = collect();
+          if (checkPass(values)) return {status: 'pass', values: values};
+          return await new Promise((resolve) => {
+            let settled = false;
+            const finish = (status) => { if (settled) return; settled = true; resolve({status: status, values: collect()}); };
+            // 页面开始导航(整页跳转)时立即返回 'navigated'——Promise 在旧 context
+            // 会被销毁，与其等 timeout 不如立刻让 Python 端 fallback poll 到新页面。
+            const onNav = () => { if (mo) mo.disconnect(); finish('navigated'); };
+            const mo = new MutationObserver(() => {
+              if (checkPass(collect())) finish('pass');
+            });
+            mo.observe(document.body || document.documentElement,
+                       {subtree: true, childList: true, attributes: true, characterData: true});
+            window.addEventListener('pagehide', onNav, {once: true});
+            window.addEventListener('beforeunload', onNav, {once: true});
+            setTimeout(() => { mo.disconnect(); finish('timeout'); }, timeoutMs);
+          });
+        })()
+        """ % (feats, exps, timeout_ms)
+        return await self.eval_js(js)

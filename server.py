@@ -342,6 +342,7 @@ async def dom_step(
     debug: int = 0,
     wait_s: float = 6.0,
     trusted: bool = True,
+    wait_mode: str = "poll",
 ):
     """通用 DOM 单步闭环：对任意选择器执行一个动作并验证，不绑任何站点。
 
@@ -358,6 +359,10 @@ async def dom_step(
     trusted: True（默认）用 CDP 真实输入/点击/按键（isTrusted=true）。对 React
       重渲染站点（知乎登录、部分 SaaS）合成事件会被框架冲掉/忽略，必须 trusted；
       普通站（百度/B站）合成事件即可，为提速可显式 trusted=False。
+    wait_mode: poll（默认，兼容旧行为，定时重查断言）
+             | event（断言下沉页面，MutationObserver 事件驱动等待——适合提交后
+              等结果出现的异步长等待，DOM 变化即刻唤醒，无定时轮询；
+              注意只对"变化反映到 DOM"的断言有效）
     debug: 1 保留 evidence 并写日志。
     例：设值并断言输入框内容：
       dom_step("set_value",
@@ -376,6 +381,7 @@ async def dom_step(
             debug=debug,
             log_prefix="dom_step",
             trusted=trusted,
+            wait_mode=wait_mode,
         )
 
 
@@ -518,6 +524,7 @@ async def dom_run_template(name_or_site: str, params: dict = None, *,
                 debug=debug,
                 log_prefix=f"tmpl_{filled.get('site')}_s{i}",
                 trusted=step.get("trusted", True),
+                wait_mode=step.get("wait_mode", "poll"),
             )
             results.append({"step": i, "action": step["action"], **r})
             if r.get("status") != "pass":
