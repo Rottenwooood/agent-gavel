@@ -35,7 +35,7 @@ diff -ruN '--exclude=target' '--exclude=.git' cul-src/src/atspi_tree.rs cul-mod/
  /// Open an `AccessibleProxy` for an object on the a11y bus.
 diff -ruN '--exclude=target' '--exclude=.git' cul-src/src/server.rs cul-mod/src/server.rs
 --- cul-src/src/server.rs	2026-09-08 13:51:50.123063802 +0800
-+++ cul-mod/src/server.rs	2026-09-08 14:46:29.166970967 +0800
++++ cul-mod/src/server.rs	2026-09-08 15:30:58.011909365 +0800
 @@ -312,9 +312,27 @@
          Parameters(params): Parameters<GetAppStateParams>,
      ) -> Json<GetAppStateOutput> {
@@ -80,7 +80,52 @@ diff -ruN '--exclude=target' '--exclude=.git' cul-src/src/server.rs cul-mod/src/
              .await;
          let (screenshot, screenshot_error) = if include_screenshot {
              let result: Result<ScreenshotCapture> = async {
-@@ -2225,6 +2247,14 @@
+@@ -565,12 +587,41 @@
+         {
+             return true;
+         }
+-        let Ok(cap) = capture_screenshot_raw().await else {
++        // 已确认 uinput 不可用：直接失败，避免每次坐标操作都截屏重试
++        // (截图只为拿桌面尺寸建指针; uinput 不可用时这是纯浪费且触发录屏灯)。
++        static UINPUT_UNAVAILABLE: std::sync::atomic::AtomicBool =
++            std::sync::atomic::AtomicBool::new(false);
++        if UINPUT_UNAVAILABLE.load(std::sync::atomic::Ordering::Relaxed) {
+             return false;
++        }
++        // 预检 /dev/uinput 可写性(不截图)：不可写则记一次性失败标记
++        {
++            use std::fs::OpenOptions;
++            let probe = OpenOptions::new()
++                .read(true)
++                .write(true)
++                .open(std::path::Path::new("/dev/uinput"));
++            if probe.is_err() {
++                UINPUT_UNAVAILABLE.store(true, std::sync::atomic::Ordering::Relaxed);
++                return false;
++            }
++        }
++        // 优先用已有 desktop_size 缓存，避免为了拿尺寸截图
++        let (dw, dh) = {
++            let cached = self.desktop_size.lock().ok().and_then(|g| *g);
++            match cached {
++                Some((w, h)) => (w, h),
++                None => {
++                    let Ok(cap) = capture_screenshot_raw().await else {
++                        return false;
++                    };
++                    self.cache_desktop_size(cap.width, cap.height);
++                    (cap.width, cap.height)
++                }
++            }
+         };
+-        self.cache_desktop_size(cap.width, cap.height);
+         match tokio::task::spawn_blocking(move || {
+-            crate::abs_pointer::AbsPointer::create(cap.width as i32, cap.height as i32)
++            crate::abs_pointer::AbsPointer::create(dw as i32, dh as i32)
+         })
+         .await
+         {
+@@ -2225,6 +2276,14 @@
      /// compact readiness block is returned.
      #[serde(default)]
      verbose: Option<bool>,
@@ -95,7 +140,7 @@ diff -ruN '--exclude=target' '--exclude=.git' cul-src/src/server.rs cul-mod/src/
  }
  
  impl GetAppStateParams {
-@@ -3033,6 +3063,7 @@
+@@ -3033,6 +3092,7 @@
          &self,
          params: &GetAppStateParams,
          window_context: Option<&WindowInfo>,
@@ -103,7 +148,7 @@ diff -ruN '--exclude=target' '--exclude=.git' cul-src/src/server.rs cul-mod/src/
      ) -> Option<String> {
          if let Some(explicit) = trimmed_nonempty(params.app_name_or_bundle_identifier.as_deref()) {
              return Some(explicit.to_string());
-@@ -3041,6 +3072,16 @@
+@@ -3041,6 +3101,16 @@
          let target_pid = window_context.and_then(|window| window.pid).or(params.pid);
          let candidates = accessibility_filter_candidates(window_context);
  
@@ -120,3 +165,29 @@ diff -ruN '--exclude=target' '--exclude=.git' cul-src/src/server.rs cul-mod/src/
          if let Some(target_pid) = target_pid {
              if let Ok(apps) = list_accessible_apps(200).await {
                  if let Some(object_ref) =
+@@ -3134,8 +3204,23 @@
+         if let Some((w, h)) = cached {
+             return Some((0, 0, w as i32, h as i32));
+         }
+-        // One-time prime: a full-frame capture reveals the desktop size when
+-        // no prior capture is available.
++        // 优先从 GNOME 扩展拿逻辑 monitor 布局(不截图)——坐标检查用足够,
++        // 避免为拿桌面尺寸触发一次昂贵的 portal 截图(录屏灯)。
++        if let Some(monitors) = self.logical_monitor_rects().await {
++            if let Some((x0, y0, x1, y1)) = monitors.iter().fold(None, |acc, (mx, my, mw, mh)| {
++                let (ax, ay, bx, by) = acc.unwrap_or((*mx, *my, mx + mw, my + mh));
++                Some((
++                    ax.min(*mx), ay.min(*my),
++                    bx.max(mx + mw), by.max(my + mh)))
++            }) {
++                let (w, h) = ((x1 - x0) as u32, (y1 - y0) as u32);
++                if w > 0 && h > 0 {
++                    self.cache_desktop_size(w, h);
++                    return Some((x0, y0, w as i32, h as i32));
++                }
++            }
++        }
++        // 兜底：无扩展/monitor 信息时才截一帧。
+         let raw = capture_screenshot_raw().await.ok()?;
+         self.cache_desktop_size(raw.width, raw.height);
+         (raw.width > 0 && raw.height > 0).then_some((0, 0, raw.width as i32, raw.height as i32))
