@@ -53,9 +53,12 @@ class ComputerUseClient:
     断线时在后台线程内自动重连。
     """
 
-    def __init__(self, command="computer-use-linux", args=("mcp",)):
-        self._command = command
-        self._args = list(args)
+    def __init__(self, command=None, args=None):
+        import os
+        # 可用环境变量 COMPUTER_USE_LINUX_BIN 覆盖二进制路径(便于测试优化版)
+        self._command = command or os.environ.get(
+            "COMPUTER_USE_LINUX_BIN", "computer-use-linux")
+        self._args = list(args) if args is not None else ["mcp"]
         self._loop = None          # 后台线程内的事件循环
         self._thread = None        # 后台线程
         self._ready = threading.Event()   # 首次连接完成信号
@@ -195,15 +198,25 @@ class ComputerUseClient:
             except Exception:
                 return raw
 
-    async def read_state(self, app_id=None):
+    async def read_state(self, app_id=None, fast_app_filter=None):
         """读当前窗口/应用的 AT-SPI 树，返回原始节点列表。
 
         get_app_state 返回 {accessibility_tree, screenshot, window_context...}
         我们取 accessibility_tree 字段喂给 normalize。
+
+        fast_app_filter: True 走改版 computer-use-linux 的快速 app-filter 路径
+        (有 pid 时跳过全桌面遍历定位, ~快 270ms); None=读环境变量
+        AGENT_GAVEL_FAST_APP_FILTER(默认 false, 保持原版行为)。
         """
+        import os
+        if fast_app_filter is None:
+            fast_app_filter = os.environ.get("AGENT_GAVEL_FAST_APP_FILTER", "0") in (
+                "1", "true", "True")
         args = {}
         if app_id:
             args["app_id"] = app_id
+        if fast_app_filter is not None:
+            args["fast_app_filter"] = bool(fast_app_filter)
         args["include_screenshot"] = False
         args["max_depth"] = 16
         args["max_nodes"] = 2000
