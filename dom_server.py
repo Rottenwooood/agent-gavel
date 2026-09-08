@@ -228,6 +228,16 @@ def register_dom_tools(mcp):
         return list_templates()
 
     @mcp.tool()
+    async def dom_template_stats():
+        """查看所有 DOM 模板的失效检测 stats。
+
+        返回 {模板文件名: {consecutive_fails, suspected, last, last_at}}。
+        suspected=true 表示连续失败达阈值、模板疑似失效。
+        """
+        from dom_templates import all_stats
+        return all_stats()
+
+    @mcp.tool()
     async def dom_run_template(name_or_site: str, params: dict = None, *,
                                debug: int = 0, wait_s: float = 6.0,
                                strict: bool = False):
@@ -237,12 +247,20 @@ def register_dom_tools(mcp):
         params: 替换模板里的 $VAR（如 {"QUERY": "..."}）。
         strict: True 时不自动降级重试（测试/调试用，暴露模板真实 fail）。
         debug: 1 保留 evidence 并写日志。
+        失效检测：每跑完记一次连续失败；连续失败>=3 标 suspected，
+        pass 清零。suspected 模板执行时返回结果顶部带 warning。
         """
-        from dom_templates import load_template, _fill
-        tmpl = load_template(name_or_site)
+        from dom_templates import resolve_template, _fill, record_run, get_stats
+        template_file, tmpl = resolve_template(name_or_site)
         if not tmpl:
             return {"status": "not_found", "name": name_or_site,
                     "available": [t["file"] for t in _list_template_summaries()]}
+        # 执行前查失效状态
+        pre = get_stats(template_file)
+        warning = None
+        if pre.get("suspected"):
+            warning = (f"模板疑似失效(连续失败 {pre.get('consecutive_fails')} 次)——"
+                       f"建议 dom_explore 重新探索后 dom_save_template 覆盖")
         filled = _fill(tmpl, params)
         results = []
         try:
@@ -263,14 +281,22 @@ def register_dom_tools(mcp):
                     )
                     results.append({"step": i, "action": step["action"], **r})
                     if r.get("status") != "pass":
-                        return {
+                        record_run(template_file, "fail")
+                        out = {
                             "status": "fail",
                             "failed_step": i,
                             "desc": tmpl.get("desc"),
                             "results": results,
                         }
-            return {"status": "pass", "desc": tmpl.get("desc"),
-                    "steps_total": len(filled.get("steps", [])), "results": results}
+                        if warning:
+                            out["warning"] = warning
+                        return out
+            record_run(template_file, "pass")
+            out = {"status": "pass", "desc": tmpl.get("desc"),
+                   "steps_total": len(filled.get("steps", [])), "results": results}
+            if warning:
+                out["warning"] = warning
+            return out
         except Exception as e:
             env = _dom_error(e)
             env["failed_step"] = len(results)

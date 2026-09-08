@@ -1,5 +1,5 @@
 {
-  "site": "zhihu-login-pwd",
+  "site": "zhihu",
   "desc": "知乎密码登录表单填充：导航登录页→切\"密码登录\"tab→填手机号→填密码。适合自动化填表/测试场景(真实登录会触发人机验证需人工过)。",
   "home": "https://www.zhihu.com/signin",
   "steps": [

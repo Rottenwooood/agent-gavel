@@ -46,6 +46,12 @@ agent-gavel **默认用真实输入**。代价是稍慢（毫秒级差异），�
 
 AI 现场把陌生站点跑通后，可以把"导航 → 切 tab → 填表 → 提交 → 验证"这整套流程**存成模板**（一个 JSON），以后同类任务直接套模板跑，不用重新探索。模板里的关键词参数化（如 `$QUERY`），换关键词即可复用。
 
+**组织（T4）**：模板按**网站**组织——`site` 字段是纯网站名，文件名是 `site_功能.json`
+（如 `bing_search.json` / `zhihu_login.json`），一个网站可有多个模板文件。
+**失效检测**：每次运行记录连续失败，连续失败 ≥3 次标 `suspected`（模板疑似失效），
+之后执行会返回 `warning` 提示重新探索；任何一次 pass 清零；覆盖同名模板清零。
+`dom_template_stats` 可查所有模板的失效状态。
+
 ## 二、对比其他类似插件/工具的特性
 
 | 维度 | agent-gavel | 典型浏览器 agent（agent-browser / computer-use 类） |
@@ -72,6 +78,7 @@ AI 现场把陌生站点跑通后，可以把"导航 → 切 tab → 填表 → 
 | `dom_save_template` | 把跑通的流程存成模板 |
 | `dom_run_template` | 执行已存模板（换参数） |
 | `dom_list_templates` | 列出已有模板 |
+| `dom_template_stats` | 查看各模板失效检测 stats（连续失败/suspected） |
 | `chrome` | 管理调试用 Chrome：`ensure`/`stop`/`status`（T1 起自动，无需手动开） |
 | `read_state` / `list_windows` / `act_and_verify` / `run_operation` | 桌面（AT-SPI）通道的操作与验证 |
 

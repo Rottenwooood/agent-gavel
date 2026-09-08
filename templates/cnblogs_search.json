@@ -1,5 +1,5 @@
 {
-  "site": "cnblogs-search",
+  "site": "cnblogs",
   "desc": "博客园站内搜索(找找看 zzkx)：导航首页→顶部导航搜索框(注意 id 重复,需用 #zzk_search input[name=w] 定位可见框)→填关键词→回车提交→断言跳转结果页 URL 含 w=关键词。注意:搜索可能触发滑块人机验证(反爬),非工具问题。",
   "home": "https://www.cnblogs.com/",
   "steps": [

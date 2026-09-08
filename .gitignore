@@ -13,6 +13,9 @@ wheels/
 # Runtime debug call logs (debug=1 dumps JSON per call)
 logs/
 
+# Template runtime stats (consecutive-fail tracking, regenerated on run)
+templates/stats.json
+
 # Python cache / build
 __pycache__/
 *.py[oc]

@@ -2,7 +2,7 @@
 
 模板结构：
 {
-  "site": "taobao",          // 站点标识
+  "site": "taobao",          // 纯网站名(唯一身份)
   "desc": "在淘宝搜索商品",
   "home": "https://www.taobao.com",
   "steps": [                  // 有序步骤
@@ -15,6 +15,14 @@
   ]
 }
 $QUERY 等 $VAR 占位符在执行时由 params 替换。
+
+命名（T4 规范）：
+  - site 字段 = 纯网站名（bing / zhihu / cnblogs）
+  - 文件名 = site_功能.json（bing_search.json / zhihu_login.json），
+    一个 site 可对应多个模板文件
+  - 失效检测：templates/stats.json 按模板文件记录连续失败；
+    连续失败 >= FAIL_THRESHOLD → suspected；任何 pass → 清零；
+    覆盖同名模板 → 该模板 stats 清零
 """
 
 import datetime
@@ -22,6 +30,8 @@ import json
 import os
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+STATS_FILE = os.path.join(TEMPLATE_DIR, "stats.json")
+FAIL_THRESHOLD = 3  # 连续失败达到该次数 → suspected
 
 
 def _ensure_dir():
@@ -33,28 +43,109 @@ def _slugify(name):
     return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
 
-def list_templates():
+# ---------------- 失效检测 stats ----------------
+
+def _read_stats():
     _ensure_dir()
+    if not os.path.exists(STATS_FILE):
+        return {}
+    try:
+        with open(STATS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _write_stats(stats):
+    _ensure_dir()
+    with open(STATS_FILE, "w", encoding="utf-8") as f:
+        json.dump(stats, f, ensure_ascii=False, indent=2)
+
+
+def record_run(template_file, status):
+    """记录一次模板运行结果。key=模板文件名。
+
+    连续失败达到 FAIL_THRESHOLD → suspected=true；
+    任何 pass → 连续失败清零、suspected 清除。
+    返回更新后的该模板 stats。
+    """
+    stats = _read_stats()
+    s = stats.get(template_file, {"consecutive_fails": 0, "suspected": False})
+    if status == "pass":
+        s["consecutive_fails"] = 0
+        s["suspected"] = False
+    else:
+        s["consecutive_fails"] = s.get("consecutive_fails", 0) + 1
+        if s["consecutive_fails"] >= FAIL_THRESHOLD:
+            s["suspected"] = True
+    s["last"] = status
+    s["last_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+    stats[template_file] = s
+    _write_stats(stats)
+    return s
+
+
+def reset_stats(template_file):
+    """覆盖同名模板时清零该模板 stats。"""
+    stats = _read_stats()
+    stats.pop(template_file, None)
+    _write_stats(stats)
+
+
+def get_stats(template_file):
+    """读单个模板 stats（无则给初始结构）。"""
+    s = _read_stats().get(template_file, {})
+    return {
+        "consecutive_fails": s.get("consecutive_fails", 0),
+        "suspected": s.get("suspected", False),
+        "last": s.get("last"),
+        "last_at": s.get("last_at"),
+    }
+
+
+def all_stats():
+    """返回 {模板文件名: stats}。"""
+    return _read_stats()
+
+
+def list_templates():
+    """列出模板，附 stats(suspected)。"""
+    _ensure_dir()
+    stats = _read_stats()
     out = []
     for f in sorted(os.listdir(TEMPLATE_DIR)):
-        if f.endswith(".json"):
+        if f.endswith(".json") and f != "stats.json":
             try:
                 with open(os.path.join(TEMPLATE_DIR, f), encoding="utf-8") as fh:
                     t = json.load(fh)
-                out.append({"file": f, "site": t.get("site"),
-                            "desc": t.get("desc"), "steps": len(t.get("steps", []))})
+                s = stats.get(f, {})
+                out.append({
+                    "file": f,
+                    "site": t.get("site"),
+                    "desc": t.get("desc"),
+                    "steps": len(t.get("steps", [])),
+                    "consecutive_fails": s.get("consecutive_fails", 0),
+                    "suspected": s.get("suspected", False),
+                })
             except Exception:
                 pass
     return out
 
 
 def save_template(site, desc, steps, home=None, name=None):
-    """保存模板，返回 {file, site, steps}。同名(按 name/site)覆盖。"""
+    """保存模板，返回 {file, site, steps}。同名(按 name/site)覆盖。
+
+    T4 命名：site=纯网站名，文件名默认 = site_功能.json。
+    name 参数给"功能"部分；不给则文件名 = site.json。
+    """
     _ensure_dir()
-    fname = (name and _slugify(name)) or _slugify(site)
+    if name:
+        fname = f"{_slugify(site)}_{_slugify(name)}"
+    else:
+        fname = _slugify(site)
     path = os.path.join(TEMPLATE_DIR, f"{fname}.json")
     tmpl = {
-        "site": site,
+        "site": _slugify(site) or site,
         "desc": desc,
         "home": home or "",
         "steps": steps,
@@ -62,30 +153,77 @@ def save_template(site, desc, steps, home=None, name=None):
     }
     with open(path, "w", encoding="utf-8") as f:
         json.dump(tmpl, f, ensure_ascii=False, indent=2)
-    return {"file": os.path.basename(path), "site": site, "steps": len(steps)}
+    # 覆盖同名 → 清零该模板 stats
+    reset_stats(os.path.basename(path))
+    return {"file": os.path.basename(path), "site": tmpl["site"], "steps": len(steps)}
 
 
 def load_template(name_or_file):
-    """按文件名(带.json)或 site 标识找模板，返回 dict 或 None。"""
+    """按文件名(带.json)或 site 标识找模板，返回 dict 或 None。
+
+    T4 后 site=纯网站名，一个 site 可能多个模板文件——按 site 匹配时
+    优先取"文件名 = site"的模板；没有则取该 site 的任意一个。
+    """
     _ensure_dir()
-    # 直接文件名
-    p = os.path.join(TEMPLATE_DIR, name_or_file)
+    # 直接文件名（含 .json 或去掉扩展名）
+    for cand in (name_or_file, f"{name_or_file}.json"):
+        p = os.path.join(TEMPLATE_DIR, cand)
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                return json.load(f)
+    # site 名：优先 文件名=site.json
+    p = os.path.join(TEMPLATE_DIR, f"{name_or_file}.json")
     if os.path.exists(p):
         with open(p, encoding="utf-8") as f:
-            return json.load(f)
-    # site 名
-    for f in os.listdir(TEMPLATE_DIR):
-        if f.endswith(".json"):
+            t = json.load(f)
+        if t.get("site") == name_or_file:
+            return t
+    # site 匹配：取任意一个该 site 的模板
+    for f in sorted(os.listdir(TEMPLATE_DIR)):
+        if f.endswith(".json") and f != "stats.json":
             with open(os.path.join(TEMPLATE_DIR, f), encoding="utf-8") as fh:
                 t = json.load(fh)
             if t.get("site") == name_or_file:
                 return t
-    # 模糊：文件名去 .json
-    for f in os.listdir(TEMPLATE_DIR):
-        if f == f"{name_or_file}.json":
-            with open(os.path.join(TEMPLATE_DIR, f), encoding="utf-8") as fh:
-                return json.load(fh)
     return None
+
+
+def load_template_file(template_file):
+    """按确切模板文件名加载（供 stats 记录用）。"""
+    path = os.path.join(TEMPLATE_DIR, template_file)
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+
+def resolve_template(name_or_site):
+    """按文件名或 site 找到模板，返回 (文件名, 模板) 或 (None, None)。
+
+    与 load_template 同逻辑，但返回确切文件名（stats 按文件名记录）。
+    """
+    _ensure_dir()
+    # 直接文件名
+    for cand in (name_or_site, f"{name_or_site}.json"):
+        p = os.path.join(TEMPLATE_DIR, cand)
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                return os.path.basename(p), json.load(f)
+    # site 名：文件名=site.json
+    p = os.path.join(TEMPLATE_DIR, f"{name_or_site}.json")
+    if os.path.exists(p):
+        with open(p, encoding="utf-8") as f:
+            t = json.load(f)
+        if t.get("site") == name_or_site:
+            return os.path.basename(p), t
+    # site 匹配：任意一个
+    for f in sorted(os.listdir(TEMPLATE_DIR)):
+        if f.endswith(".json") and f != "stats.json":
+            with open(os.path.join(TEMPLATE_DIR, f), encoding="utf-8") as fh:
+                t = json.load(fh)
+            if t.get("site") == name_or_site:
+                return f, t
+    return None, None
 
 
 def _fill(template, params):
