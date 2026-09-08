@@ -1,10 +1,55 @@
 [project]
 name = "agent-gavel"
 version = "0.1.0"
-description = "Add your description here"
+description = "验证驱动的多端操作框架：动作发出去，程序断言判成败，省掉一次模型往返"
 readme = "README.md"
 requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [{ name = "Rottenwooood" }]
+keywords = ["mcp", "dom", "atspi", "browser", "automation", "agent", "cdp", "web"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+]
 dependencies = [
     "mcp[cli]>=2.1.1",
     "websockets>=17.1",
+]
+
+# agent-gavel 是 MCP server（stdio 模式），opencode 等客户端通过
+# `uvx agent-gavel` 拉起。桌面(AT-SPI)通道依赖 computer-use-linux
+# (npm 全局安装)，不是 Python 依赖——纯 DOM 用法无需安装它。
+
+[project.scripts]
+agent-gavel = "main:main"
+
+[project.urls]
+Homepage = "https://github.com/Rottenwooood/agent-gavel"
+Repository = "https://github.com/Rottenwooood/agent-gavel"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# 项目是扁平结构(模块在根目录, 非 src/ 包)——把 *.py 作为顶层模块装进
+# site-packages, 模板目录作为包数据一起发布。用 force-include 显式声明。
+[tool.hatch.build.targets.wheel]
+include = ["*.py"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"templates" = "templates"
+"desktop_templates" = "desktop_templates"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "*.py",
+    "*.sh",
+    "templates/*.json",
+    "desktop_templates/*.json",
+    "tests/*.py",
+    "docs/*.md",
+    "third_party/**",
+    "AGENTS.md",
+    "README.md",
 ]

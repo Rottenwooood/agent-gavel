@@ -18,7 +18,6 @@ import time
 
 from mcp.server.mcpserver import MCPServer
 
-from adapter import ComputerUseClient
 from catalog import evaluate_assertions
 from catalog_data import resolve_operation
 from diff import diff_snapshots, classify, meaningful_change
@@ -28,6 +27,44 @@ from wait import wait_until_stable
 mcp = MCPServer("agent-gavel")
 
 LOG_DIR = os.environ.get("AGENT_GAVEL_LOG_DIR", "/home/c6h4o2/agent-gavel/logs")
+
+
+class AtspiUnavailableError(RuntimeError):
+    """桌面(AT-SPI)通道不可用——没装 computer-use-linux。"""
+
+
+def _atspi_client():
+    """惰性获取 AT-SPI 客户端。未装 computer-use-linux 时抛结构化错误。
+
+    DOM 通道不依赖它；只有调桌面工具才需要。这样 `uvx agent-gavel`
+    纯 DOM 用户无需安装 AT-SPI 后端。
+    """
+    import shutil
+    if shutil.which("computer-use-linux") is None:
+        raise AtspiUnavailableError(
+            "computer-use-linux 未安装——桌面(AT-SPI)通道不可用。"
+            "纯 DOM 用法无需它；需要桌面操作请安装 desktop extra"
+            "(npm i -g computer-use-linux)")
+    from adapter import ComputerUseClient
+    return ComputerUseClient()
+
+
+def _guard_atspi(fn):
+    """装饰器：把 AtspiUnavailableError 转成结构化返回（不给 agent 报错猜原因）。"""
+    import functools
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except AtspiUnavailableError as e:
+            return {
+                "status": "error",
+                "reason": "atspi_unavailable",
+                "error": str(e),
+                "hint": "纯 DOM 用法无需 AT-SPI；桌面操作需安装 computer-use-linux",
+            }
+    return wrapper
 
 
 def _write_call_log(call, result):
@@ -129,6 +166,7 @@ async def _do_verify(before_norm, after_norm, verify, precomputed_diff=None):
 
 
 @mcp.tool()
+@_guard_atspi
 async def act_and_verify(
     action: str,
     action_args: dict = None,
@@ -189,7 +227,7 @@ async def act_and_verify(
         "wait_mode": wait_mode,
     }
 
-    async with ComputerUseClient() as client:
+    async with _atspi_client() as client:
         # Step 1: 抓 before（归一化 + 保留 hash 供稳定等待复用为 seed）
         t_before = time.monotonic()
         if before_raw is not None:
@@ -328,6 +366,7 @@ async def act_and_verify(
 
 
 @mcp.tool()
+@_guard_atspi
 async def run_operation(app: str, operation: str, params: dict = None,
                         timeout_s: float = None, debug: int = 0):
     """从操作目录查 app+operation 的断言模板，执行动作并验证。
@@ -410,9 +449,10 @@ async def list_operations():
 
 
 @mcp.tool()
+@_guard_atspi
 async def read_state(app_id: str = None, limit: int = 50):
     """读取当前应用的无障碍树（归一化摘要），调试用。"""
-    async with ComputerUseClient() as client:
+    async with _atspi_client() as client:
         norm = await _read_normalized(client, app_id=app_id)
         return {
             "count": len(norm["normalized"]),
@@ -421,9 +461,10 @@ async def read_state(app_id: str = None, limit: int = 50):
 
 
 @mcp.tool()
+@_guard_atspi
 async def list_windows():
     """列出桌面窗口。"""
-    async with ComputerUseClient() as client:
+    async with _atspi_client() as client:
         return await client.list_windows()
 
 
@@ -508,7 +549,7 @@ async def _locate_click_point(app_id, role, name, right_pad=150, left_pad=None,
       文本左侧空白，故右键/点击要取右缘内偏移。
       center=True：点 bounds 中心(用于对话框按钮等需点中心的元素)。
     """
-    async with ComputerUseClient() as client:
+    async with _atspi_client() as client:
         raw = await client.read_state(app_id=app_id)
     for n in raw or []:
         b = n.get("bounds") or {}
@@ -542,6 +583,7 @@ async def _resolve_app_pid(client, app_id):
 
 
 @mcp.tool()
+@_guard_atspi
 async def desktop_run_template(name_or_app: str, params: dict = None, *,
                                debug: int = 0, timeout_s: float = 8.0):
     """执行已保存的桌面流程模板，逐步验证，任一步 fail 即停。
@@ -564,7 +606,7 @@ async def desktop_run_template(name_or_app: str, params: dict = None, *,
     filled = _fill(tmpl, params)
     results = []
     default_app_id = filled.get("app_id") or None
-    async with ComputerUseClient() as client:
+    async with _atspi_client() as client:
         # 会话内解析一次 pid（微信重启后变化），优先 pid 定位避免窗口解析歧义
         pid = None
         if default_app_id:
