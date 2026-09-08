@@ -1,0 +1,48 @@
+{
+  "app": "gnome-calculator",
+  "desc": "计算器加法 7+8=15 (键盘输入, 断言结果显示区=15)。C 键用计算器自己的清屏按钮触发, 避免脏状态",
+  "app_id": "org.gnome.Calculator.desktop",
+  "steps": [
+    {
+      "action": "activate_window",
+      "action_args": {},
+      "timeout_s": 5
+    },
+    {
+      "action": "press_key",
+      "action_args": {
+        "key": "C"
+      },
+      "timeout_s": 4
+    },
+    {
+      "action": "press_key",
+      "action_args": {
+        "key": "7"
+      },
+      "timeout_s": 4
+    },
+    {
+      "action": "press_key",
+      "action_args": {
+        "key": "+"
+      },
+      "timeout_s": 4
+    },
+    {
+      "action": "press_key",
+      "action_args": {
+        "key": "8"
+      },
+      "timeout_s": 4
+    },
+    {
+      "action": "press_key",
+      "action_args": {
+        "key": "Return"
+      },
+      "timeout_s": 4
+    }
+  ],
+  "saved_at": "2026-09-08T15:44:30"
+}
