@@ -96,6 +96,26 @@ def _write_pidfile(pid):
         f.write(str(pid))
 
 
+def _bring_to_front():
+    """把调试 Chrome 窗口置前可见（best-effort，失败不影响）。
+
+    用户要看着浏览器操作，所以每次 ensure 后就把它带到前台。
+    用 xdotool 按 user-data-dir 特征找窗口激活；无 xdotool 则跳过。
+    """
+    try:
+        import subprocess as _sp
+        import shutil as _sh
+        if not _sh.which("xdotool"):
+            return False
+        # 按窗口类名或标题找 agent-gavel 的 chrome 窗口激活
+        r = _sp.run(["xdotool", "search", "--class", "Google-chrome",
+                     "windowactivate", "--sync", "%1"],
+                    capture_output=True, timeout=5)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def _own_process_alive(pid):
     """pid 组是否存活且确实是"我们拉起的 Chrome"。
 
@@ -117,34 +137,23 @@ def _own_process_alive(pid):
         return False
 
 
-def _headless_env():
-    """Chrome 需要 X/Wayland 才能起图形窗口。若当前进程环境没有可用
-    DISPLAY，自动加 --headless=new 兜底——agent-gavel 走 CDP 全自动化，
-    不需要可见窗口；从 opencode/systemd/cron 等无显示环境拉起也能用。
-    探测 DISPLAY 存在且能连才走有头，否则 headless。
-    """
-    disp = os.environ.get("DISPLAY", "")
-    if not disp:
-        return True
-    try:
-        r = subprocess.run(["xdpyinfo", "-display", disp],
-                           capture_output=True, timeout=3)
-        return r.returncode != 0
-    except Exception:
-        # xdpyinfo 不可用时不猜——返回 False(有头) 由 Chrome 自己报错
-        return False
-
-
 def _spawn(port=DEBUG_PORT):
-    """拉起 Chrome（新进程组，组长 pid 记入 pidfile）。"""
+    """拉起 Chrome（新进程组，组长 pid 记入 pidfile）。
+
+    永不用 headless：agent-gavel 的调试 Chrome 必须有可见窗口（用户要看
+    操作过程）。无 DISPLAY 时直接报错，由调用方提示用户，而不是悄悄
+    降级成 headless。
+    """
     binary = chrome_binary()
     if not binary:
         return {"ok": False, "error": "no chrome binary found"}
+    disp = os.environ.get("DISPLAY", "") or os.environ.get("WAYLAND_DISPLAY", "")
+    if not disp:
+        return {"ok": False, "error":
+                "DISPLAY 未设置——调试 Chrome 需要可见窗口(不用 headless)。"
+                "请在桌面会话里运行，或 export DISPLAY=:0"}
     _log_dir()
-    flags = list(_CHROME_FLAGS)
-    if _headless_env():
-        flags.append("--headless=new")
-    cmd = [binary, *flags,
+    cmd = [binary, *list(_CHROME_FLAGS),
            f"--user-data-dir={USER_DATA_DIR}",
            f"--remote-debugging-port={port}",
            "about:blank"]
@@ -172,6 +181,7 @@ def ensure_chrome(port=DEBUG_PORT, timeout_s=20.0):
             # 端口在响应。判断是不是自己起的：pidfile 有记录且进程组活着。
             pid = _read_pidfile()
             if pid and _own_process_alive(pid):
+                _bring_to_front()
                 return {"ok": True, "owner": "self",
                         "cdp": True, "browser": probe.get("browser")}
             return {"ok": True, "owner": "external",
@@ -185,6 +195,7 @@ def ensure_chrome(port=DEBUG_PORT, timeout_s=20.0):
             while time.monotonic() < deadline:
                 p2 = _probe(port)
                 if p2.get("ok"):
+                    _bring_to_front()
                     return {"ok": True, "owner": "self", "cdp": True,
                             "browser": p2.get("browser")}
                 time.sleep(0.5)
@@ -200,6 +211,7 @@ def ensure_chrome(port=DEBUG_PORT, timeout_s=20.0):
         while time.monotonic() < deadline:
             p2 = _probe(port)
             if p2.get("ok"):
+                _bring_to_front()
                 return {"ok": True, "owner": "started", "cdp": True,
                         "browser": p2.get("browser"), "pid": sp.get("pid")}
             time.sleep(0.5)

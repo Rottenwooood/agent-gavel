@@ -92,21 +92,21 @@ def test_crash_recover():
     assert bm.status()["owner"] == "self"
 
 
-def test_headless_env():
-    _step("8. 无 DISPLAY 用 headless")
+def test_no_display_errors():
+    _step("8. 无 DISPLAY 报错(永不用 headless)")
     for k in ("DISPLAY", "WAYLAND_DISPLAY"):
         os.environ.pop(k, None)
-    assert bm._headless_env() is True
     bm.stop_own()
-    asyncio.run(_nav())
-    assert bm.status()["owner"] == "self"
+    r = bm.ensure_chrome()
+    assert not r["ok"], r
+    assert "DISPLAY" in r.get("error", ""), r
 
 
 def main():
     test_lifecycle()
     test_external_not_killed()
     test_crash_recover()
-    test_headless_env()
+    test_no_display_errors()
     _step("清理")
     bm.stop_own()
     print("\nALL PASS")
