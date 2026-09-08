@@ -34,18 +34,15 @@
       }
     },
     {
-      "action": "click",
-      "selectors": {
-        "target": "#su"
-      },
+      "action": "press_enter",
       "page_features": {
         "title": "document.title",
-        "url": "location.href",
-        "has_result": "!!document.querySelector('.result, #content_left, .c-container')"
+        "url": "location.href"
       },
       "expected_feature": {
-        "has_result": {
-          "op": "exists"
+        "url": {
+          "op": "contains",
+          "value": "wd="
         }
       }
     }
