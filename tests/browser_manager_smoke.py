@@ -14,8 +14,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import browser_manager as bm  # noqa: E402
-from dom_adapter import DomClient  # noqa: E402
+from agent_gavel import browser_manager as bm  # noqa: E402
+from agent_gavel.channels.dom.adapter import DomClient  # noqa: E402
 
 
 def _step(name):

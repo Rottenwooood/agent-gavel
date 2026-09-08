@@ -37,13 +37,14 @@ AI 声明动作 + "做完后页面应该长什么样" → 执行 → 程序断�
 
 **`uvx agent-gavel`** —— 临时环境运行，不污染你的 Python：
 - uvx 在 `~/.cache/uv` 建一个**临时虚拟环境**，把 agent-gavel 包装进去
-- 包里的 `.py` 文件（server.py / dom_server.py / main.py 等）落在该环境 `site-packages/`，`templates/` 模板目录也一并装入
-- 然后执行包注册的入口命令 `agent-gavel` → 等价于跑 `main.py` 的 `main()` → 在**标准输入/输出**上启动 MCP server 协议
+- 包代码落在该环境 `site-packages/agent_gavel/`（含 `channels/dom` 网页通道、
+  `channels/desktop` 桌面通道，及随包模板 JSON）
+- 然后执行包注册的入口命令 `agent-gavel`（指向 `agent_gavel.main:main`）→ 在**标准输入/输出**上启动 MCP server 协议
 - 退出后临时环境保留在缓存（下次秒起），不占你的全局 site-packages
 
 **`pip install agent-gavel`** —— 装进当前 Python 环境的 site-packages：
-- `.py` 模块 + `templates/` 落到 `<venv>/lib/python3.13/site-packages/`
-- 同时生成可执行命令 `agent-gavel`（指向 `main:main`），在你 PATH 里
+- `agent_gavel/` 包落到 `<venv>/lib/python3.13/site-packages/`
+- 同时生成可执行命令 `agent-gavel`（指向 `agent_gavel.main:main`），在你 PATH 里
 - 之后随时 `agent-gavel` 就能起 MCP server
 
 两种方式最终效果一致：**启动一个在 stdio 上说话的 MCP server 进程**，等 MCP 客户端连它。
@@ -66,6 +67,12 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 ```
 
 重启 opencode，工具列表出现 `agent-gavel_dom_*` 系列。**无需手动开 Chrome**——首次 DOM 调用时 server 自动用独立 profile 拉起可见窗口的调试 Chrome，崩溃自动重拉，退出自动清理。
+
+### 模板存在哪
+
+- **随包模板**：安装自带的模板在 `site-packages/agent_gavel/channels/{dom,desktop}/templates/`（只读默认，如百度/必应/豆瓣等 8 个验证过的）
+- **你的模板**：`dom_save_template` / `desktop_save_template` 保存到你自己的用户目录 `~/.config/agent-gavel/{templates,desktop_templates}/`——跨 uvx 缓存、跨安装版本持久存在，不会被升级覆盖
+- 读取时**用户目录优先**：你保存的同名模板覆盖自带模板；失效检测记录（stats）也存用户目录
 
 ## 实测耗时（优化前后对比）
 

@@ -59,7 +59,7 @@ class DomClient:
 
     async def __aenter__(self):
         # T1: DOM 通道自管 Chrome——连接前确保调试口在(未起则自启, 死了则重拉)
-        from browser_manager import ensure_chrome
+        from agent_gavel.browser_manager import ensure_chrome
         from urllib.parse import urlparse
         port = 9222
         try:

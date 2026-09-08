@@ -4,8 +4,14 @@ import os
 import signal
 import threading
 
-from server import mcp
-from adapter import close_resident
+from mcp.server.mcpserver import MCPServer
+
+from .channels.desktop.server import register_desktop_tools
+from .channels.dom.server import register_dom_tools
+
+mcp = MCPServer("agent-gavel")
+register_dom_tools(mcp)
+register_desktop_tools(mcp)
 
 
 def _set_pdeathsig():
@@ -42,10 +48,16 @@ def _cleanup_sync():
         pass
 
 
+def close_resident():
+    """清理 desktop adapter 的常驻 computer-use-linux 进程。"""
+    from .channels.desktop.adapter import close_resident as _cr
+    return _cr()
+
+
 def _stop_owned_chrome():
     try:
-        import browser_manager
-        browser_manager.stop_own()
+        from .browser_manager import stop_own
+        stop_own()
     except Exception:
         pass
 

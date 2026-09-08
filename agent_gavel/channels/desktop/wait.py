@@ -6,7 +6,7 @@
 
 import time
 
-from normalize import quick_hash
+from .normalize import quick_hash
 
 
 async def wait_until_stable(fetch_state, *, timeout_s=6.0, interval_s=0.3,

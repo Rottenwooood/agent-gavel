@@ -25,7 +25,9 @@
 
 ## 代码约定
 
-- 桌面模板存 `desktop_templates/*.json`，支持 `locate` 动态定位（读树算坐标，勿写死）
+- 桌面模板存 `~/.config/agent-gavel/desktop_templates/*.json`（用户保存）或包内
+  `agent_gavel/channels/desktop/templates/`（随包自带），支持 `locate` 动态定位
+  （读树算坐标，勿写死）
 - 坐标类操作优先动态定位（`locate`），不要硬编码屏幕坐标
 
 ## Shell 陷阱（真实踩过）

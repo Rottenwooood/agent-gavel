@@ -16,4 +16,4 @@ if [[ -z "${COMPUTER_USE_LINUX_BIN:-}" ]]; then
 fi
 export AGENT_GAVEL_FAST_APP_FILTER="${AGENT_GAVEL_FAST_APP_FILTER:-1}"
 
-exec uv run python3 main.py
+exec uv run python3 -m agent_gavel.main

@@ -23,13 +23,11 @@ agent-gavel 是一个**验证驱动的多端操作框架**：让 AI 对桌面/�
 
 ```
 agent 核心（外部：opencode / subagent）
-  └─ agent-gavel MCP server（server.py，~1700 行）
-       ├─ AT-SPI 桌面通道（adapter.py）      → 读控件树 / xdotool 注入
-       ├─ DOM 网页通道（dom_adapter.py）     → Chrome CDP / JS 操作
-       ├─ 验证框架（normalize/diff/wait/catalog）
-       ├─ 通用原语：act_and_verify / dom_step
-       ├─ 探索固化：dom_explore → dom_save_template → dom_run_template
-       └─ 模板库（templates/*.json，纯数据）
+  └─ agent-gavel MCP server（agent_gavel.main:main）
+       ├─ agent_gavel/channels/dom/      DOM 网页通道(adapter/verify/templates/server)
+       ├─ agent_gavel/channels/desktop/  AT-SPI 桌面通道(adapter/验证框架/templates/server)
+       ├─ browser_manager.py             Chrome 进程自管
+       └─ 模板库: 用户目录(~/.config/agent-gavel/)优先 + 随包模板回退
 ```
 
 ## 工具清单（MCP）
@@ -48,7 +46,9 @@ agent 核心（外部：opencode / subagent）
 - [x] 断言失败的重试 / 降级策略（dom_verify 自动降级：S1 原样重试→S2 trusted 翻转
       →S3 重新 explore 换锚点→S4 滚动→S5 wait_mode 翻转；独立字段 `strict`
       关闭降级暴露真实 fail，测试/调试用。实测三个场景全过）
-- [ ] server.py 已混 AT-SPI + DOM 两界，拆模块（桌面保留功能、标实验性）
+- [x] 通道分包对称：agent_gavel/channels/{dom,desktop} 各自自包含
+      (adapter/verify/templates/server)，共享 browser_manager，main 聚合入口
+- [x] 模板用户目录优先：保存到 ~/.config/agent-gavel/，跨安装持久，随包模板回退
 
 ### 第二层：多操作域联动（不在此阶段自研 agent）
 agent-gavel 不自研 agent 循环，现阶段也不集成 agent。仅当需要跨操作域联动

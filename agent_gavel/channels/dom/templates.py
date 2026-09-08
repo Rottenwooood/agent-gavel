@@ -29,13 +29,29 @@ import datetime
 import json
 import os
 
-TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
-STATS_FILE = os.path.join(TEMPLATE_DIR, "stats.json")
+# 双层模板目录：
+#   - PKG_DIR：安装包内模板（随 wheel 提供，默认只读）
+#   - USER_DIR：用户模板目录（可写，优先）。用户保存/失效 stats 都落这里，
+#     跨 uvx 临时环境、跨安装版本持久存在。
+PKG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+USER_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+    "agent-gavel", "templates")
+STATS_FILE = os.path.join(USER_DIR, "stats.json")
 FAIL_THRESHOLD = 3  # 连续失败达到该次数 → suspected
 
 
-def _ensure_dir():
-    os.makedirs(TEMPLATE_DIR, exist_ok=True)
+def _ensure_user_dir():
+    os.makedirs(USER_DIR, exist_ok=True)
+
+
+def _dirs():
+    """读取候选目录（user 优先，pkg 回退），去重保序。"""
+    dirs = []
+    for d in (USER_DIR, PKG_DIR):
+        if os.path.isdir(d) and d not in dirs:
+            dirs.append(d)
+    return dirs
 
 
 def _slugify(name):
@@ -46,7 +62,7 @@ def _slugify(name):
 # ---------------- 失效检测 stats ----------------
 
 def _read_stats():
-    _ensure_dir()
+    _ensure_user_dir()
     if not os.path.exists(STATS_FILE):
         return {}
     try:
@@ -57,7 +73,7 @@ def _read_stats():
 
 
 def _write_stats(stats):
-    _ensure_dir()
+    _ensure_user_dir()
     with open(STATS_FILE, "w", encoding="utf-8") as f:
         json.dump(stats, f, ensure_ascii=False, indent=2)
 
@@ -109,41 +125,43 @@ def all_stats():
 
 
 def list_templates():
-    """列出模板，附 stats(suspected)。"""
-    _ensure_dir()
+    """列出模板（user + pkg 合并，user 覆盖 pkg 同名），附 stats(suspected)。"""
+    _ensure_user_dir()
     stats = _read_stats()
-    out = []
-    for f in sorted(os.listdir(TEMPLATE_DIR)):
-        if f.endswith(".json") and f != "stats.json":
-            try:
-                with open(os.path.join(TEMPLATE_DIR, f), encoding="utf-8") as fh:
-                    t = json.load(fh)
-                s = stats.get(f, {})
-                out.append({
-                    "file": f,
-                    "site": t.get("site"),
-                    "desc": t.get("desc"),
-                    "steps": len(t.get("steps", [])),
-                    "consecutive_fails": s.get("consecutive_fails", 0),
-                    "suspected": s.get("suspected", False),
-                })
-            except Exception:
-                pass
-    return out
+    seen = {}
+    for d in _dirs():
+        for f in sorted(os.listdir(d)):
+            if f.endswith(".json") and f != "stats.json" and f not in seen:
+                try:
+                    with open(os.path.join(d, f), encoding="utf-8") as fh:
+                        t = json.load(fh)
+                    s = stats.get(f, {})
+                    seen[f] = {
+                        "file": f,
+                        "site": t.get("site"),
+                        "desc": t.get("desc"),
+                        "steps": len(t.get("steps", [])),
+                        "consecutive_fails": s.get("consecutive_fails", 0),
+                        "suspected": s.get("suspected", False),
+                    }
+                except Exception:
+                    pass
+    return sorted(seen.values(), key=lambda x: x["file"])
 
 
 def save_template(site, desc, steps, home=None, name=None):
-    """保存模板，返回 {file, site, steps}。同名(按 name/site)覆盖。
+    """保存模板到用户目录，返回 {file, site, steps}。同名覆盖。
 
     T4 命名：site=纯网站名，文件名默认 = site_功能.json。
     name 参数给"功能"部分；不给则文件名 = site.json。
+    存到 ~/.agent-gavel/templates/（可写、跨环境持久）。
     """
-    _ensure_dir()
+    _ensure_user_dir()
     if name:
         fname = f"{_slugify(site)}_{_slugify(name)}"
     else:
         fname = _slugify(site)
-    path = os.path.join(TEMPLATE_DIR, f"{fname}.json")
+    path = os.path.join(USER_DIR, f"{fname}.json")
     tmpl = {
         "site": _slugify(site) or site,
         "desc": desc,
@@ -158,41 +176,51 @@ def save_template(site, desc, steps, home=None, name=None):
     return {"file": os.path.basename(path), "site": tmpl["site"], "steps": len(steps)}
 
 
+def _find_in_dirs(fname):
+    """在 user→pkg 目录里找确切文件名，返回 (路径, 目录) 或 (None, None)。"""
+    for d in _dirs():
+        p = os.path.join(d, fname)
+        if os.path.isfile(p):
+            return p, d
+    return None, None
+
+
 def load_template(name_or_file):
     """按文件名(带.json)或 site 标识找模板，返回 dict 或 None。
 
     T4 后 site=纯网站名，一个 site 可能多个模板文件——按 site 匹配时
     优先取"文件名 = site"的模板；没有则取该 site 的任意一个。
+    user 目录优先，pkg 回退。
     """
-    _ensure_dir()
     # 直接文件名（含 .json 或去掉扩展名）
     for cand in (name_or_file, f"{name_or_file}.json"):
-        p = os.path.join(TEMPLATE_DIR, cand)
-        if os.path.exists(p):
+        p, _ = _find_in_dirs(cand)
+        if p:
             with open(p, encoding="utf-8") as f:
                 return json.load(f)
-    # site 名：优先 文件名=site.json
-    p = os.path.join(TEMPLATE_DIR, f"{name_or_file}.json")
-    if os.path.exists(p):
+    # site 名：文件名=site.json
+    p, _ = _find_in_dirs(f"{name_or_file}.json")
+    if p:
         with open(p, encoding="utf-8") as f:
             t = json.load(f)
         if t.get("site") == name_or_file:
             return t
-    # site 匹配：取任意一个该 site 的模板
-    for f in sorted(os.listdir(TEMPLATE_DIR)):
-        if f.endswith(".json") and f != "stats.json":
-            with open(os.path.join(TEMPLATE_DIR, f), encoding="utf-8") as fh:
-                t = json.load(fh)
-            if t.get("site") == name_or_file:
-                return t
+    # site 匹配：任意一个
+    for d in _dirs():
+        for f in sorted(os.listdir(d)):
+            if f.endswith(".json") and f != "stats.json":
+                with open(os.path.join(d, f), encoding="utf-8") as fh:
+                    t = json.load(fh)
+                if t.get("site") == name_or_file:
+                    return t
     return None
 
 
 def load_template_file(template_file):
-    """按确切模板文件名加载（供 stats 记录用）。"""
-    path = os.path.join(TEMPLATE_DIR, template_file)
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
+    """按确切模板文件名加载（供 stats 记录用）。user 优先。"""
+    p, _ = _find_in_dirs(template_file)
+    if p:
+        with open(p, encoding="utf-8") as f:
             return json.load(f)
     return None
 
@@ -202,27 +230,27 @@ def resolve_template(name_or_site):
 
     与 load_template 同逻辑，但返回确切文件名（stats 按文件名记录）。
     """
-    _ensure_dir()
     # 直接文件名
     for cand in (name_or_site, f"{name_or_site}.json"):
-        p = os.path.join(TEMPLATE_DIR, cand)
-        if os.path.exists(p):
+        p, _ = _find_in_dirs(cand)
+        if p:
             with open(p, encoding="utf-8") as f:
                 return os.path.basename(p), json.load(f)
     # site 名：文件名=site.json
-    p = os.path.join(TEMPLATE_DIR, f"{name_or_site}.json")
-    if os.path.exists(p):
+    p, _ = _find_in_dirs(f"{name_or_site}.json")
+    if p:
         with open(p, encoding="utf-8") as f:
             t = json.load(f)
         if t.get("site") == name_or_site:
             return os.path.basename(p), t
     # site 匹配：任意一个
-    for f in sorted(os.listdir(TEMPLATE_DIR)):
-        if f.endswith(".json") and f != "stats.json":
-            with open(os.path.join(TEMPLATE_DIR, f), encoding="utf-8") as fh:
-                t = json.load(fh)
-            if t.get("site") == name_or_site:
-                return f, t
+    for d in _dirs():
+        for f in sorted(os.listdir(d)):
+            if f.endswith(".json") and f != "stats.json":
+                with open(os.path.join(d, f), encoding="utf-8") as fh:
+                    t = json.load(fh)
+                if t.get("site") == name_or_site:
+                    return f, t
     return None, None
 
 

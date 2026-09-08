@@ -22,7 +22,7 @@ dependencies = [
 # (npm 全局安装)，不是 Python 依赖——纯 DOM 用法无需安装它。
 
 [project.scripts]
-agent-gavel = "main:main"
+agent-gavel = "agent_gavel.main:main"
 
 [project.urls]
 Homepage = "https://github.com/Rottenwooood/agent-gavel"
@@ -32,24 +32,19 @@ Repository = "https://github.com/Rottenwooood/agent-gavel"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# 项目是扁平结构(模块在根目录, 非 src/ 包)——把 *.py 作为顶层模块装进
-# site-packages, 模板目录作为包数据一起发布。用 force-include 显式声明。
+# 标准包结构：agent_gavel/（含 channels/{dom,desktop} 及随包模板 JSON）。
+# packages 递归打包包内全部文件（含 .json 模板），无需 force-include。
 [tool.hatch.build.targets.wheel]
-include = ["*.py"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"templates" = "templates"
-"desktop_templates" = "desktop_templates"
+packages = ["agent_gavel"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "*.py",
+    "agent_gavel/**",
     "*.sh",
-    "templates/*.json",
-    "desktop_templates/*.json",
     "tests/*.py",
     "docs/*.md",
     "third_party/**",
     "AGENTS.md",
     "README.md",
+    "LICENSE",
 ]

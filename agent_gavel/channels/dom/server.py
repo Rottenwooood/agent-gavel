@@ -6,8 +6,8 @@ T2 拆分：DOM 网页操作相关工具全部集中于此，通过 register_dom
 
 import asyncio
 
-from dom_adapter import DomClient
-from dom_verify import dom_act_and_verify, _write_log
+from .adapter import DomClient
+from .verify import dom_act_and_verify, _write_log
 
 
 def _dom_error(e):
@@ -51,12 +51,13 @@ def register_dom_tools(mcp):
           stop    -> 停掉 agent-gavel 自己拉起的 Chrome（绝不碰外部手动开的）
           status  -> 只读探测当前状态
         """
-        import browser_manager
+        from agent_gavel.browser_manager import (stop_own, status as bm_status,
+                                                 ensure_chrome)
         if action == "stop":
-            return browser_manager.stop_own()
+            return stop_own()
         if action == "status":
-            return browser_manager.status()
-        return browser_manager.ensure_chrome()
+            return bm_status()
+        return ensure_chrome()
 
     @mcp.tool()
     async def dom_step(
@@ -124,7 +125,7 @@ def register_dom_tools(mcp):
         """
         target = url
         if not target:
-            from dom_templates import load_template
+            from .templates import load_template
             tmpl = load_template(site)
             target = (tmpl or {}).get("home")
         if not target:
@@ -216,7 +217,7 @@ def register_dom_tools(mcp):
             "page_features":{"input_value":"..."},
             "expected_feature":{"input_value":{"op":"eq","value":"$QUERY"}}}]
         """
-        from dom_templates import save_template
+        from .templates import save_template
         r = save_template(site, desc, steps, home=home, name=name)
         r["status"] = "saved"
         return r
@@ -224,7 +225,7 @@ def register_dom_tools(mcp):
     @mcp.tool()
     async def dom_list_templates():
         """列出已保存的 DOM 流程模板。"""
-        from dom_templates import list_templates
+        from .templates import list_templates
         return list_templates()
 
     @mcp.tool()
@@ -234,7 +235,7 @@ def register_dom_tools(mcp):
         返回 {模板文件名: {consecutive_fails, suspected, last, last_at}}。
         suspected=true 表示连续失败达阈值、模板疑似失效。
         """
-        from dom_templates import all_stats
+        from .templates import all_stats
         return all_stats()
 
     @mcp.tool()
@@ -250,7 +251,7 @@ def register_dom_tools(mcp):
         失效检测：每跑完记一次连续失败；连续失败>=3 标 suspected，
         pass 清零。suspected 模板执行时返回结果顶部带 warning。
         """
-        from dom_templates import resolve_template, _fill, record_run, get_stats
+        from .templates import resolve_template, _fill, record_run, get_stats
         template_file, tmpl = resolve_template(name_or_site)
         if not tmpl:
             return {"status": "not_found", "name": name_or_site,
@@ -305,5 +306,5 @@ def register_dom_tools(mcp):
             return env
 
     def _list_template_summaries():
-        from dom_templates import list_templates
+        from .templates import list_templates
         return list_templates()
