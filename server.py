@@ -135,11 +135,14 @@ async def act_and_verify(
     action_args: dict = None,
     *,
     app_id: str = None,
+    pid: int = None,
     window: str = None,
     verify: dict = None,
     timeout_s: float = 8.0,
     debug: int = 0,
     wait_mode: str = "stable",
+    before_raw: list = None,
+    return_after_raw: bool = False,
 ):
     """执行一个动作并验证其结果，一次调用返回。
 
@@ -189,8 +192,15 @@ async def act_and_verify(
 
     async with ComputerUseClient() as client:
         # Step 1: 抓 before（归一化 + 保留 hash 供稳定等待复用为 seed）
-        before_raw = await client.read_state(app_id=app_id)
+        t_before = time.monotonic()
+        if before_raw is not None:
+            if isinstance(before_raw, dict):
+                before_raw = before_raw.get("nodes") or []
+            before_raw = before_raw if isinstance(before_raw, list) else None
+        if before_raw is None:
+            before_raw = await client.read_state(app_id=app_id, pid=pid)
         before_norm = normalize_nodes(before_raw)
+        t_after_before = time.monotonic()
 
         # Step 2: 执行动作
         try:
@@ -204,6 +214,7 @@ async def act_and_verify(
             if debug:
                 _write_call_log(call_record, result)
             return result
+        t_after_action = time.monotonic()
 
         # Step 3+4: 等待并判定。
         # poll 模式(有断言)：动作后每拍读树跑断言，全 pass 立即返回——不等树稳定。
@@ -217,7 +228,7 @@ async def act_and_verify(
             after_norm = None
             poll_interval = 0.6  # 桌面读树成本高，间隔放宽
             while time.monotonic() - start < timeout_s:
-                after_raw = await client.read_state(app_id=app_id)
+                after_raw = await client.read_state(app_id=app_id, pid=pid)
                 after_norm = normalize_nodes(after_raw)
                 polls += 1
                 res = evaluate_assertions(assertions, after_norm["normalized"])
@@ -242,15 +253,21 @@ async def act_and_verify(
         else:
             # 原路径：稳定等待 + 一次判定
             async def fetch():
-                return await client.read_state(app_id=app_id)
+                return await client.read_state(app_id=app_id, pid=pid)
 
+            # activate/move/press_key 这类动作不改变目标树，before 即稳定态，
+            # 跳过稳定确认读树（省一次昂贵的 read_state）。有断言时不跳过。
+            has_assertions = bool((verify or {}).get("assertions"))
+            no_confirm = (not has_assertions
+                          and action in ("activate_window", "move_window", "press_key"))
             stable, polls, wait_ms, final_hash, final_data = await wait_until_stable(
                 fetch, timeout_s=timeout_s,
                 seed_hash=before_norm["signature"],
                 seed_data=before_raw,
+                confirm_changed=not no_confirm,
             )
             if final_data is None:
-                after_raw = await client.read_state(app_id=app_id)
+                after_raw = await client.read_state(app_id=app_id, pid=pid)
             else:
                 after_raw = final_data
             after_norm = normalize_nodes(after_raw)
@@ -258,6 +275,7 @@ async def act_and_verify(
             the_diff = diff_snapshots(before_norm["normalized"], after_norm["normalized"])
             status, detail = await _do_verify(before_norm, after_norm, verify,
                                               precomputed_diff=the_diff)
+        t_after_verify = time.monotonic()
 
         evidence = {
             "diff": the_diff,
@@ -286,8 +304,17 @@ async def act_and_verify(
             "cost": {
                 "elapsed_ms": int((time.monotonic() - start) * 1000),
                 "stable_wait_ms": wait_ms,
+                "phase": {
+                    "before_read_ms": int((t_after_before - t_before) * 1000),
+                    "action_ms": int((t_after_action - t_after_before) * 1000),
+                    "wait_ms": int((t_after_verify - t_after_action) * 1000),
+                    "after_verify_ms": int((time.monotonic() - t_after_verify) * 1000),
+                },
             },
         }
+        if return_after_raw:
+            # 供 desktop_run_template 跨步复用（下一步的 before）
+            result["after_raw"] = after_raw
 
         if debug:
             # 日志：总是含 evidence + screenshot 完整结果
@@ -706,6 +733,20 @@ async def _locate_click_point(app_id, role, name, right_pad=150, left_pad=None,
     return {"found": False}
 
 
+async def _resolve_app_pid(client, app_id):
+    """app_id -> pid。微信等 app 有多个同名窗口，取第一个有 pid 的。"""
+    try:
+        wins = await client.list_windows()
+        if isinstance(wins, dict):
+            wins = wins.get("windows") or []
+        for w in wins or []:
+            if w.get("app_id") == app_id and w.get("pid"):
+                return int(w["pid"])
+    except Exception:
+        pass
+    return None
+
+
 @mcp.tool()
 async def desktop_run_template(name_or_app: str, params: dict = None, *,
                                debug: int = 0, timeout_s: float = 8.0):
@@ -729,43 +770,56 @@ async def desktop_run_template(name_or_app: str, params: dict = None, *,
     filled = _fill(tmpl, params)
     results = []
     default_app_id = filled.get("app_id") or None
-    for i, step in enumerate(filled.get("steps", [])):
-        action_args = dict(step.get("action_args") or {})
-        app_id = step.get("app_id") or default_app_id
-        # 动态定位：读树算点击点注入 action_args
-        if step.get("locate"):
-            loc = step["locate"]
-            r = await _locate_click_point(
-                app_id, loc.get("role"), loc.get("name"),
-                right_pad=loc.get("right_pad", 150),
-                left_pad=loc.get("left_pad"),
-                y_ratio=loc.get("y_ratio", 0.5))
-            if not r.get("found"):
+    async with ComputerUseClient() as client:
+        # 会话内解析一次 pid（微信重启后变化），优先 pid 定位避免窗口解析歧义
+        pid = None
+        if default_app_id:
+            pid = await _resolve_app_pid(client, default_app_id)
+        before_raw = None
+        for i, step in enumerate(filled.get("steps", [])):
+            action_args = dict(step.get("action_args") or {})
+            app_id = step.get("app_id") or default_app_id
+            # 动态定位：读树算点击点注入 action_args
+            if step.get("locate"):
+                loc = step["locate"]
+                r = await _locate_click_point(
+                    app_id, loc.get("role"), loc.get("name"),
+                    right_pad=loc.get("right_pad", 150),
+                    left_pad=loc.get("left_pad"),
+                    y_ratio=loc.get("y_ratio", 0.5))
+                if not r.get("found"):
+                    return {"status": "fail", "failed_step": i,
+                            "reason": f"locate failed: no element role={loc.get('role')} "
+                                      f"name={loc.get('name')}",
+                            "desc": tmpl.get("desc"), "results": results}
+                action_args["x"] = r["x"]
+                action_args["y"] = r["y"]
+                results.append({"step": i, "locate": "ok",
+                                "point": (r["x"], r["y"]),
+                                "bounds": r.get("bounds")})
+            r = await act_and_verify(
+                action=step["action"],
+                action_args=action_args,
+                app_id=app_id,
+                pid=pid,
+                before_raw=before_raw,
+                return_after_raw=True,
+                verify={"mode": "assert", "assertions": step.get("assertions") or []}
+                       if step.get("assertions") else {"mode": "auto"},
+                timeout_s=step.get("timeout_s") or timeout_s,
+                debug=debug,
+            )
+            results.append({"step": i, "action": step["action"],
+                            "status": r.get("status"),
+                            "detail": {k: v for k, v in r.items()
+                                       if k in ("action", "verification", "error", "cost")}})
+            if r.get("status") == "fail":
                 return {"status": "fail", "failed_step": i,
-                        "reason": f"locate failed: no element role={loc.get('role')} "
-                                  f"name={loc.get('name')}",
                         "desc": tmpl.get("desc"), "results": results}
-            action_args["x"] = r["x"]
-            action_args["y"] = r["y"]
-            results.append({"step": i, "locate": "ok",
-                            "point": (r["x"], r["y"]),
-                            "bounds": r.get("bounds")})
-        r = await act_and_verify(
-            action=step["action"],
-            action_args=action_args,
-            app_id=app_id,
-            verify={"mode": "assert", "assertions": step.get("assertions") or []}
-                   if step.get("assertions") else {"mode": "auto"},
-            timeout_s=step.get("timeout_s") or timeout_s,
-            debug=debug,
-        )
-        results.append({"step": i, "action": step["action"],
-                        "status": r.get("status"),
-                        "detail": {k: v for k, v in r.items()
-                                   if k in ("action", "verification", "error")}})
-        if r.get("status") == "fail":
-            return {"status": "fail", "failed_step": i,
-                    "desc": tmpl.get("desc"), "results": results}
+            # 上一步的 after 树复用为下一步的 before（省一次读树）。
+            # ambiguous(activate/move/无变化)也算成功，after_raw 同样可用。
+            if r.get("status") != "fail" and r.get("after_raw"):
+                before_raw = r["after_raw"]
     return {"status": "pass", "desc": tmpl.get("desc"),
             "steps_total": len(filled.get("steps", [])), "results": results}
 

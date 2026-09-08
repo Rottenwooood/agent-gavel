@@ -198,12 +198,15 @@ class ComputerUseClient:
             except Exception:
                 return raw
 
-    async def read_state(self, app_id=None, fast_app_filter=None):
+    async def read_state(self, app_id=None, pid=None, fast_app_filter=None):
         """读当前窗口/应用的 AT-SPI 树，返回原始节点列表。
 
         get_app_state 返回 {accessibility_tree, screenshot, window_context...}
         我们取 accessibility_tree 字段喂给 normalize。
 
+        app_id: 应用 id（如 wechat.desktop），cul 内部会解析窗口拿 pid。
+        pid: 直接指定进程号（更精确，跳过窗口解析/歧义；微信有两个窗口
+             app_id 都叫 wechat.desktop，用 pid 可锁定主窗口）。
         fast_app_filter: True 走改版 computer-use-linux 的快速 app-filter 路径
         (有 pid 时跳过全桌面遍历定位, ~快 270ms); None=读环境变量
         AGENT_GAVEL_FAST_APP_FILTER(默认 false, 保持原版行为)。
@@ -213,7 +216,9 @@ class ComputerUseClient:
             fast_app_filter = os.environ.get("AGENT_GAVEL_FAST_APP_FILTER", "0") in (
                 "1", "true", "True")
         args = {}
-        if app_id:
+        if pid:
+            args["pid"] = pid
+        elif app_id:
             args["app_id"] = app_id
         if fast_app_filter is not None:
             args["fast_app_filter"] = bool(fast_app_filter)

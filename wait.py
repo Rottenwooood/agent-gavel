@@ -11,18 +11,27 @@ from normalize import quick_hash
 
 async def wait_until_stable(fetch_state, *, timeout_s=6.0, interval_s=0.3,
                             required_consecutive=2, seed_hash=None,
-                            seed_data=None):
+                            seed_data=None, confirm_changed=True):
     """fetch_state: async 无参可调用，返回 state 原始数据（会被归一化比较）。
 
     seed_hash/seed_data: 若调用方已抓过 before，可传入作为第 0 次观察，
     避免"动作后还要先白等一次才能对比"，省一次 fetch 和一次间隔。
     返回 (stable, poll_count, elapsed_ms, final_hash, final_data)
+
+    confirm_changed: True(默认) 保持原行为——必须 fetch 一次确认树稳定；
+      False 时若有 seed_hash 则直接视为已稳定（0 次 fetch）。用于
+      activate_window / move_window 这类"动作不改变目标树"的场景：
+      before 就是稳定态，无需再读树确认，省一次昂贵的 read_state。
     """
     start = time.monotonic()
     poll_count = 0
     last_hash = seed_hash
     consecutive = 1 if seed_hash is not None else 0
     last_data = seed_data
+
+    if not confirm_changed and seed_hash is not None:
+        # 直接认为 seed 即稳定态：before 就是 after。
+        return True, 0, int((time.monotonic() - start) * 1000), last_hash, last_data
 
     while True:
         elapsed = time.monotonic() - start
