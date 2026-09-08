@@ -126,6 +126,7 @@ async def act_and_verify(
     verify: dict = None,
     timeout_s: float = 8.0,
     debug: int = 0,
+    wait_mode: str = "stable",
 ):
     """执行一个动作并验证其结果，一次调用返回。
 
@@ -135,11 +136,17 @@ async def act_and_verify(
     window: 目标窗口标题（activate_window 用）
     verify: {"mode": "auto"|"assert"|"none", "assertions": [...]}
     timeout_s: 稳定等待上限（秒）
+    wait_mode: stable(默认，现有行为——动作后轮询直到树连续 N 拍一致再判定，
+      适合无断言的 auto diff，保守但稳)
+             | poll——动作后每拍读树并跑断言，断言 pass 立即返回；
+              有断言时比 stable 快(不等树稳定，只要断言满足就走)；
+              无断言时自动退化为 stable。
     debug: 0=精简返回(无 evidence)，1=含 evidence 并写完整调用日志
     """
     start = time.monotonic()
     action_args = action_args or {}
     verify = verify or {"mode": "auto"}
+    mode = (verify or {}).get("mode", "auto")
 
     call_record = {
         "tool": "act_and_verify",
@@ -150,6 +157,7 @@ async def act_and_verify(
         "verify": verify,
         "timeout_s": timeout_s,
         "debug": debug,
+        "wait_mode": wait_mode,
     }
 
     async with ComputerUseClient() as client:
@@ -170,26 +178,59 @@ async def act_and_verify(
                 _write_call_log(call_record, result)
             return result
 
-        # Step 3: 稳定等待（复用 before 作 seed，避免首轮白等）
-        async def fetch():
-            return await client.read_state(app_id=app_id)
+        # Step 3+4: 等待并判定。
+        # poll 模式(有断言)：动作后每拍读树跑断言，全 pass 立即返回——不等树稳定。
+        # 无断言或 wait_mode=stable：等树连续 N 拍一致再判（原行为）。
+        use_poll = (wait_mode == "poll" and mode == "assert"
+                    and (verify or {}).get("assertions"))
+        stable, polls, wait_ms, final_hash, final_data = None, 0, 0, None, None
 
-        stable, polls, wait_ms, final_hash, final_data = await wait_until_stable(
-            fetch, timeout_s=timeout_s,
-            seed_hash=before_norm["signature"],
-            seed_data=before_raw,
-        )
-
-        # Step 4: 判定。after = 稳定等待最后一次抓取，无需重复读
-        if final_data is None:
-            after_raw = await client.read_state(app_id=app_id)
+        if use_poll:
+            assertions = verify["assertions"]
+            after_norm = None
+            poll_interval = 0.6  # 桌面读树成本高，间隔放宽
+            while time.monotonic() - start < timeout_s:
+                after_raw = await client.read_state(app_id=app_id)
+                after_norm = normalize_nodes(after_raw)
+                polls += 1
+                res = evaluate_assertions(assertions, after_norm["normalized"])
+                if res["status"] == "pass":
+                    status = "pass"
+                    detail = {"mode": "assert", "poll_passed": True,
+                              "results": res}
+                    wait_ms = int((time.monotonic() - start) * 1000)
+                    break
+                if res["status"] == "fail":
+                    # fail 不一定是终态(异步可能在路上)，继续等直至超时
+                    pass
+                await asyncio.sleep(poll_interval)
+            else:
+                # 超时：用最后一次抓取判定
+                status, detail = await _do_verify(before_norm, after_norm, verify)
+                detail["poll_timeout"] = True
+                wait_ms = int((time.monotonic() - start) * 1000)
+            the_diff = (diff_snapshots(before_norm["normalized"],
+                                       after_norm["normalized"])
+                        if after_norm is not None else {"total": 0, "items": []})
         else:
-            after_raw = final_data
-        after_norm = normalize_nodes(after_raw)
-        # diff 只算一次，判定和 evidence 共用
-        the_diff = diff_snapshots(before_norm["normalized"], after_norm["normalized"])
-        status, detail = await _do_verify(before_norm, after_norm, verify,
-                                          precomputed_diff=the_diff)
+            # 原路径：稳定等待 + 一次判定
+            async def fetch():
+                return await client.read_state(app_id=app_id)
+
+            stable, polls, wait_ms, final_hash, final_data = await wait_until_stable(
+                fetch, timeout_s=timeout_s,
+                seed_hash=before_norm["signature"],
+                seed_data=before_raw,
+            )
+            if final_data is None:
+                after_raw = await client.read_state(app_id=app_id)
+            else:
+                after_raw = final_data
+            after_norm = normalize_nodes(after_raw)
+            # diff 只算一次，判定和 evidence 共用
+            the_diff = diff_snapshots(before_norm["normalized"], after_norm["normalized"])
+            status, detail = await _do_verify(before_norm, after_norm, verify,
+                                              precomputed_diff=the_diff)
 
         evidence = {
             "diff": the_diff,

@@ -71,7 +71,7 @@ class ComputerUseClient:
         if app_id:
             args["app_id"] = app_id
         args["include_screenshot"] = False
-        args["max_depth"] = 8
+        args["max_depth"] = 16
         args["max_nodes"] = 2000
         data = await self._call("get_app_state", args)
         if isinstance(data, dict):
