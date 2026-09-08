@@ -1,0 +1,40 @@
+{
+  "app": "wechat",
+  "desc": "发消息到文件传输助手(模板机制验证)",
+  "app_id": "wechat.desktop",
+  "steps": [
+    {
+      "action": "activate_window",
+      "action_args": {}
+    },
+    {
+      "action": "click",
+      "action_args": {
+        "role": "text",
+        "name": "文件传输助手"
+      }
+    },
+    {
+      "action": "type",
+      "action_args": {
+        "text": "$MSG",
+        "method": "clipboard"
+      }
+    },
+    {
+      "action": "click",
+      "action_args": {
+        "role": "push button",
+        "name": "发送(S)"
+      },
+      "assertions": [
+        {
+          "type": "element_appears",
+          "role": "list item",
+          "name": "$MSG"
+        }
+      ]
+    }
+  ],
+  "saved_at": "2026-09-08T13:41:38"
+}

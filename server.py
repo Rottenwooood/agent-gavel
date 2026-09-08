@@ -647,5 +647,80 @@ def _list_template_summaries():
     return list_templates()
 
 
+@mcp.tool()
+async def desktop_save_template(app: str, desc: str, steps: list,
+                                app_id: str = None, name: str = None):
+    """把一套验证过的桌面(AT-SPI)流程固化成可复用模板。
+
+    steps 每项 = act_and_verify 语义：
+      {"action": click|type|press_key|activate_window|move_window,
+       "action_args": {...},        # 步骤参数，可含 $VAR 占位符
+       "assertions": [...],         # 可选：如 [{"type":"element_appears",
+                                     #           "role":"push button","name":"发送(S)"}]
+       "timeout_s": 6.0}            # 可选
+    例：发消息到文件传输助手 =
+      [{"action":"click",
+        "action_args":{"role":"text","name":"文件传输助手"}},
+       {"action":"type",
+        "action_args":{"text":"$MSG","method":"clipboard"}},
+       {"action":"click",
+        "action_args":{"role":"push button","name":"发送(S)"}}]
+    """
+    from desktop_templates import save_template
+    r = save_template(app, desc, steps, app_id=app_id, name=name)
+    r["status"] = "saved"
+    return r
+
+
+@mcp.tool()
+async def desktop_list_templates():
+    """列出已保存的桌面流程模板。"""
+    from desktop_templates import list_templates
+    return list_templates()
+
+
+@mcp.tool()
+async def desktop_run_template(name_or_app: str, params: dict = None, *,
+                               debug: int = 0, timeout_s: float = 8.0):
+    """执行已保存的桌面流程模板，逐步验证，任一步 fail 即停。
+
+    name_or_app: 模板文件名或 app 标识。
+    params: 替换模板里的 $VAR（如 {"MSG": "你好"}）。
+    debug: 1 保留 evidence 并写日志。
+    """
+    from desktop_templates import load_template, _fill
+    tmpl = load_template(name_or_app)
+    if not tmpl:
+        return {"status": "not_found", "name": name_or_app,
+                "available": [t["file"] for t in _list_desktop_templates()]}
+    filled = _fill(tmpl, params)
+    results = []
+    default_app_id = filled.get("app_id") or None
+    for i, step in enumerate(filled.get("steps", [])):
+        r = await act_and_verify(
+            action=step["action"],
+            action_args=step.get("action_args") or {},
+            app_id=step.get("app_id") or default_app_id,
+            verify={"mode": "assert", "assertions": step.get("assertions") or []}
+                   if step.get("assertions") else {"mode": "auto"},
+            timeout_s=step.get("timeout_s") or timeout_s,
+            debug=debug,
+        )
+        results.append({"step": i, "action": step["action"],
+                        "status": r.get("status"),
+                        "detail": {k: v for k, v in r.items()
+                                   if k in ("action", "verification", "error")}})
+        if r.get("status") == "fail":
+            return {"status": "fail", "failed_step": i,
+                    "desc": tmpl.get("desc"), "results": results}
+    return {"status": "pass", "desc": tmpl.get("desc"),
+            "steps_total": len(filled.get("steps", [])), "results": results}
+
+
+def _list_desktop_templates():
+    from desktop_templates import list_templates
+    return list_templates()
+
+
 if __name__ == "__main__":
     mcp.run()
