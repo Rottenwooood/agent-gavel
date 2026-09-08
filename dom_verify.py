@@ -7,6 +7,11 @@
   {"url": ..., "title": ..., "kw_value": ..., "has_result": bool}
 页面本身没有可复用的无障碍树，所以用"特征提取"代替 diff——
 即调用方声明"这个动作应该改变哪个特征"，然后检查该特征。
+
+T3：断言失败降级重试。fail 不即停，按序换策略重试：
+  S1 原样重试(竞态) → S2 trusted 翻转 → S3 重新 explore 换锚点 →
+  S4 滚动重试 → S5 wait_mode 翻转。
+strict=True 时只跑一次尝试，暴露真实 fail(测试/调试用)。
 """
 
 import asyncio
@@ -55,6 +60,183 @@ def _strip_evidence(result):
     return result
 
 
+async def _find_anchor(client, selector):
+    """给失效的 CSS 选择器找一个可用的替代锚点。
+
+    selector 可能指 input(#inp-query)、target(#su 等)。通过 explore 枚举
+    当前页可交互元素，找 tag/name/id 与旧选择器相关的可用锚点。
+    返回新锚点字符串或 None。这是 S3 的核心——页面改版后锚点漂移时，
+    用页面现状重新定位。
+    """
+    import re
+    target_tag = None
+    target_name = None
+    if selector.startswith("#"):
+        target_id = selector[1:]
+    else:
+        m = re.match(r"^([a-z]+)(?:\[name=['\"]?([^'\"]+)['\"]?\])?$", selector)
+        target_tag = m.group(1) if m else None
+        target_name = m.group(2) if m and m.group(2) else None
+        target_id = None
+
+    try:
+        items = await client.explore()
+    except Exception:
+        return None
+
+    for it in items or []:
+        sel = it.get("selector")
+        if not sel:
+            continue
+        if target_id and it.get("id") == target_id:
+            return sel
+        if target_name and it.get("name") == target_name:
+            return sel
+        if target_tag and it.get("tag") == target_tag and it.get("name"):
+            return sel
+    return None
+
+
+async def _attempt(client, *, action, selectors, page_features, expected_feature,
+                   wait_s, trusted, wait_mode, start):
+    """执行一次动作 + 验证。返回 (result_dict, ok_bool)。
+
+    ok=False 表示动作执行失败(选择器失效等)；ok=True 但 status=fail 表示
+    动作做了但断言没过。返回 result 含 status/verification/evidence。
+    """
+    sel = selectors or {}
+    r = None
+    if action == "set_value":
+        target = sel.get("input")
+        if not target:
+            return {"status": "fail", "action_error": "set_value needs selectors.input",
+                    "action": {"name": action}}, False
+        r = await client.set_value(target, sel.get("value", ""), trusted=trusted)
+        ok = isinstance(r, dict) and r.get("ok")
+    elif action == "click":
+        target = sel.get("target") or sel.get("input")
+        if not target:
+            return {"status": "fail", "action_error": "click needs selectors.target",
+                    "action": {"name": action}}, False
+        r = await client.click(target, trusted=trusted)
+        ok = isinstance(r, dict) and r.get("ok")
+    elif action == "press_enter":
+        r = await client.press_enter(trusted=trusted)
+        ok = isinstance(r, dict) and r.get("ok")
+    elif action == "navigate":
+        r = await client.navigate(sel.get("url", ""))
+        await client.wait_page_load()
+        ok = True
+    elif action == "focus":
+        target = sel.get("input")
+        r = await client.focus(target)
+        ok = isinstance(r, dict) and r.get("ok")
+    elif action == "clear":
+        target = sel.get("input") or sel.get("target")
+        if not target:
+            return {"status": "fail", "action_error": "clear needs selectors.input",
+                    "action": {"name": action}}, False
+        r = await client.clear(target, trusted=trusted)
+        ok = isinstance(r, dict) and r.get("ok")
+    else:
+        raise ValueError(f"unknown dom action: {action}")
+
+    if not ok:
+        return {"status": "fail", "action_error": r,
+                "action": {"name": action}}, False
+
+    # ---- 验证特征 ----
+    async def _poll_verify(remaining_s):
+        evidence = {}
+        deadline = time.monotonic() + remaining_s
+        status = "pass"
+        detail = {"mode": "feature"}
+        first = True
+        all_pass = True
+        while True:
+            ev = {}
+            try:
+                for fname, expr in page_features.items():
+                    ev[fname] = await client.eval_js(expr)
+            except Exception:
+                ev = {f: "<eval-error>" for f in page_features} if first else ev
+            if first:
+                evidence = ev
+                first = False
+            if expected_feature:
+                checks = []
+                all_pass = True
+                for fname, expect in expected_feature.items():
+                    actual = ev.get(fname)
+                    passed = _passes(expect, actual)
+                    checks.append({"feature": fname, "op": expect.get("op", "eq"),
+                                   "actual": actual,
+                                   "expected": expect.get("value"),
+                                   "passed": passed})
+                    if not passed:
+                        all_pass = False
+                if all_pass:
+                    detail["checks"] = checks
+                    evidence = ev
+                    break
+                detail["checks"] = checks
+            else:
+                if not first:
+                    break
+                await asyncio.sleep(0.5)
+                continue
+            if time.monotonic() >= deadline:
+                break
+            await asyncio.sleep(0.25)
+        status = "pass" if (not expected_feature) or all_pass else "fail"
+        return status, detail, evidence
+
+    if wait_mode == "event" and page_features and expected_feature:
+        ev_pass = False
+        ev_res = None
+        try:
+            ev_res = await client.wait_event(page_features, expected_feature,
+                                             timeout_s=wait_s)
+        except Exception:
+            ev_res = None
+        ev_pass = (isinstance(ev_res, dict) and ev_res.get("status") == "pass")
+        if ev_pass:
+            evidence = ev_res.get("values", {}) if isinstance(ev_res, dict) else {}
+            status = "pass"
+            checks = []
+            for fname, expect in (expected_feature or {}).items():
+                actual = evidence.get(fname)
+                checks.append({"feature": fname, "op": expect.get("op", "eq"),
+                               "actual": actual,
+                               "expected": expect.get("value"),
+                               "passed": _passes(expect, actual)})
+            detail = {"mode": "event", "checks": checks}
+        else:
+            remaining = wait_s - (time.monotonic() - start)
+            remaining = max(remaining, 0.3)
+            status, detail, evidence = await _poll_verify(remaining)
+            if status == "pass":
+                detail["mode"] = "event->poll_fallback"
+    else:
+        if page_features:
+            status, detail, evidence = await _poll_verify(wait_s)
+        else:
+            await asyncio.sleep(0.5)
+            status, detail, evidence = "pass", {"mode": "feature"}, {}
+
+    return {
+        "status": status,
+        "action": {"name": action, "result": r},
+        "verification": {
+            **detail,
+            "url": await client.eval_js("location.href"),
+            "title": await client.get_title(),
+        },
+        "evidence": evidence,
+        "cost": {"elapsed_ms": int((time.monotonic() - start) * 1000)},
+    }, True
+
+
 async def dom_act_and_verify(
     client: DomClient,
     *,
@@ -67,18 +249,23 @@ async def dom_act_and_verify(
     log_prefix: str = "op",
     trusted: bool = True,
     wait_mode: str = "poll",
+    strict: bool = False,
 ):
     """执行网页动作 + 验证特征变化，一次调用返回。
 
-    action: set_value | click | press_enter | navigate | focus
+    action: set_value | click | press_enter | navigate | focus | clear
     selectors: {目标名: CSS选择器}，action 用
     page_features: 动作后应检查的页面特征，dict {名: JS表达式返回标量}
     expected_feature: 断言期望，{名: {op: eq|neq|exists|not_exists, value: ...}}
     trusted: True 用 CDP 真实输入/点击/按键（isTrusted=true），对 React 重渲染
         站点（知乎等）合成事件会被冲掉/忽略，必须开。默认 False 保速度。
-    wait_mode: poll(默认，Python 侧定时重查断言，兼容旧行为，对任何变化都稳)
-             | event(断言下沉页面，MutationObserver 唤醒，DOM 变化驱动的等待，
-               适合提交后等结果区出现等长等待；纯 JS 状态不碰 DOM 的用它无效)
+    wait_mode: poll(默认，Python 侧定时重查断言) | event(事件驱动等待)
+    strict: True 时不降级，只跑一次，失败直接返回真实 fail（测试/调试用，
+        用来暴露"模板本身不行"而非被降级掩盖）。默认 False 自动降级重试。
+
+    T3 降级序列（strict=False 且动作非 navigate 时）：
+      S1 原样重试(竞态) → S2 trusted 翻转 → S3 重新 explore 换锚点 →
+      S4 滚动重试 → S5 wait_mode 翻转。全失败才返回最终 fail。
     """
     start = time.monotonic()
     call = {
@@ -89,155 +276,108 @@ async def dom_act_and_verify(
         "debug": debug,
         "trusted": trusted,
         "wait_mode": wait_mode,
+        "strict": strict,
     }
     result = {}
 
     try:
-        # ---- 执行动作 ----
-        sel = selectors or {}
-        if action == "set_value":
-            target = sel.get("input")
-            if not target:
-                raise ValueError("set_value needs selectors.input")
-            r = await client.set_value(target, sel.get("value", ""), trusted=trusted)
-            ok = isinstance(r, dict) and r.get("ok")
-        elif action == "click":
-            target = sel.get("target") or sel.get("input")
-            if not target:
-                raise ValueError("click needs selectors.target")
-            r = await client.click(target, trusted=trusted)
-            ok = isinstance(r, dict) and r.get("ok")
-        elif action == "press_enter":
-            r = await client.press_enter(trusted=trusted)
-            ok = isinstance(r, dict) and r.get("ok")
-        elif action == "navigate":
-            r = await client.navigate(sel.get("url", ""))
-            await client.wait_page_load()
-            ok = True
-        elif action == "focus":
-            target = sel.get("input")
-            r = await client.focus(target)
-            ok = isinstance(r, dict) and r.get("ok")
-        elif action == "clear":
-            target = sel.get("input") or sel.get("target")
-            if not target:
-                raise ValueError("clear needs selectors.input")
-            r = await client.clear(target, trusted=trusted)
-            ok = isinstance(r, dict) and r.get("ok")
+        if strict:
+            result, _ = await _attempt(
+                client, action=action, selectors=selectors,
+                page_features=page_features, expected_feature=expected_feature,
+                wait_s=wait_s, trusted=trusted, wait_mode=wait_mode, start=start)
         else:
-            raise ValueError(f"unknown dom action: {action}")
-
-        if not ok:
-            result = {"status": "fail", "action_error": r,
-                      "action": {"name": action}}
-            if debug:
-                _write_log(log_prefix + "_" + action, call, result)
-            return result
-
-        # ---- 验证特征 ----
-        # 事件驱动优先：wait_mode=event 且断言齐全时，把判定下沉页面，
-        # MutationObserver 驱动唤醒，一次调用等到底（无定时轮询）。
-        # event 对"整页导航"无效(导航杀死页面内 Promise)，此时 timeout 后
-        # 若 URL 已变则自动 fallback 到 poll 覆盖跳转类动作。
-
-        async def _poll_verify(remaining_s):
-            """轮询直到断言满足或超时。返回 (status, detail, evidence)。"""
-            evidence = {}
-            deadline = time.monotonic() + remaining_s
-            status = "pass"
-            detail = {"mode": "feature"}
-            first = True
-            while True:
-                ev = {}
-                try:
-                    for fname, expr in page_features.items():
-                        ev[fname] = await client.eval_js(expr)
-                except Exception:
-                    ev = {f: "<eval-error>" for f in page_features} if first else ev
-                if first:
-                    evidence = ev
-                    first = False
-                if expected_feature:
-                    checks = []
-                    all_pass = True
-                    for fname, expect in expected_feature.items():
-                        actual = ev.get(fname)
-                        passed = _passes(expect, actual)
-                        checks.append({"feature": fname, "op": expect.get("op", "eq"),
-                                       "actual": actual,
-                                       "expected": expect.get("value"),
-                                       "passed": passed})
-                        if not passed:
-                            all_pass = False
-                    if all_pass:
-                        detail["checks"] = checks
-                        evidence = ev
-                        break
-                    detail["checks"] = checks
+            # 降级序列：S1 原样 → S2 trusted 翻转 → S3 换锚点 → S4 滚动 → S5 翻转 wait_mode
+            # navigate 不做降级（导航语义明确，重试没意义且会重复跳转）。
+            if action == "navigate":
+                result, _ = await _attempt(
+                    client, action=action, selectors=selectors,
+                    page_features=page_features, expected_feature=expected_feature,
+                    wait_s=wait_s, trusted=trusted, wait_mode=wait_mode, start=start)
+            else:
+                attempts = []
+                strategies = [("retry", trusted, wait_mode)]
+                if trusted:
+                    strategies.append(("trusted_flip", False, wait_mode))
                 else:
-                    if not first:
+                    strategies.append(("trusted_flip", True, wait_mode))
+
+                # S3: 选择器失效时换锚点
+                replaced = None
+                for key in ("input", "target"):
+                    old = (selectors or {}).get(key)
+                    if old and (old.startswith("#") or "[" in old):
+                        alt = await _find_anchor(client, old)
+                        if alt:
+                            replaced = (key, old, alt)
+                            break
+
+                # S5: wait_mode 翻转
+                alt_mode = "event" if wait_mode == "poll" else "poll"
+
+                final = None
+                for i, (name, tr, wm) in enumerate(strategies):
+                    res, _ = await _attempt(
+                        client, action=action, selectors=selectors,
+                        page_features=page_features, expected_feature=expected_feature,
+                        wait_s=wait_s, trusted=tr, wait_mode=wm, start=start)
+                    res["strategy"] = name
+                    attempts.append(res)
+                    if res.get("status") == "pass":
+                        final = res
                         break
-                    await asyncio.sleep(0.5)
-                    continue
-                if time.monotonic() >= deadline:
-                    break
-                await asyncio.sleep(0.25)
-            status = "pass" if (not expected_feature) or all_pass else "fail"
-            return status, detail, evidence
+                    # 动作执行失败(选择器失效)——尝试换锚点
+                    if res.get("action_error"):
+                        if replaced:
+                            new_sel = dict(selectors or {})
+                            key, old, alt = replaced
+                            new_sel[key] = alt
+                            res2, _ = await _attempt(
+                                client, action=action, selectors=new_sel,
+                                page_features=page_features,
+                                expected_feature=expected_feature,
+                                wait_s=wait_s, trusted=tr, wait_mode=wm, start=start)
+                            res2["strategy"] = "anchor_replace"
+                            attempts.append(res2)
+                            if res2.get("status") == "pass":
+                                final = res2
+                                break
 
-        if wait_mode == "event" and page_features and expected_feature:
-            ev_pass = False
-            ev_res = None
-            try:
-                ev_res = await client.wait_event(page_features, expected_feature,
-                                                 timeout_s=wait_s)
-            except Exception:
-                # wait_event 的 eval 可能在整页导航时抛 'target navigated'。
-                # 这类异常说明页面跳走了，event 无效——fallback poll 覆盖。
-                ev_res = None
-            ev_pass = (isinstance(ev_res, dict) and ev_res.get("status") == "pass")
-            if ev_pass:
-                evidence = ev_res.get("values", {}) if isinstance(ev_res, dict) else {}
-                status = "pass"
-                checks = []
-                for fname, expect in (expected_feature or {}).items():
-                    actual = evidence.get(fname)
-                    checks.append({"feature": fname, "op": expect.get("op", "eq"),
-                                   "actual": actual,
-                                   "expected": expect.get("value"),
-                                   "passed": _passes(expect, actual)})
-                detail = {"mode": "event", "checks": checks}
-            else:
-                # 非 pass：可能页面导航(Promise 在旧 context 销毁)。event 对
-                # 整页跳转类动作无效，立即 fallback poll 等新页面(不等满 timeout)。
-                remaining = wait_s - (time.monotonic() - start)
-                remaining = max(remaining, 0.3)
-                status, detail, evidence = await _poll_verify(remaining)
-                if status == "pass":
-                    detail["mode"] = "event->poll_fallback"
-        else:
-            # ---- 轮询直到满足或超时，不再固定等 3s）----
-            # 之前每个动作固定 sleep 3s 再断言——set_value 等立即生效的动作白等。
-            # 改为：动作后立即取特征做断言，pass 即返回；异步动作(提交/跳转)靠轮询
-            # 等到断言满足。无 expected_feature 时只短等一拍让页面反应。
-            if page_features:
-                status, detail, evidence = await _poll_verify(wait_s)
-            else:
-                # 无 page_features：动作后短等一拍（供异步副作用落地）
-                await asyncio.sleep(0.5)
-                status, detail, evidence = "pass", {"mode": "feature"}, {}
+                # S4: 滚动重试（元素可能在视口外）
+                if final is None:
+                    try:
+                        await client.eval_js("window.scrollBy(0, 400)")
+                    except Exception:
+                        pass
+                    res4, _ = await _attempt(
+                        client, action=action, selectors=selectors,
+                        page_features=page_features, expected_feature=expected_feature,
+                        wait_s=wait_s, trusted=trusted, wait_mode=alt_mode, start=start)
+                    res4["strategy"] = "scroll+" + alt_mode
+                    attempts.append(res4)
+                    if res4.get("status") == "pass":
+                        final = res4
 
-        result = {
-            "status": status,
-            "action": {"name": action, "result": r},
-            "verification": {
-                **detail,
-                "url": await client.eval_js("location.href"),
-                "title": await client.get_title(),
-            },
-            "evidence": evidence,
-            "cost": {"elapsed_ms": int((time.monotonic() - start) * 1000)},
-        }
+                # S5 独立：wait_mode 翻转（若上面 scroll 已试过 alt_mode 则跳过重复）
+                if final is None:
+                    if not any(a.get("strategy", "").endswith(alt_mode)
+                               for a in attempts):
+                        res5, _ = await _attempt(
+                            client, action=action, selectors=selectors,
+                            page_features=page_features,
+                            expected_feature=expected_feature,
+                            wait_s=wait_s, trusted=trusted, wait_mode=alt_mode,
+                            start=start)
+                        res5["strategy"] = "wait_mode_flip"
+                        attempts.append(res5)
+                        if res5.get("status") == "pass":
+                            final = res5
+
+                final = final or attempts[-1]
+                final["retries"] = [
+                    {"strategy": a.get("strategy"), "status": a.get("status")}
+                    for a in attempts]
+                result = final
     except Exception as e:
         result = {"status": "error", "error": str(e),
                   "cost": {"elapsed_ms": int((time.monotonic() - start) * 1000)}}
@@ -246,13 +386,3 @@ async def dom_act_and_verify(
         _write_log(log_prefix, call, result)
         return result
     return _strip_evidence(result)
-
-
-def _write_log(prefix, call, result):
-    try:
-        os.makedirs(LOG_DIR, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        with open(os.path.join(LOG_DIR, f"{prefix}_{ts}.json"), "w", encoding="utf-8") as f:
-            json.dump({"call": call, "result": result}, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass

@@ -45,10 +45,9 @@ agent 核心（外部：opencode / subagent）
 - [x] 清理重复模板（bing.json vs bing_search.json 重复）
 - [x] 浏览器进程管理：Chrome 自管（browser_manager.py 按需自启/自愈/退出清理，
       不再依赖手动开 CDP；doctor 报告 owner）
-- [ ] 断言失败的重试 / 降级策略（现在 fail 即停，缺"换策略重试"）。
-      设计：默认自动降级（换 trusted / 备用选择器 / 重新 explore / event↔poll），
-      测试/调试用独立字段 `strict`（不用 debug——debug 已用于日志/截图）关掉降级，
-      暴露真实 fail。
+- [x] 断言失败的重试 / 降级策略（dom_verify 自动降级：S1 原样重试→S2 trusted 翻转
+      →S3 重新 explore 换锚点→S4 滚动→S5 wait_mode 翻转；独立字段 `strict`
+      关闭降级暴露真实 fail，测试/调试用。实测三个场景全过）
 - [ ] server.py 已混 AT-SPI + DOM 两界，拆模块（桌面保留功能、标实验性）
 
 ### 第二层：多操作域联动（不在此阶段自研 agent）

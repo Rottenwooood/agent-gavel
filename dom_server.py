@@ -40,6 +40,7 @@ def register_dom_tools(mcp):
         wait_s: float = 6.0,
         trusted: bool = True,
         wait_mode: str = "poll",
+        strict: bool = False,
     ):
         """通用 DOM 单步闭环：对任意选择器执行一个动作并验证，不绑任何站点。
 
@@ -60,6 +61,7 @@ def register_dom_tools(mcp):
                  | event（断言下沉页面，MutationObserver 事件驱动等待——适合提交后
                   等结果出现的异步长等待，DOM 变化即刻唤醒，无定时轮询；
                   注意只对"变化反映到 DOM"的断言有效）
+        strict: True 时不自动降级重试，失败直接返回（测试/调试用，暴露真实 fail）。
         debug: 1 保留 evidence 并写日志。
         例：设值并断言输入框内容：
           dom_step("set_value",
@@ -79,6 +81,7 @@ def register_dom_tools(mcp):
                 log_prefix="dom_step",
                 trusted=trusted,
                 wait_mode=wait_mode,
+                strict=strict,
             )
 
     @mcp.tool()
@@ -188,11 +191,13 @@ def register_dom_tools(mcp):
 
     @mcp.tool()
     async def dom_run_template(name_or_site: str, params: dict = None, *,
-                               debug: int = 0, wait_s: float = 6.0):
+                               debug: int = 0, wait_s: float = 6.0,
+                               strict: bool = False):
         """执行已保存的 DOM 流程模板，逐步验证，任一步 fail 即停。
 
         name_or_site: 模板文件名或 site 标识。
         params: 替换模板里的 $VAR（如 {"QUERY": "..."}）。
+        strict: True 时不自动降级重试（测试/调试用，暴露模板真实 fail）。
         debug: 1 保留 evidence 并写日志。
         """
         from dom_templates import load_template, _fill
@@ -215,6 +220,7 @@ def register_dom_tools(mcp):
                     log_prefix=f"tmpl_{filled.get('site')}_s{i}",
                     trusted=step.get("trusted", True),
                     wait_mode=step.get("wait_mode", "poll"),
+                    strict=strict,
                 )
                 results.append({"step": i, "action": step["action"], **r})
                 if r.get("status") != "pass":
