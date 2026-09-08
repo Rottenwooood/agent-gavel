@@ -681,6 +681,31 @@ async def desktop_list_templates():
     return list_templates()
 
 
+async def _locate_click_point(app_id, role, name, right_pad=150, left_pad=None,
+                              y_ratio=0.5):
+    """读原始 AT-SPI 树，找 role+name 匹配的首个元素，算一个点击点。
+
+    返回 {"x","y","found"}。定位逻辑(基于微信实测)：
+      默认点元素 bounds 右缘内侧 right_pad 像素、垂直 y_ratio 处。
+      微信消息气泡右对齐于行右缘，list item 语义点击(行中心)会落到
+      文本左侧空白，故右键/点击要取右缘内偏移。
+    """
+    async with ComputerUseClient() as client:
+        raw = await client.read_state(app_id=app_id)
+    for n in raw or []:
+        b = n.get("bounds") or {}
+        nm = n.get("name") or ""
+        if (not role or n.get("role") == role) and name in nm and b.get("width", 0) > 50:
+            x = b["x"] + b["width"] - right_pad
+            if left_pad is not None:
+                x = b["x"] + left_pad
+            y = b["y"] + int(b["height"] * y_ratio)
+            return {"x": int(x), "y": int(y), "found": True,
+                    "bounds": {"x": b["x"], "y": b["y"],
+                               "width": b["width"], "height": b["height"]}}
+    return {"found": False}
+
+
 @mcp.tool()
 async def desktop_run_template(name_or_app: str, params: dict = None, *,
                                debug: int = 0, timeout_s: float = 8.0):
@@ -689,6 +714,12 @@ async def desktop_run_template(name_or_app: str, params: dict = None, *,
     name_or_app: 模板文件名或 app 标识。
     params: 替换模板里的 $VAR（如 {"MSG": "你好"}）。
     debug: 1 保留 evidence 并写日志。
+
+    步骤可选 "locate" 字段做动态定位(避免写死坐标)：
+      {"action": "click",
+       "locate": {"role":"list item", "name":"$MSG", "right_pad":150},
+       "action_args": {"button":"right"}}
+    执行该步前先读树找 role+name 元素, 把算出的 x/y 注入 action_args。
     """
     from desktop_templates import load_template, _fill
     tmpl = load_template(name_or_app)
@@ -699,10 +730,30 @@ async def desktop_run_template(name_or_app: str, params: dict = None, *,
     results = []
     default_app_id = filled.get("app_id") or None
     for i, step in enumerate(filled.get("steps", [])):
+        action_args = dict(step.get("action_args") or {})
+        app_id = step.get("app_id") or default_app_id
+        # 动态定位：读树算点击点注入 action_args
+        if step.get("locate"):
+            loc = step["locate"]
+            r = await _locate_click_point(
+                app_id, loc.get("role"), loc.get("name"),
+                right_pad=loc.get("right_pad", 150),
+                left_pad=loc.get("left_pad"),
+                y_ratio=loc.get("y_ratio", 0.5))
+            if not r.get("found"):
+                return {"status": "fail", "failed_step": i,
+                        "reason": f"locate failed: no element role={loc.get('role')} "
+                                  f"name={loc.get('name')}",
+                        "desc": tmpl.get("desc"), "results": results}
+            action_args["x"] = r["x"]
+            action_args["y"] = r["y"]
+            results.append({"step": i, "locate": "ok",
+                            "point": (r["x"], r["y"]),
+                            "bounds": r.get("bounds")})
         r = await act_and_verify(
             action=step["action"],
-            action_args=step.get("action_args") or {},
-            app_id=step.get("app_id") or default_app_id,
+            action_args=action_args,
+            app_id=app_id,
             verify={"mode": "assert", "assertions": step.get("assertions") or []}
                    if step.get("assertions") else {"mode": "auto"},
             timeout_s=step.get("timeout_s") or timeout_s,
