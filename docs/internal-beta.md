@@ -72,6 +72,7 @@ AI 现场把陌生站点跑通后，可以把"导航 → 切 tab → 填表 → 
 | `dom_save_template` | 把跑通的流程存成模板 |
 | `dom_run_template` | 执行已存模板（换参数） |
 | `dom_list_templates` | 列出已有模板 |
+| `chrome` | 管理调试用 Chrome：`ensure`/`stop`/`status`（T1 起自动，无需手动开） |
 | `read_state` / `list_windows` / `act_and_verify` / `run_operation` | 桌面（AT-SPI）通道的操作与验证 |
 
 ### 典型会话（对陌生网站搜索）
@@ -119,13 +120,18 @@ uv sync   # 需要已装 uv；或 pip install -e .
 
 ### 2. 启动带调试端口的 Chrome
 
-agent-gavel 通过 CDP 控制浏览器，需要 Chrome 以调试端口启动（用独立 profile，不影响日常浏览器）：
+**（T1 起不需要手动做了）** agent-gavel 自带 Chrome 进程自管理（`browser_manager.py`）：
+首次 DOM 调用时自动用独立 profile（`/tmp/agent-gavel-chrome`）拉起调试 Chrome，
+崩溃自动重拉，随 MCP server 退出自动清理。也可以手动：
 
 ```bash
 google-chrome --no-sandbox --disable-gpu \
   --user-data-dir=/tmp/chrome-live \
   --remote-debugging-port=9222 https://www.baidu.com &
 ```
+
+手动起的 Chrome 会被识别为 `owner=external`，agent-gavel **绝不误杀**；
+无 DISPLAY 环境（systemd/cron 等）自动以 `--headless=new` 兜底。
 
 验证：浏览器打开后 `curl http://127.0.0.1:9222/json/version` 有返回即可。
 

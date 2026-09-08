@@ -58,6 +58,17 @@ class DomClient:
         self._mid = 0
 
     async def __aenter__(self):
+        # T1: DOM 通道自管 Chrome——连接前确保调试口在(未起则自启, 死了则重拉)
+        from browser_manager import ensure_chrome
+        from urllib.parse import urlparse
+        port = 9222
+        try:
+            port = urlparse(self._debug_url).port or 9222
+        except Exception:
+            pass
+        boot = ensure_chrome(port=port)
+        if not boot.get("ok"):
+            raise RuntimeError(f"chrome not available: {boot.get('error')}")
         ws_url = await self._find_page_ws()
         if not ws_url:
             raise RuntimeError("no matching CDP page target")

@@ -441,23 +441,41 @@ async def doctor():
     checks["atspi_binary"] = bool(cul)
     checks["atspi_binary_path"] = cul
 
-    # 2. Chrome CDP 调试端口是否可达
-    try:
-        import urllib.request
-        with urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2) as r:
-            import json as _json
-            v = _json.loads(r.read())
-            checks["cdp_ready"] = True
-            checks["cdp_browser"] = v.get("Browser")
-    except Exception as e:
-        checks["cdp_ready"] = False
-        checks["cdp_error"] = str(e)[:120]
+    # 2. Chrome CDP 调试端口是否可达/是否自管（T1: 不再依赖手动开 Chrome）
+    import browser_manager
+    bm = browser_manager.status()
+    checks["cdp_ready"] = bm["cdp_ready"]
+    checks["cdp_browser"] = bm["browser"]
+    checks["cdp_owner"] = bm["owner"]
+    checks["cdp_pidfile"] = bm["pidfile_pid"]
+    checks["chrome_hint"] = (
+        "ok: agent-gavel 管理的 Chrome 在跑" if bm["owner"] == "self"
+        else "ok: 检测到外部 Chrome" if bm["owner"] == "external"
+        else "未启动——首次 DOM 调用会自动拉起" if not bm["cdp_ready"]
+        else "unexpected")
 
     # 3. 模板仓库
     checks["templates"] = sorted(
         os.path.basename(p) for p in glob.glob(os.path.join(LOG_DIR, "..", "templates", "*.json")))
 
     return {"status": "ok" if checks.get("cdp_ready") else "degraded", "checks": checks}
+
+
+@mcp.tool()
+async def chrome(action: str = "ensure"):
+    """管理 agent-gavel 的调试用 Chrome（T1 自管，无需手动开）。
+
+    action:
+      ensure  -> 确保在跑（探测；无则用独立 profile 自启；死了自动重拉）
+      stop    -> 停掉 agent-gavel 自己拉起的 Chrome（绝不碰外部手动开的）
+      status  -> 只读探测当前状态
+    """
+    import browser_manager
+    if action == "stop":
+        return browser_manager.stop_own()
+    if action == "status":
+        return browser_manager.status()
+    return browser_manager.ensure_chrome()
 
 
 # ---------------- DOM 通道（网页操作） ----------------
@@ -709,13 +727,14 @@ async def desktop_list_templates():
 
 
 async def _locate_click_point(app_id, role, name, right_pad=150, left_pad=None,
-                              y_ratio=0.5):
+                              y_ratio=0.5, center=False):
     """读原始 AT-SPI 树，找 role+name 匹配的首个元素，算一个点击点。
 
     返回 {"x","y","found"}。定位逻辑(基于微信实测)：
       默认点元素 bounds 右缘内侧 right_pad 像素、垂直 y_ratio 处。
       微信消息气泡右对齐于行右缘，list item 语义点击(行中心)会落到
       文本左侧空白，故右键/点击要取右缘内偏移。
+      center=True：点 bounds 中心(用于对话框按钮等需点中心的元素)。
     """
     async with ComputerUseClient() as client:
         raw = await client.read_state(app_id=app_id)
@@ -723,9 +742,12 @@ async def _locate_click_point(app_id, role, name, right_pad=150, left_pad=None,
         b = n.get("bounds") or {}
         nm = n.get("name") or ""
         if (not role or n.get("role") == role) and name in nm and b.get("width", 0) > 50:
-            x = b["x"] + b["width"] - right_pad
-            if left_pad is not None:
-                x = b["x"] + left_pad
+            if center:
+                x = b["x"] + b["width"] // 2
+            else:
+                x = b["x"] + b["width"] - right_pad
+                if left_pad is not None:
+                    x = b["x"] + left_pad
             y = b["y"] + int(b["height"] * y_ratio)
             return {"x": int(x), "y": int(y), "found": True,
                     "bounds": {"x": b["x"], "y": b["y"],
@@ -786,7 +808,8 @@ async def desktop_run_template(name_or_app: str, params: dict = None, *,
                     app_id, loc.get("role"), loc.get("name"),
                     right_pad=loc.get("right_pad", 150),
                     left_pad=loc.get("left_pad"),
-                    y_ratio=loc.get("y_ratio", 0.5))
+                    y_ratio=loc.get("y_ratio", 0.5),
+                    center=loc.get("center", False))
                 if not r.get("found"):
                     return {"status": "fail", "failed_step": i,
                             "reason": f"locate failed: no element role={loc.get('role')} "

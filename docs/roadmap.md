@@ -42,8 +42,9 @@ agent 核心（外部：opencode / subagent）
 ## 距离完整产品还缺什么（按优先级）
 
 ### 第一层：单机收尾（技术债 + 可用性，短期）
-- [ ] 清理重复模板（bing.json vs bing_search.json 重复）
-- [ ] 浏览器进程管理：Chrome 常驻的启动 / 健康检查 / 崩溃重启（现靠手动开 CDP）
+- [x] 清理重复模板（bing.json vs bing_search.json 重复）
+- [x] 浏览器进程管理：Chrome 自管（browser_manager.py 按需自启/自愈/退出清理，
+      不再依赖手动开 CDP；doctor 报告 owner）
 - [ ] 断言失败的重试 / 降级策略（现在 fail 即停，缺"换策略重试"）
 - [ ] server.py 已混 AT-SPI + DOM 两界，拆模块
 

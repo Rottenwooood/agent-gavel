@@ -15,7 +15,7 @@
     },
     {
       "action": "click",
-      "locate": {"role": "list item", "name": "$MSG", "right_pad": 150},
+      "locate": {"role": "list item", "name": "$MSG", "right_pad": 90},
       "action_args": {"button": "right"},
       "timeout_s": 6.0
     },
@@ -26,7 +26,8 @@
     },
     {
       "action": "click",
-      "action_args": {"role": "push button", "name": "删除"},
+      "locate": {"role": "push button", "name": "删除", "center": true},
+      "action_args": {},
       "assertions": [
         {
           "type": "element_disappears",

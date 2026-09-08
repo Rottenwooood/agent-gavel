@@ -21,20 +21,31 @@ def _set_pdeathsig():
 
 
 def _shutdown(signum, frame):  # noqa: ARG001
-    """SIGTERM（父进程死亡）时：先清理常驻 cul 子进程，再退出。"""
+    """SIGTERM（父进程死亡）时：先清理常驻 cul 子进程 + 自管 Chrome，再退出。"""
     try:
         # close_resident 是 async；在信号 handler 里用独立线程跑事件循环。
-        threading.Thread(target=_close_resident_sync, daemon=True).start()
+        threading.Thread(target=_cleanup_sync, daemon=True).start()
     except Exception:
         pass
     os._exit(0)
 
 
-def _close_resident_sync():
+def _cleanup_sync():
     try:
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(close_resident())
+        loop.run_until_complete(asyncio.gather(
+            close_resident(),
+            asyncio.to_thread(_stop_owned_chrome),
+        ))
         loop.close()
+    except Exception:
+        pass
+
+
+def _stop_owned_chrome():
+    try:
+        import browser_manager
+        browser_manager.stop_own()
     except Exception:
         pass
 
