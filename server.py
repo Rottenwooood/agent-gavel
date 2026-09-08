@@ -70,7 +70,10 @@ async def _execute_action(client, action, args, app_id=None):
         res = await client.click(**click_args)
         return _unpack_result(res)
     if action == "type":
-        return _unpack_result(await client.type_text(args.get("text", ""), app_id=app_id))
+        method = args.get("method")
+        return _unpack_result(await client.type_text(
+            args.get("text", ""), app_id=app_id,
+            method=method, window_id=args.get("window_id")))
     if action == "press_key":
         key = args.get("key", "")
         times = int(args.get("times", 1))
