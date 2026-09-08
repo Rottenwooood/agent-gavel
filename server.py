@@ -134,7 +134,10 @@ async def act_and_verify(
     """执行一个动作并验证其结果，一次调用返回。
 
     action: click | type | press_key | scroll | activate_window
-    action_args: 动作参数（click 用 element_index/name/role/text；type 用 text；等）
+    action_args: 动作参数。
+      click 用 element_index/name/role/text/x/y
+      type 用 text（+可选 method/window_id）——见下方"中文输入"策略
+      press_key 用 key/times/window_id
     app_id: 目标应用 id（如 firefox_firefox.desktop）
     window: 目标窗口标题（activate_window 用）
     verify: {"mode": "auto"|"assert"|"none", "assertions": [...]}
@@ -145,6 +148,17 @@ async def act_and_verify(
               有断言时比 stable 快(不等树稳定，只要断言满足就走)；
               无断言时自动退化为 stable。
     debug: 0=精简返回(无 evidence)，1=含 evidence 并写完整调用日志
+
+    中文输入策略（action=type）：逐键模拟(xdotool)输中文会失败——非 ASCII
+    无 keysym。因此 type 默认"含非 ASCII 自动走剪贴板粘贴"：
+      method="clipboard"  xsel 写 X CLIPBOARD + Ctrl+V（任意文本可靠）
+      method="keys"       逐键模拟（仅纯 ASCII 建议）
+      method=省略         自动：文本含非 ASCII → clipboard，否则 keys
+    剪贴板方式注意事项（实测微信总结）：
+      - 目标 app 读 CLIPBOARD，勿双写 PRIMARY（会触发 X 归属竞争粘旧值）
+      - Ctrl+V 不带 app_id（带 app_id 会触发 AT-SPI 焦点校验被误拦），
+        定位用 action_args.window_id
+      - 调用前应先 activate/click 聚焦输入框（剪贴板粘到当前 X 焦点）
     """
     start = time.monotonic()
     action_args = action_args or {}

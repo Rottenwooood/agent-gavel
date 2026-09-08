@@ -213,7 +213,7 @@ class ComputerUseClient:
         return data
 
     async def click(self, *, element_index=None, role=None, name=None, text=None,
-                    app_id=None, x=None, y=None, button="left"):
+                    app_id=None, x=None, y=None, button="left", window_id=None):
         args = {}
         if element_index is not None:
             args["element_index"] = element_index
@@ -225,6 +225,8 @@ class ComputerUseClient:
             args["text"] = text
         if app_id:
             args["app_id"] = app_id
+        if window_id:
+            args["window_id"] = window_id
         if x is not None and y is not None:
             args["x"] = x
             args["y"] = y
