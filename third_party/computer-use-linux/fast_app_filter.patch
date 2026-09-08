@@ -1,0 +1,122 @@
+diff -ruN '--exclude=target' '--exclude=.git' cul-src/src/atspi_tree.rs cul-mod/src/atspi_tree.rs
+--- cul-src/src/atspi_tree.rs	2026-09-08 13:51:50.121252628 +0800
++++ cul-mod/src/atspi_tree.rs	2026-09-08 14:09:44.765920678 +0800
+@@ -466,9 +466,29 @@
+ 
+ async fn connect() -> Result<AccessibilityConnection> {
+     hydrate_session_bus_env();
+-    AccessibilityConnection::new()
++
++    // 跨调用复用同一个 AT-SPI 连接：zbus 的 AccessibilityConnection 是
++    // Arc 句柄(Clone 零成本)，重复 new() 每次都要重建 session bus 连接 +
++    // a11y bus 连接 + 代理，固定 ~300ms。首次真正连接后缓存，后续 clone。
++    static CONN_CACHE: std::sync::OnceLock<std::sync::Mutex<Option<AccessibilityConnection>>> =
++        std::sync::OnceLock::new();
++    let cache = CONN_CACHE.get_or_init(|| std::sync::Mutex::new(None));
++
++    // 快速路径：已有缓存连接，clone 返回（零成本 Arc 复制）
++    if let Some(conn) = cache.lock().unwrap().as_ref() {
++        return Ok(conn.clone());
++    }
++
++
++    // 慢路径：首次真正建立连接（放锁外，避免长时间持锁阻塞其他协程）
++    let new_conn = AccessibilityConnection::new()
+         .await
+-        .context("failed to connect to AT-SPI bus")
++        .context("failed to connect to AT-SPI bus")?;
++    let mut guard = cache.lock().unwrap();
++    if guard.is_none() {
++        *guard = Some(new_conn.clone());
++    }
++    Ok(new_conn)
+ }
+ 
+ /// Open an `AccessibleProxy` for an object on the a11y bus.
+diff -ruN '--exclude=target' '--exclude=.git' cul-src/src/server.rs cul-mod/src/server.rs
+--- cul-src/src/server.rs	2026-09-08 13:51:50.123063802 +0800
++++ cul-mod/src/server.rs	2026-09-08 14:46:29.166970967 +0800
+@@ -312,9 +312,27 @@
+         Parameters(params): Parameters<GetAppStateParams>,
+     ) -> Json<GetAppStateOutput> {
+         let verbose = params.verbose.unwrap_or(false);
+-        let diagnostics = tokio::task::spawn_blocking(doctor_report)
+-            .await
+-            .expect("diagnostics task panicked");
++        // doctor_report 全量探测(platform/portal/windowing/input)反映的是
++        // "系统能力"，非瞬时状态，几秒内不变。5 秒 TTL 缓存避免 get_app_state
++        // 每次调用都白付 ~150ms（doctor 是 get_app_state 固定开销之一）。
++        static DOCTOR_CACHE: std::sync::OnceLock<
++            std::sync::Mutex<Option<(std::time::Instant, crate::diagnostics::DoctorReport)>>,
++        > = std::sync::OnceLock::new();
++        let doctor_cache = DOCTOR_CACHE.get_or_init(|| std::sync::Mutex::new(None));
++        let diagnostics = {
++            let cached = doctor_cache.lock().unwrap().clone();
++            match cached {
++                Some((ts, report)) if ts.elapsed() < std::time::Duration::from_secs(5) => report,
++                _ => {
++                    let report = tokio::task::spawn_blocking(doctor_report)
++                        .await
++                        .expect("diagnostics task panicked");
++                    *doctor_cache.lock().unwrap() =
++                        Some((std::time::Instant::now(), report.clone()));
++                    report
++                }
++            }
++        };
+         let (window_context, window_error, window_permissions_hint) =
+             self.resolve_window_context(&params).await;
+         let (max_nodes, max_depth) =
+@@ -323,7 +341,11 @@
+         let screenshot_options = params.screenshot_options();
+         let screenshot_target_requested = params.window_target().has_target();
+         let app_filter = self
+-            .resolve_accessibility_app_filter(&params, window_context.as_ref())
++            .resolve_accessibility_app_filter(
++                &params,
++                window_context.as_ref(),
++                params.fast_app_filter.unwrap_or(false),
++            )
+             .await;
+         let (screenshot, screenshot_error) = if include_screenshot {
+             let result: Result<ScreenshotCapture> = async {
+@@ -2225,6 +2247,14 @@
+     /// compact readiness block is returned.
+     #[serde(default)]
+     verbose: Option<bool>,
++    /// Fast app-filter path (default false). When true and a target pid is
++    /// known (from app_id/window_id/pid targeting), skip the full-desktop
++    /// AT-SPI traversal that maps pid -> object_ref and let snapshot_tree
++    /// select the app by pid alone. Saves ~280ms per get_app_state call on
++    /// busy desktops; behavior identical except when a single pid owns
++    /// multiple AT-SPI roots (rare), where the precise-ref form is kept.
++    #[serde(default)]
++    fast_app_filter: Option<bool>,
+ }
+ 
+ impl GetAppStateParams {
+@@ -3033,6 +3063,7 @@
+         &self,
+         params: &GetAppStateParams,
+         window_context: Option<&WindowInfo>,
++        fast_app_filter: bool,
+     ) -> Option<String> {
+         if let Some(explicit) = trimmed_nonempty(params.app_name_or_bundle_identifier.as_deref()) {
+             return Some(explicit.to_string());
+@@ -3041,6 +3072,16 @@
+         let target_pid = window_context.and_then(|window| window.pid).or(params.pid);
+         let candidates = accessibility_filter_candidates(window_context);
+ 
++        // fast_app_filter=true：有精确 target_pid 时，snapshot_tree/select_roots
++        // 会按 pid 直接选中目标 app 的 AT-SPI root，无需在这里遍历全部 200 个
++        // app 把 pid 反查成 object_ref（原实现每次 ~280ms 固定开销）。
++        // 差异仅在"单 pid 拥有多个 AT-SPI root"的罕见场景：fast 路径会选中
++        // 该 pid 的所有 root，非 fast 路径精确到匹配的 object_ref。
++        if fast_app_filter && target_pid.is_some() {
++            return None;
++        }
++
++        // 默认(非 fast)：保留原逻辑——遍历定位 object_ref，精确匹配。
+         if let Some(target_pid) = target_pid {
+             if let Ok(apps) = list_accessible_apps(200).await {
+                 if let Some(object_ref) =

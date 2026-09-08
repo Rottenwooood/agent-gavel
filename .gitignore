@@ -16,3 +16,6 @@ logs/
 # Python cache / build
 __pycache__/
 *.py[oc]
+
+# Optimized computer-use-linux binary (build locally from third_party patch)
+bin/computer-use-linux-fast
