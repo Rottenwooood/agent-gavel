@@ -267,7 +267,9 @@ async def act_and_verify(
             "after_signature": after_norm["signature"][:16],
         }
         screenshot_ref = None
-        if status == "ambiguous":
+        if debug and status == "ambiguous":
+            # 仅 debug=1 时截图辅助判定；常规调用不截图(省一次昂贵截屏, 避免
+            # mode=auto 的 ambiguous 结果每次都触发 portal 截屏)
             shot = await client.screenshot(app_id=app_id, format="jpeg", quality=70)
             screenshot_ref = _unpack_result(shot)
 
