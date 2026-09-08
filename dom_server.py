@@ -10,6 +10,35 @@ from dom_adapter import DomClient
 from dom_verify import dom_act_and_verify, _write_log
 
 
+def _dom_error(e):
+    """把 DOM 通道异常转成结构化结果，绝不让 MCP 层包成 'Error executing tool'。
+
+    关键：agent 需要看到失败原因（尤其环境类：Chrome 没起/CDP 断/无页面），
+    而不是一个笼统的 UnexpectedToolError 猜半天。
+    识别常见环境错误并给 hint：
+      - chrome not available / CDP not ready / DISPLAY 未设置 → 环境问题
+      - no matching CDP page target → 无页面
+      - 其余 → 通用 error
+    """
+    msg = str(e)
+    if any(k in msg for k in ("chrome not available", "CDP not ready", "DISPLAY")):
+        return {
+            "status": "error",
+            "reason": "chrome_env",
+            "error": msg,
+            "hint": "调试 Chrome 没起来——调 chrome(ensure) 或确认 DISPLAY；"
+                    "headless 已禁用，需桌面会话",
+        }
+    if "no matching CDP page target" in msg:
+        return {
+            "status": "error",
+            "reason": "no_page_target",
+            "error": msg,
+            "hint": "Chrome 在跑但没有可用页面 tab——导航一个 URL 或开新 tab",
+        }
+    return {"status": "error", "reason": "dom_error", "error": msg}
+
+
 def register_dom_tools(mcp):
     """把 DOM 通道全部 MCP 工具注册到给定 mcp server。"""
 
@@ -69,20 +98,23 @@ def register_dom_tools(mcp):
             page_features={"v":"document.querySelector('#inp-query').value"},
             expected_feature={"v":{"op":"eq","value":"流浪地球"}})
         """
-        async with DomClient() as client:
-            return await dom_act_and_verify(
-                client,
-                action=action,
-                selectors=selectors,
-                page_features=page_features,
-                expected_feature=expected_feature,
-                wait_s=wait_s,
-                debug=debug,
-                log_prefix="dom_step",
-                trusted=trusted,
-                wait_mode=wait_mode,
-                strict=strict,
-            )
+        try:
+            async with DomClient() as client:
+                return await dom_act_and_verify(
+                    client,
+                    action=action,
+                    selectors=selectors,
+                    page_features=page_features,
+                    expected_feature=expected_feature,
+                    wait_s=wait_s,
+                    debug=debug,
+                    log_prefix="dom_step",
+                    trusted=trusted,
+                    wait_mode=wait_mode,
+                    strict=strict,
+                )
+        except Exception as e:
+            return _dom_error(e)
 
     @mcp.tool()
     async def dom_navigate(site: str, url: str = None, *, debug: int = 0):
@@ -98,19 +130,22 @@ def register_dom_tools(mcp):
         if not target:
             return {"status": "error", "error": "no url and no template home for site",
                     "hint": "pass url= directly, or dom_save_template first"}
-        async with DomClient() as client:
-            await client.navigate(target)
-            await client.wait_page_load()
-            await asyncio.sleep(1.5)
-            r = {
-                "status": "pass",
-                "url": await client.eval_js("location.href"),
-                "title": await client.get_title(),
-            }
-            if debug:
-                _write_log("dom_navigate",
-                           {"tool": "dom_navigate", "site": site, "url": target}, r)
-            return r
+        try:
+            async with DomClient() as client:
+                await client.navigate(target)
+                await client.wait_page_load()
+                await asyncio.sleep(1.5)
+                r = {
+                    "status": "pass",
+                    "url": await client.eval_js("location.href"),
+                    "title": await client.get_title(),
+                }
+                if debug:
+                    _write_log("dom_navigate",
+                               {"tool": "dom_navigate", "site": site, "url": target}, r)
+                return r
+        except Exception as e:
+            return _dom_error(e)
 
     @mcp.tool()
     async def dom_explore(
@@ -132,34 +167,37 @@ def register_dom_tools(mcp):
           tail: 只返回后 N 个（页面底部元素，如确认按钮/弹窗）
           include_all: True 时返回全部（含 no-unique-selector），默认只返锚点
         """
-        async with DomClient() as client:
-            items = await client.explore()
-            total = len(items)
+        try:
+            async with DomClient() as client:
+                items = await client.explore()
+                total = len(items)
 
-            if not include_all:
-                items = [it for it in items if it.get("selector")]
-            if tag:
-                items = [it for it in items if it.get("tag") == tag]
-            if text_contains:
-                items = [it for it in items
-                         if text_contains in (it.get("text") or "")]
+                if not include_all:
+                    items = [it for it in items if it.get("selector")]
+                if tag:
+                    items = [it for it in items if it.get("tag") == tag]
+                if text_contains:
+                    items = [it for it in items
+                             if text_contains in (it.get("text") or "")]
 
-            head_total = len(items)
-            if head is not None and head > 0:
-                items = items[:head]
-            elif tail is not None and tail > 0:
-                items = items[-tail:]
+                head_total = len(items)
+                if head is not None and head > 0:
+                    items = items[:head]
+                elif tail is not None and tail > 0:
+                    items = items[-tail:]
 
-            return {
-                "url": await client.eval_js("location.href"),
-                "title": await client.get_title(),
-                "total_elements": total,
-                "after_filter": head_total,
-                "returned": len(items),
-                "head": head,
-                "tail": tail,
-                "elements": items,
-            }
+                return {
+                    "url": await client.eval_js("location.href"),
+                    "title": await client.get_title(),
+                    "total_elements": total,
+                    "after_filter": head_total,
+                    "returned": len(items),
+                    "head": head,
+                    "tail": tail,
+                    "elements": items,
+                }
+        except Exception as e:
+            return _dom_error(e)
 
     @mcp.tool()
     async def dom_save_template(site: str, desc: str, steps: list,
@@ -207,31 +245,38 @@ def register_dom_tools(mcp):
                     "available": [t["file"] for t in _list_template_summaries()]}
         filled = _fill(tmpl, params)
         results = []
-        async with DomClient() as client:
-            for i, step in enumerate(filled.get("steps", [])):
-                r = await dom_act_and_verify(
-                    client,
-                    action=step["action"],
-                    selectors=step.get("selectors"),
-                    page_features=step.get("page_features"),
-                    expected_feature=step.get("expected_feature"),
-                    wait_s=wait_s,
-                    debug=debug,
-                    log_prefix=f"tmpl_{filled.get('site')}_s{i}",
-                    trusted=step.get("trusted", True),
-                    wait_mode=step.get("wait_mode", "poll"),
-                    strict=strict,
-                )
-                results.append({"step": i, "action": step["action"], **r})
-                if r.get("status") != "pass":
-                    return {
-                        "status": "fail",
-                        "failed_step": i,
-                        "desc": tmpl.get("desc"),
-                        "results": results,
-                    }
-        return {"status": "pass", "desc": tmpl.get("desc"),
-                "steps_total": len(filled.get("steps", [])), "results": results}
+        try:
+            async with DomClient() as client:
+                for i, step in enumerate(filled.get("steps", [])):
+                    r = await dom_act_and_verify(
+                        client,
+                        action=step["action"],
+                        selectors=step.get("selectors"),
+                        page_features=step.get("page_features"),
+                        expected_feature=step.get("expected_feature"),
+                        wait_s=wait_s,
+                        debug=debug,
+                        log_prefix=f"tmpl_{filled.get('site')}_s{i}",
+                        trusted=step.get("trusted", True),
+                        wait_mode=step.get("wait_mode", "poll"),
+                        strict=strict,
+                    )
+                    results.append({"step": i, "action": step["action"], **r})
+                    if r.get("status") != "pass":
+                        return {
+                            "status": "fail",
+                            "failed_step": i,
+                            "desc": tmpl.get("desc"),
+                            "results": results,
+                        }
+            return {"status": "pass", "desc": tmpl.get("desc"),
+                    "steps_total": len(filled.get("steps", [])), "results": results}
+        except Exception as e:
+            env = _dom_error(e)
+            env["failed_step"] = len(results)
+            env["desc"] = tmpl.get("desc")
+            env["results"] = results
+            return env
 
     def _list_template_summaries():
         from dom_templates import list_templates

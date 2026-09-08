@@ -142,8 +142,8 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
         raise ValueError(f"unknown dom action: {action}")
 
     if not ok:
-        return {"status": "fail", "action_error": r,
-                "action": {"name": action}}, False
+        return {"status": "fail", "reason": "action_failed",
+                "action_error": r, "action": {"name": action}}, False
 
     # ---- 验证特征 ----
     async def _poll_verify(remaining_s):
@@ -224,7 +224,7 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
             await asyncio.sleep(0.5)
             status, detail, evidence = "pass", {"mode": "feature"}, {}
 
-    return {
+    res = {
         "status": status,
         "action": {"name": action, "result": r},
         "verification": {
@@ -234,7 +234,10 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
         },
         "evidence": evidence,
         "cost": {"elapsed_ms": int((time.monotonic() - start) * 1000)},
-    }, True
+    }
+    if status != "pass":
+        res["reason"] = "assertion_timeout" if expected_feature else "action_failed"
+    return res, True
 
 
 async def dom_act_and_verify(
@@ -377,6 +380,8 @@ async def dom_act_and_verify(
                 final["retries"] = [
                     {"strategy": a.get("strategy"), "status": a.get("status")}
                     for a in attempts]
+                if final.get("status") != "pass":
+                    final["reason"] = "all_strategies_failed"
                 result = final
     except Exception as e:
         result = {"status": "error", "error": str(e),
