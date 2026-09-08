@@ -31,6 +31,23 @@ AI 声明动作 + "做完后页面应该长什么样" → 执行 → 程序断�
 
 不装 computer-use-linux 也能用 DOM；装了才解锁桌面工具（不装时桌面工具返回 `atspi_unavailable` 的明确提示）。
 
+## Install
+
+**兼容性（诚实说明）**：Linux + Python 3.13 验证过，需本机有 Chrome/Chromium。Windows/macOS 未适配（见文末 TODO）。
+
+```sh
+# 方式一：uvx 直接运行（推荐，不污染 Python 环境，临时缓存即装即跑）
+uvx agent-gavel
+
+# 方式二：安装到当前环境
+pip install agent-gavel
+
+# 桌面操作（可选）：不装则 DOM 照常可用，只是桌面工具返回 atspi_unavailable
+npm install -g computer-use-linux
+```
+
+装好后在 MCP 客户端（见下）里配置 `["uvx", "agent-gavel"]`，重启后 `doctor` 工具会报告 DOM / AT-SPI 双通道状态——这就是安装成功的信号。
+
 ## 安装后到底发生了什么（流程说明）
 
 ### 两条安装命令的区别
@@ -127,7 +144,19 @@ agent-gavel 端到端：`read_state` 620→235ms（2.6x）；`act_and_verify` �
 - 等待：`poll`（轮询断言）/ `event`（MutationObserver，DOM 一变即醒，适合异步长等待）
 - 每动作返回 `cost.phase` 毫秒级拆分（before_read / action / wait / after_verify），性能可观测
 
-## 开发
+## TODO
+
+"可用"和"正式发布"之间的差距：
+
+- [ ] **适配 Windows**：AT-SPI 桌面通道是 Linux 无障碍树，Windows 应走 UI Automation 或对应后端；DOM 通道理论上跨平台但只在 Linux 验证过
+- [ ] **完善模板共享机制**：当前模板存本地用户目录，缺少"模板共享/导入"通道（如按站点从远端拉模板、版本化、社区模板源）
+- [ ] **登录态模板**：Chrome profile 登录态保留，覆盖真实登录类流程
+- [ ] **多步骤 / 分页 / 滚动模板**：现有模板多是"导航+填+提交"，缺连续点进详情、无限滚动、多 tab
+- [ ] **断言语言增强**：`eq/neq/exists/contains` 之外，补数值比较 / 正则 / 列表断言（结果条数等）
+- [ ] **权限 / 确认机制**：高危操作（提交表单 / 发送）前人工确认
+- [ ] **可观测性**：debug 日志之上，补任务级 trace / 会话重放
+
+## 开发与贡献（走 PR）
 
 ```sh
 uv sync                       # 装依赖
@@ -136,8 +165,16 @@ uv build                      # 构建 wheel/sdist
 ```
 
 仓库内的验证过的模板：百度 / 百度百科 / 必应 / 博客园 / 豆瓣电影 / Google / 菜鸟教程 / 知乎登录填表。
-
 设计说明见 [docs/internal-beta.md](docs/internal-beta.md)，路线见 [docs/roadmap.md](docs/roadmap.md)。
+
+提 PR 时 GitHub 会自动带上 `.github/PULL_REQUEST_TEMPLATE.md` 的检查清单。手动过一遍：
+
+- [ ] `uv run python3 tests/browser_manager_smoke.py` 全过（涉及 Chrome 生命周期改动时）
+- [ ] 真实跑一遍受影响的模板（`dom_run_template` / `desktop_run_template`），不是只过语法
+- [ ] 环境错误走结构化返回（`reason + hint`），不要裸抛让 agent 猜
+- [ ] 模板/API 改动同步更新 README 对应章节
+- [ ] 附上实测数据（改动性能时：before/after 耗时）
+- [ ] 若改了模板目录结构或路径，确认用户目录优先逻辑不被破坏
 
 ## License
 
