@@ -1,0 +1,53 @@
+{
+  "app": "wechat",
+  "desc": "删除文件传输助手中的一条消息(坐标右键气泡→菜单删除→确认)。$Y 默认710=最新消息行, 窗口归位全屏(0,32)",
+  "app_id": "wechat.desktop",
+  "steps": [
+    {
+      "action": "activate_window",
+      "action_args": {},
+      "timeout_s": 5.0
+    },
+    {
+      "action": "move_window",
+      "action_args": {
+        "x": 0,
+        "y": 32
+      },
+      "timeout_s": 5.0
+    },
+    {
+      "action": "click",
+      "action_args": {
+        "button": "right",
+        "x": 1700,
+        "y": 710
+      },
+      "timeout_s": 6.0
+    },
+    {
+      "action": "click",
+      "action_args": {
+        "role": "menu item",
+        "name": "删除"
+      },
+      "timeout_s": 6.0
+    },
+    {
+      "action": "click",
+      "action_args": {
+        "role": "push button",
+        "name": "删除"
+      },
+      "assertions": [
+        {
+          "type": "element_disappears",
+          "role": "list item",
+          "name": "$MSG"
+        }
+      ],
+      "timeout_s": 8.0
+    }
+  ],
+  "saved_at": "2026-09-08T15:01:27"
+}
