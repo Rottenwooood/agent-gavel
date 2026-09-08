@@ -29,6 +29,9 @@ async def _nav():
 
 
 def test_lifecycle():
+    _step("0. 确保初始干净")
+    bm.stop_own()
+
     _step("1. 未启动 status")
     s = bm.status()
     assert s["owner"] == "none", s
