@@ -305,6 +305,16 @@ class ComputerUseClient:
             args["app_id"] = app_id
         return await self._call("screenshot", args)
 
+    async def move_window(self, *, window_id=None, x=None, y=None):
+        args = {}
+        if window_id:
+            args["window_id"] = window_id
+        if x is not None:
+            args["x"] = x
+        if y is not None:
+            args["y"] = y
+        return await self._call("move_window", args)
+
     async def list_windows(self):
         return await self._call("list_windows")
 

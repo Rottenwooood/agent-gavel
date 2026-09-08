@@ -91,6 +91,16 @@ async def _execute_action(client, action, args, app_id=None):
         if app_id:
             aw_args["app_id"] = app_id
         return _unpack_result(await client.activate_window(**aw_args))
+    if action == "move_window":
+        mv_args = dict(args)
+        if not mv_args.get("window_id"):
+            # 没有 window_id 时按 app_id 激活的窗口定位
+            aw = await client.activate_window(app_id=app_id)
+            if isinstance(aw, dict):
+                w = (aw.get("focus") or {}).get("focused_window") or {}
+                if w.get("window_id"):
+                    mv_args["window_id"] = w["window_id"]
+        return _unpack_result(await client.move_window(**mv_args))
     raise ValueError(f"unknown action: {action}")
 
 
@@ -306,6 +316,10 @@ async def run_operation(app: str, operation: str, params: dict = None,
             "operation": operation,
             "available": _list_operations(),
         }
+    # flow：多步组合操作，串行执行每步并汇总
+    if op.get("flow"):
+        return await _run_flow(op, params, timeout_s, debug)
+
     target = op.get("target") or {}
     app_id = target.get("app_id")
     verify = {
@@ -322,6 +336,38 @@ async def run_operation(app: str, operation: str, params: dict = None,
         timeout_s=timeout_s or op.get("timeout_s", 6.0),
         debug=debug,
     )
+
+
+async def _run_flow(op, params, timeout_s, debug):
+    """串行执行 flow 里的子操作。每步可单步 op 或嵌套 dict。"""
+    steps = []
+    for step in op.get("flow", []):
+        s = dict(step)
+        # 子步骤里可用 params 替换占位符（action_args/assertions 字符串）
+        app_id = (s.get("target") or {}).get("app_id") or (op.get("target") or {}).get("app_id")
+        action_args = s.get("action_args") or {}
+        verify = {
+            "mode": "assert",
+            "assertions": s.get("assertions") or [],
+        }
+        if not verify["assertions"]:
+            verify = {"mode": "auto"}
+        res = await act_and_verify(
+            action=s["action"],
+            action_args=action_args,
+            app_id=app_id,
+            verify=verify,
+            timeout_s=timeout_s or s.get("timeout_s", 6.0),
+            debug=debug,
+        )
+        steps.append({"action": s.get("action"), "args": action_args,
+                      "status": res.get("status")})
+        if res.get("status") == "fail":
+            return {"status": "fail", "app": op.get("app"),
+                    "operation": op.get("operation"), "failed_step": s.get("action"),
+                    "detail": res, "steps": steps}
+    return {"status": "pass", "app": op.get("app"), "operation": op.get("operation"),
+            "steps": steps}
 
 
 def _list_operations():
