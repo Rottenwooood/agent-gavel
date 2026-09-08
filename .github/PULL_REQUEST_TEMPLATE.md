@@ -1,27 +1,30 @@
-## 改动类型
+## 贡献的模板
 
-- [ ] 新功能 / 新模板
-- [ ] 修复（bug / 失败诊断）
-- [ ] 重构（结构 / 命名）
-- [ ] 文档 / 性能优化
+> 本 PR 贡献一个验证过的操作模板，不是代码改动。
 
-## 描述
+**站点 / 功能**
 
-<!-- 改了什么，为什么。 -->
+<!-- 例：bing 搜索，site=bing，文件 bing_search.json -->
 
-## 验证（必填——"语法过了"不算验证）
+**模板文件**
 
-- [ ] `uv run python3 tests/browser_manager_smoke.py` 全过（涉及 Chrome 生命周期改动时）
-- [ ] 真实跑通受影响的模板（`dom_run_template` / `desktop_run_template`），贴出 pass/fail
-- [ ] 环境错误走结构化返回（`reason + hint`），确认没有裸抛 UnexpectedToolError
-- [ ] 改动性能时附 before/after 实测耗时
+- [ ] 位于 `agent_gavel/channels/dom/templates/<site>_<func>.json`（或 desktop 对应目录）
+- [ ] `site`（DOM）/ `app`（desktop）是纯站名，文件名 `站名_功能`
+- [ ] 步骤含断言（`page_features` + `expected_feature`），非只发动作
 
-## 兼容性检查
+**实测结果（必填）**
 
-- [ ] 模板 / API 改动已同步 README
-- [ ] 改了模板目录或路径时，用户目录优先（`~/.config/agent-gavel/`）逻辑未被破坏
-- [ ] 通道自包含结构（`agent_gavel/channels/{dom,desktop}`）未被破坏
+<!-- 贴 dom_run_template / desktop_run_template 的 pass 输出，说明测过的关键词/参数 -->
 
-## 截图 / 日志
+```
+status: pass
+```
 
-<!-- 可选：debug=1 的调用日志或关键输出。 -->
+**锚点稳定性**
+
+- [ ] 用稳定锚点（`#id` / `input[name=x]` / `__text__:`），无写死易变路径
+- [ ] 涉及登录/个人数据时用假凭据
+
+**备注**
+
+<!-- 依赖的登录态、站点特殊处理、可能失效点等 -->

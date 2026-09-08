@@ -35,36 +35,55 @@ AI 声明动作 + "做完后页面应该长什么样" → 执行 → 程序断�
 
 **兼容性（诚实说明）**：Linux + Python 3.13 验证过，需本机有 Chrome/Chromium。Windows/macOS 未适配（见文末 TODO）。
 
+三种安装方式，按场景选：
+
 ```sh
-# 方式一：uvx 直接运行（推荐，不污染 Python 环境，临时缓存即装即跑）
+# ① 一次性运行（不装任何东西，临时缓存即装即跑）——适合"先试试"
 uvx agent-gavel
 
-# 方式二：安装到当前环境
+# ② 全局安装（推荐正式用）——命令装进 ~/.local/bin，全局 PATH 可用
+uv tool install agent-gavel
+
+# ③ 装进当前 Python 环境（项目 venv / conda env）
 pip install agent-gavel
 
 # 桌面操作（可选）：不装则 DOM 照常可用，只是桌面工具返回 atspi_unavailable
 npm install -g computer-use-linux
 ```
 
-装好后在 MCP 客户端（见下）里配置 `["uvx", "agent-gavel"]`，重启后 `doctor` 工具会报告 DOM / AT-SPI 双通道状态——这就是安装成功的信号。
+装好后在 MCP 客户端（见下）里配置 `["uvx", "agent-gavel"]`（方式①）或 `["agent-gavel"]`（方式②③，命令已在 PATH），重启后 `doctor` 工具会报告 DOM / AT-SPI 双通道状态——这就是安装成功的信号。
+
+### 开发者：clone 源码运行
+
+```sh
+git clone https://github.com/Rottenwooood/agent-gavel.git
+cd agent-gavel
+uv sync                    # 装依赖（Python 3.13）
+uv run python3 -m agent_gavel.main    # 起 MCP server（等价 ./run-mcp.sh）
+uv run python3 tests/browser_manager_smoke.py   # Chrome 生命周期冒烟测试
+uv build                   # 本地构建 wheel/sdist
+```
+
+源码跑通后，想贡献你验证过的模板 → 见文末"贡献你验证过的模板"。
 
 ## 安装后到底发生了什么（流程说明）
 
-### 两条安装命令的区别
+### 三种安装方式的区别
 
-**`uvx agent-gavel`** —— 临时环境运行，不污染你的 Python：
-- uvx 在 `~/.cache/uv` 建一个**临时虚拟环境**，把 agent-gavel 包装进去
-- 包代码落在该环境 `site-packages/agent_gavel/`（含 `channels/dom` 网页通道、
-  `channels/desktop` 桌面通道，及随包模板 JSON）
-- 然后执行包注册的入口命令 `agent-gavel`（指向 `agent_gavel.main:main`）→ 在**标准输入/输出**上启动 MCP server 协议
-- 退出后临时环境保留在缓存（下次秒起），不占你的全局 site-packages
+**`uvx agent-gavel`** —— 一次性运行，不装进任何环境：
+- uvx 在 `~/.cache/uv` 建**临时虚拟环境**装包，跑完即弃（缓存留档，下次秒起）
+- 适合"先试试"，不污染你的 Python；代价是每次 `uvx` 首次要解析依赖
 
-**`pip install agent-gavel`** —— 装进当前 Python 环境的 site-packages：
+**`uv tool install agent-gavel`** —— 全局安装（推荐正式用）：
+- uv 把 agent-gavel 装进 `~/.local/share/uv/tools/` 的独立环境
+- 可执行命令 `agent-gavel` 链接到 `~/.local/bin/`（已在你的 PATH 里）
+- 任何目录都能直接 `agent-gavel` 起 server，类似 `npm i -g`
+
+**`pip install agent-gavel`** —— 装进当前 Python 环境（项目 venv / conda env）：
 - `agent_gavel/` 包落到 `<venv>/lib/python3.13/site-packages/`
-- 同时生成可执行命令 `agent-gavel`（指向 `agent_gavel.main:main`），在你 PATH 里
-- 之后随时 `agent-gavel` 就能起 MCP server
+- 同时生成可执行命令 `agent-gavel`（指向 `agent_gavel.main:main`），在所在环境 PATH 里
 
-两种方式最终效果一致：**启动一个在 stdio 上说话的 MCP server 进程**，等 MCP 客户端连它。
+三种方式最终效果一致：**启动一个在 stdio 上说话的 MCP server 进程**，等 MCP 客户端连它。区别只在命令装在哪、是否全局可用。
 
 ### 怎么接到 opencode
 
@@ -76,7 +95,8 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
   "mcp": {
     "agent-gavel": {
       "type": "local",
-      "command": ["uvx", "agent-gavel"],   // 或 ["agent-gavel"] 若已 pip install
+      "command": ["uvx", "agent-gavel"],   // 一次性
+      // 或 ["agent-gavel"]  // uv tool install 或 pip install 后(命令已在 PATH)
       "enabled": true
     }
   }
@@ -156,25 +176,32 @@ agent-gavel 端到端：`read_state` 620→235ms（2.6x）；`act_and_verify` �
 - [ ] **权限 / 确认机制**：高危操作（提交表单 / 发送）前人工确认
 - [ ] **可观测性**：debug 日志之上，补任务级 trace / 会话重放
 
-## 开发与贡献（走 PR）
+## 贡献你验证过的模板（PR template）
 
-```sh
-uv sync                       # 装依赖
-uv run python3 tests/browser_manager_smoke.py   # Chrome 生命周期冒烟测试
-uv build                      # 构建 wheel/sdist
-```
+agent-gavel 的模板按网站组织（`site` 纯站名，文件名 `site_功能.json`），随包带 8 个验证过的。你在一台机器上跑通了新网站的流程，**PR 给我**，合并后所有用户随包可用。
 
 仓库内的验证过的模板：百度 / 百度百科 / 必应 / 博客园 / 豆瓣电影 / Google / 菜鸟教程 / 知乎登录填表。
 设计说明见 [docs/internal-beta.md](docs/internal-beta.md)，路线见 [docs/roadmap.md](docs/roadmap.md)。
 
-提 PR 时 GitHub 会自动带上 `.github/PULL_REQUEST_TEMPLATE.md` 的检查清单。手动过一遍：
+### 模板去哪、怎么存
 
-- [ ] `uv run python3 tests/browser_manager_smoke.py` 全过（涉及 Chrome 生命周期改动时）
-- [ ] 真实跑一遍受影响的模板（`dom_run_template` / `desktop_run_template`），不是只过语法
-- [ ] 环境错误走结构化返回（`reason + hint`），不要裸抛让 agent 猜
-- [ ] 模板/API 改动同步更新 README 对应章节
-- [ ] 附上实测数据（改动性能时：before/after 耗时）
-- [ ] 若改了模板目录结构或路径，确认用户目录优先逻辑不被破坏
+模板默认读**用户目录**优先（`~/.config/agent-gavel/{templates,desktop_templates}/`），随包模板在 `agent_gavel/channels/{dom,desktop}/templates/`。
+
+贡献模板的路径：源码 clone → 用 `dom_explore` + `dom_step` 现场探索跑通 → `dom_save_template` 存 JSON → 确认稳定后放进仓库对应目录提 PR。
+
+### 模板 PR 检查清单
+
+模板 PR 要能直接合并，请过一遍：
+
+- [ ] 模板 JSON 在 `agent_gavel/channels/dom/templates/<site>_<func>.json`（或 desktop 对应目录）
+- [ ] `site`（DOM）/ `app`（desktop）字段是纯站名，不含功能名；文件名 `站名_功能`
+- [ ] 真实跑通过（`dom_run_template` / `desktop_run_template` 全 pass），PR 描述里贴结果
+- [ ] 步骤含断言（`page_features` + `expected_feature`），不是只发动作不验证
+- [ ] 用了稳定锚点（`#id` / `input[name=x]` / `__text__:`），没有写死易变的 CSS 路径
+- [ ] 涉及登录/个人数据时用假凭据，PR 里说明依赖的登录态
+- [ ] 描述里写清：站点 URL、功能、测过的关键词/参数
+
+模板存疑或失效会走失效检测（连续失败 ≥3 次标 suspected），无需担心一次不完美。
 
 ## License
 
