@@ -212,13 +212,17 @@ def register_dom_tools(mcp):
 
     @mcp.tool()
     async def dom_save_template(site: str, desc: str, steps: list,
-                                home: str = None, name: str = None):
+                                home: str = None, name: str = None,
+                                sensitive_params: list = None):
         """把现场跑通的一套网页流程固化成可复用模板。
 
         steps 每项 = {"action": navigate|set_value|click|press_enter|focus,
                       "selectors": {...},
                       "page_features": {特征名: JS表达式},   # 动作后提取
                       "expected_feature": {特征名: {op, value}}}  # 断言
+        sensitive_params: 可选，显式声明哪些参数是敏感的(密码/token)，
+          如 ["PASSWORD"]——运行时传的真实值不落日志/不进返回。不声明则
+          不脱敏(除非参数名命中 PASSWORD/TOKEN 等关键词兜底)。
         例：
           [{"action":"navigate","selectors":{"url":"https://.../"},
             "page_features":{"title":"document.title"},
@@ -228,7 +232,11 @@ def register_dom_tools(mcp):
             "expected_feature":{"input_value":{"op":"eq","value":"$QUERY"}}}]
         """
         from .templates import save_template
-        r = save_template(site, desc, steps, home=home, name=name)
+        params_spec = None
+        if sensitive_params:
+            params_spec = {p: {"sensitive": True} for p in sensitive_params}
+        r = save_template(site, desc, steps, home=home, name=name,
+                          params_spec=params_spec)
         r["status"] = "saved"
         return r
 
@@ -262,13 +270,14 @@ def register_dom_tools(mcp):
         pass 清零。suspected 模板执行时返回结果顶部带 warning。
         """
         from .templates import (resolve_template, _fill, record_run, get_stats,
-                                is_sensitive_var)
+                                norm_params)
         template_file, tmpl = resolve_template(name_or_site)
         if not tmpl:
             return {"status": "not_found", "name": name_or_site,
                     "available": [t["file"] for t in _list_template_summaries()]}
-        # 校验模板声明需要的参数是否齐（params 自动从 $VAR 提取）
-        need = tmpl.get("params") or []
+        # 规整模板参数声明（新=对象带 sensitive，老=数组；敏感以模板显式标记为准）
+        pdecl = norm_params(tmpl.get("params"), tmpl.get("steps"))
+        need = list(pdecl.keys())
         params = params or {}
         missing = [p for p in need if p not in params]
         if missing:
@@ -276,9 +285,10 @@ def register_dom_tools(mcp):
                     "missing": missing, "needs": need,
                     "desc": tmpl.get("desc"),
                     "hint": f"dom_run_template 需传参数: {need}"}
-        # 敏感参数(密码/token 等)值收集——供脱敏, 不落日志/不回传
+        # 敏感参数值收集——模板声明 sensitive 的才脱敏
+        # (is_sensitive_var 关键词兜底已在 norm_params 里对未声明老参数生效)
         redact_values = [str(params[p]) for p in params
-                         if is_sensitive_var(p) and params[p]]
+                         if pdecl.get(p, {}).get("sensitive") and params[p]]
         # 执行前查失效状态
         pre = get_stats(template_file)
         warning = None

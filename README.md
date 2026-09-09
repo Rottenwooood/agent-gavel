@@ -189,8 +189,8 @@ agent-gavel 的模板按网站组织（`site` 纯站名，文件名 `site_功能
 - [ ] 真实跑通过（`dom_run_template` / `desktop_run_template` 全 pass），PR 描述里贴结果
 - [ ] 步骤含断言（`page_features` + `expected_feature`），不是只发动作不验证
 - [ ] 用了稳定锚点（`#id` / `input[name=x]` / `__text__:`），没有写死易变的 CSS 路径
-- [ ] 用 `$VAR` 占位符替代可变输入（关键词/账号/密码），**不要写死真实值**——保存时 `params` 字段会自动从 `$VAR` 提取（`dom_list_templates` 会显示模板需要哪些参数）
-- [ ] 密码/token 等敏感输入用 `$PASSWORD`/`$TOKEN` 这类名字（含 PASSWORD/TOKEN/SECRET/API_KEY 等会自动脱敏——真值只在调用时传 `params`，不落日志、不进返回、不进 git）
+- [ ] 用 `$VAR` 占位符替代可变输入（关键词/账号/密码），**不要写死真实值**——`params` 字段自动从 `$VAR` 提取（`dom_list_templates` 会显示模板需要哪些参数）
+- [ ] **密码/token 等敏感参数在模板里显式声明**：`dom_save_template(..., sensitive_params=["PASSWORD"])` → params 存 `{"PASSWORD": {"sensitive": true}}`。声明后运行时传的真实值不落日志、不进返回；不声明则默认不敏感（仅参数名命中 PASSWORD/TOKEN 等关键词时兜底脱敏）
 - [ ] 涉及登录/个人数据时：模板文件里用**假凭据占位**（如 `$USERNAME`/`$PASSWORD`，跑的时候才传真实值）；若流程依赖"已登录浏览器"（如删订单），PR 里说明依赖的登录态，别假装模板能独立登录
 - [ ] 描述里写清：站点 URL、功能、测过的关键词/参数
 

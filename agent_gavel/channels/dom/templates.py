@@ -141,7 +141,7 @@ def list_templates():
                         "site": t.get("site"),
                         "desc": t.get("desc"),
                         "steps": len(t.get("steps", [])),
-                        "params": t.get("params", []),
+                        "params": norm_params(t.get("params"), t.get("steps")),
                         "consecutive_fails": s.get("consecutive_fails", 0),
                         "suspected": s.get("suspected", False),
                     }
@@ -155,9 +155,40 @@ _SENSITIVE_VAR_HINTS = ("PASSWORD", "PASSWD", "PWD", "TOKEN", "SECRET",
 
 
 def is_sensitive_var(name):
-    """判断 $VAR 是否敏感(密码/token 等)——调用传值不落日志。"""
+    """兜底判定 $VAR 是否敏感(密码/token 等)。
+
+    仅对"老模板/未显式声明"生效——新模板应在 params 里显式标 sensitive，
+    不依赖关键词猜。关键词命中只是保险。
+    """
     up = (name or "").upper()
     return any(h in up for h in _SENSITIVE_VAR_HINTS)
+
+
+def norm_params(tmpl_params, steps=None):
+    """把模板 params 规整成 {参数名: {"sensitive": bool}}。
+
+    兼容两种存储形态：
+      - 新: {"PASSWORD": {"sensitive": true}, "QUERY": {}} (或 {"QUERY": false})
+      - 旧: ["QUERY", "USERNAME", "PASSWORD"]
+    steps 给出时，先补上自动提取但未声明的参数(默认非敏感)。
+    敏感标记优先级: 显式声明 > 关键词兜底(仅老数组/无声明时)。
+    """
+    out = {}
+    if isinstance(tmpl_params, dict):
+        for name, spec in tmpl_params.items():
+            if isinstance(spec, dict):
+                out[name] = {"sensitive": bool(spec.get("sensitive"))}
+            else:  # {"PASSWORD": true} 或 {"PASSWORD": "sensitive"}
+                out[name] = {"sensitive": bool(spec)}
+    elif isinstance(tmpl_params, list):
+        for name in tmpl_params:
+            out[name] = {"sensitive": is_sensitive_var(name)}  # 老数组: 关键词兜底
+    # 补自动提取但未声明的(新模板由 save 写入, 一般不会缺; 老模板缺则补)
+    if steps:
+        for name in _extract_vars(steps):
+            if name not in out:
+                out[name] = {"sensitive": is_sensitive_var(name)}
+    return out
 
 
 def _extract_vars(steps):
@@ -181,12 +212,15 @@ def _extract_vars(steps):
     return found
 
 
-def save_template(site, desc, steps, home=None, name=None):
+def save_template(site, desc, steps, home=None, name=None, params_spec=None):
     """保存模板到用户目录，返回 {file, site, steps}。同名覆盖。
 
     T4 命名：site=纯网站名，文件名默认 = site_功能.json。
     name 参数给"功能"部分；不给则文件名 = site.json。
-    自动从 steps 提取 $VAR 存入 params（模板声明它需要哪些参数）。
+    params_spec: 显式声明参数及敏感标记，如
+      {"PASSWORD": {"sensitive": true}} —— 敏感与否写死在模板里，
+      关键词兜底(is_sensitive_var)只对未声明的老参数生效。
+    自动从 steps 提取 $VAR 并入 params（普通参数默认非敏感）。
     存到 ~/.agent-gavel/templates/（可写、跨环境持久）。
     """
     _ensure_user_dir()
@@ -195,11 +229,21 @@ def save_template(site, desc, steps, home=None, name=None):
     else:
         fname = _slugify(site)
     path = os.path.join(USER_DIR, f"{fname}.json")
+    auto = _extract_vars(steps)
+    # 构建 params 对象：自动提取的全列上；显式 spec 覆盖标记
+    params_obj = {}
+    for p in auto:
+        params_obj[p] = {}
+    for p, spec in (params_spec or {}).items():
+        if isinstance(spec, dict):
+            params_obj[p] = {"sensitive": bool(spec.get("sensitive"))}
+        else:
+            params_obj[p] = {"sensitive": bool(spec)}
     tmpl = {
         "site": _slugify(site) or site,
         "desc": desc,
         "home": home or "",
-        "params": _extract_vars(steps),
+        "params": params_obj,
         "steps": steps,
         "saved_at": datetime.datetime.now().isoformat(timespec="seconds"),
     }
@@ -208,7 +252,7 @@ def save_template(site, desc, steps, home=None, name=None):
     # 覆盖同名 → 清零该模板 stats
     reset_stats(os.path.basename(path))
     return {"file": os.path.basename(path), "site": tmpl["site"],
-            "steps": len(steps), "params": tmpl["params"]}
+            "steps": len(steps), "params": params_obj}
 
 
 def _find_in_dirs(fname):
