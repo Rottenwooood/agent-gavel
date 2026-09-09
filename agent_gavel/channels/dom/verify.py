@@ -341,7 +341,8 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
                 "action_error": r, "action": {"name": action}}, False
 
     # ---- 验证特征 ----
-    async def _poll_verify(remaining_s):
+    async def _poll_verify(remaining_s, *, before=None, diff_target=None,
+                           diff_scope=None, diff_enabled=False):
         evidence = {}
         deadline = time.monotonic() + remaining_s
         status = "pass"
@@ -374,6 +375,16 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
                     detail["checks"] = checks
                     evidence = ev
                     break
+                # diff 兜底：断言不匹配但页面已实际变化(如点了别处/断言写窄)，
+                # 不必等满 wait_s 超时，立刻判 ambiguous 交给模型仲裁。
+                if diff_enabled and before is not None:
+                    _a = await _diff_snapshot(client, diff_target, diff_scope)
+                    _v = _diff_verdict(before, _a) if _a else None
+                    if _v and _v.get("meaningful"):
+                        detail["mode"] = "feature->diff(early)"
+                        detail["diff"] = _v
+                        status = "ambiguous"
+                        break
                 detail["checks"] = checks
             else:
                 # expected 为空：不再固定等 0.5s，交给动作后的 diff 兜底判定
@@ -408,12 +419,16 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
         else:
             remaining = wait_s - (time.monotonic() - start)
             remaining = max(remaining, 0.3)
-            status, detail, evidence = await _poll_verify(remaining)
+            status, detail, evidence = await _poll_verify(
+                remaining, before=before, diff_target=diff_target,
+                diff_scope=sel.get("diff_scope"), diff_enabled=bool(diff and before))
             if status == "pass":
                 detail["mode"] = "event->poll_fallback"
     else:
         if page_features:
-            status, detail, evidence = await _poll_verify(wait_s)
+            status, detail, evidence = await _poll_verify(
+                wait_s, before=before, diff_target=diff_target,
+                diff_scope=sel.get("diff_scope"), diff_enabled=bool(diff and before))
         else:
             # 无 page_features/expected：不固定睡 0.5s，直接交 diff 兜底判定
             status, detail, evidence = "pass", {"mode": "feature"}, {}
