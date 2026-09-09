@@ -119,9 +119,21 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 
 数据来自 `tests/dom_smoke.py` 分段计时与 `tests/dom_smoke_loop.py` 多模板循环压测（5 模板 × 3 轮全过，平均单次 ~0.6s）。慢的是页面真实加载，工具本身动作步都在毫秒级。
 
-### AT-SPI 桌面通道：computer-use-linux 优化补丁
+### AT-SPI 桌面通道：微信发消息模板
 
-给上游 computer-use-linux 打补丁（`third_party/` 保存）：AT-SPI 连接复用 + doctor 缓存 + `fast_app_filter` 跳过全桌面 pid 反查 + 坐标操作不再触发 portal 截屏。桌面 70 节点应用实测：
+微信发消息模板（4 步：激活窗口→点会话→输入→发送）的耗时构成，实测微信窗口开着时（优化前基准）：
+
+| 步骤 | 动作 | 总耗时 | 其中读树(before+稳定) | 动作本身 |
+|---|---|---|---|---|
+| step0 | activate_window | 1472ms | 1332ms | 131ms |
+| step1 | click 文件传输助手 | 1508ms | 1145ms | 362ms |
+| step2 | type(剪贴板) | 1507ms | 1161ms | 346ms |
+| step3 | click 发送+断言 | 2533ms | 576ms+稳定 | 354ms |
+| **合计** | | **~6.8s** | | |
+
+**耗时大头在读树**：每步做 2 次 `get_app_state`（before + 稳定确认），每次 ~580ms（微信 ~600 节点 × ~10 次 DBus 读）。step3 多一次等消息。
+
+**优化**：给 computer-use-linux 打补丁（`third_party/` 保存）——AT-SPI 连接复用 + doctor 缓存 + `fast_app_filter` 跳过全桌面 pid 反查 + 坐标操作不再触发 portal 截屏；server 层读树次数减半（before 复用 + 确定性动作跳过稳定确认）。桌面 70 节点应用实测单次读树：
 
 | 阶段 | 原版 | 优化后(fast=true) |
 |---|---|---|
@@ -130,7 +142,7 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 | snapshot_tree | ~145ms | ~140ms |
 | **合计/次读树** | **~630ms** | **~220ms**（2.9x） |
 
-agent-gavel 端到端：`read_state` 620→235ms（2.6x）；`act_and_verify` 单次闭环 ~1.5s→0.65s（2.3x）。微信发消息模板整条流程 6.8s→4.8s。树内容与动作结果和原版一致，无回归。
+端到端对比：`read_state` 620→235ms（2.6x）；`act_and_verify` 单次闭环 ~1.5s→0.65s（2.3x）；**微信发消息模板整条流程 6.8s→4.8s**。树内容与动作结果和原版一致，无回归。
 
 ## 功能一览
 
