@@ -11,10 +11,12 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
 ]
 dependencies = [
     "mcp[cli]>=2.1.1",
     "websockets>=17.1",
+    "psutil>=6.0",
 ]
 
 # agent-gavel 是 MCP server（stdio 模式），opencode 等客户端通过

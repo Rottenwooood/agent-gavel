@@ -33,7 +33,7 @@ AI 声明动作 + "做完后页面应该长什么样" → 执行 → 程序断�
 
 ## Install
 
-**兼容性**：Linux + Python 3.13 验证过，需本机有 Chrome/Chromium。Windows/macOS 未适配（见文末 TODO）。
+**兼容性**：Linux + Python 3.13 验证过，需本机有 Chrome/Chromium。**Windows 上 DOM 通道已适配**（Chrome 自管/进程清理/置顶已跨平台，Windows + Chrome 实测跑通；见文末 TODO）；macOS 与桌面(AT-SPI)通道仍仅限 Linux。
 
 三种安装方式，按场景选：
 
@@ -180,7 +180,8 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 
 ### 平台 / 能力
 
-- [ ] **适配其他平台**：DOM 理论跨平台但只在 Linux 验证过；Windows/macOS 需补 Chrome 自管 + 测试。
+- [x] **适配 Windows（DOM）**：Chrome 自管跨平台化（psutil 进程管理、`taskkill /T` 清理、user32 置顶、Windows 版 Chrome 路径探测），去掉 DISPLAY 硬检查；Windows + Chrome 153 实测跑通 `dom_step`/导航全链路（Python 3.12 验证，声明 3.13）。
+- [ ] **适配其他平台**：macOS 尚未适配（需补 Chrome 路径/进程管理/置顶）；桌面(AT-SPI)通道依赖 Linux 无障碍树，不随 DOM 跨平台。
 - [ ] **完善模板共享机制**：当前模板存本地用户目录，缺少"模板共享/导入"通道（按站点从远端拉模板、版本化、社区模板源）。
 - [ ] **登录态模板**：Chrome profile 登录态保留，覆盖真实登录类流程。
 - [ ] **多步骤 / 分页 / 滚动模板**：现有模板多是"导航+填+提交"，缺连续点进详情、无限滚动、多 tab。

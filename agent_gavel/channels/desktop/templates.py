@@ -25,9 +25,16 @@ import os
 #   - PKG_DIR：安装包内模板（随 wheel 提供，默认只读）
 #   - USER_DIR：用户模板目录（可写，优先）。保存落这里，跨环境持久。
 PKG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
-USER_DIR = os.path.join(
-    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
-    "agent-gavel", "desktop_templates")
+
+
+def _config_root():
+    """跨平台用户配置根目录：Windows %APPDATA%；其它 XDG_CONFIG_HOME/~/.config。"""
+    if os.name == "nt":
+        return os.environ.get("APPDATA") or os.path.expanduser("~/.config")
+    return os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+
+
+USER_DIR = os.path.join(_config_root(), "agent-gavel", "desktop_templates")
 
 
 def _ensure_user_dir():

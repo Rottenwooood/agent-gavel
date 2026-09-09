@@ -24,7 +24,12 @@ from .normalize import normalize_nodes
 from .wait import wait_until_stable
 
 
-LOG_DIR = os.environ.get("AGENT_GAVEL_LOG_DIR", "/home/c6h4o2/agent-gavel/logs")
+LOG_DIR = os.environ.get(
+    "AGENT_GAVEL_LOG_DIR",
+    os.path.join(os.environ.get("APPDATA") if os.name == "nt"
+                 else os.environ.get("XDG_CONFIG_HOME",
+                                     os.path.expanduser("~/.config")),
+                 "agent-gavel", "logs"))
 
 
 class AtspiUnavailableError(RuntimeError):

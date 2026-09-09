@@ -22,7 +22,12 @@ import time
 
 from .adapter import DomClient
 
-LOG_DIR = os.environ.get("AGENT_GAVEL_LOG_DIR", "/home/c6h4o2/agent-gavel/logs")
+LOG_DIR = os.environ.get(
+    "AGENT_GAVEL_LOG_DIR",
+    os.path.join(os.environ.get("APPDATA") if os.name == "nt"
+                 else os.environ.get("XDG_CONFIG_HOME",
+                                     os.path.expanduser("~/.config")),
+                 "agent-gavel", "logs"))
 
 
 def _write_log(prefix, call, result):

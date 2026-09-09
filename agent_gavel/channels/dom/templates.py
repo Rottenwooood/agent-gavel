@@ -34,9 +34,16 @@ import os
 #   - USER_DIR：用户模板目录（可写，优先）。用户保存/失效 stats 都落这里，
 #     跨 uvx 临时环境、跨安装版本持久存在。
 PKG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
-USER_DIR = os.path.join(
-    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
-    "agent-gavel", "templates")
+
+
+def _config_root():
+    """跨平台用户配置根目录：Windows %APPDATA%；其它 XDG_CONFIG_HOME/~/.config。"""
+    if os.name == "nt":
+        return os.environ.get("APPDATA") or os.path.expanduser("~/.config")
+    return os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+
+
+USER_DIR = os.path.join(_config_root(), "agent-gavel", "templates")
 STATS_FILE = os.path.join(USER_DIR, "stats.json")
 FAIL_THRESHOLD = 3  # 连续失败达到该次数 → suspected
 
