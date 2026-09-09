@@ -113,14 +113,50 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
                     "action": {"name": action}}, False
         r = await client.set_value(target, sel.get("value", ""), trusted=trusted)
         ok = isinstance(r, dict) and r.get("ok")
+    elif action == "type_text":
+        # 真实输入文本到当前焦点（用前先 focus/click 目标）
+        text = sel.get("text", sel.get("value", ""))
+        target = sel.get("target") or sel.get("input")
+        if target:
+            await client.focus(target)
+        r = await client.type_text(text)
+        ok = isinstance(r, dict) and r.get("ok")
+    elif action == "press_key":
+        keys = sel.get("keys", sel.get("key", ""))
+        if not keys:
+            return {"status": "fail", "action_error": "press_key needs selectors.keys",
+                    "action": {"name": action}}, False
+        r = await client.press_key(keys, trusted=trusted)
+        ok = isinstance(r, dict) and r.get("ok")
     elif action == "click":
         target = sel.get("target") or sel.get("input")
         if not target:
             return {"status": "fail", "action_error": "click needs selectors.target",
                     "action": {"name": action}}, False
-        r = await client.click(target, trusted=trusted)
+        r = await client.click(target, trusted=trusted,
+                               button=sel.get("button", "left"),
+                               count=sel.get("count", 1))
+        ok = isinstance(r, dict) and r.get("ok")
+    elif action == "hover":
+        target = sel.get("target")
+        if not target:
+            return {"status": "fail", "action_error": "hover needs selectors.target",
+                    "action": {"name": action}}, False
+        r = await client.hover(target, trusted=True)
+        ok = isinstance(r, dict) and r.get("ok")
+    elif action == "drag":
+        src = sel.get("source", sel.get("target"))
+        dst = sel.get("target" if not sel.get("source") else "destination")
+        r = await client.drag(src, dst or sel.get("destination"),
+                              dx=sel.get("dx"), dy=sel.get("dy"), trusted=True)
+        ok = isinstance(r, dict) and r.get("ok")
+    elif action == "scroll":
+        r = await client.scroll(sel.get("direction", "down"),
+                                float(sel.get("amount", 1.0)),
+                                selector=sel.get("target"))
         ok = isinstance(r, dict) and r.get("ok")
     elif action == "press_enter":
+        # 便捷动作：本质是发 Enter 键（保持旧模板兼容）
         r = await client.press_enter(trusted=trusted)
         ok = isinstance(r, dict) and r.get("ok")
     elif action == "navigate":

@@ -22,3 +22,4 @@ __pycache__/
 
 # Optimized computer-use-linux binary (build locally from third_party patch)
 bin/computer-use-linux-fast
+.atomic/

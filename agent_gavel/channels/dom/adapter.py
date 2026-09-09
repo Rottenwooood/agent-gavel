@@ -51,6 +51,100 @@ def _el_js(selector):
     return f"document.querySelector({json.dumps(selector)})"
 
 
+# CDP Input.dispatchKeyEvent 键盘码表：人类键名 -> (key, code, windowsVirtualKeyCode)。
+# 覆盖字母/数字/常用功能键/方向/编辑键。修饰键单独处理(不进码表)。
+_KEYS = {
+    # 字母
+    **{c: (c, f"Key{c.upper()}", ord(c.upper())) for c in "abcdefghijklmnopqrstuvwxyz"},
+    # 数字
+    **{str(d): (str(d), f"Digit{d}", 0x30 + int(d)) for d in range(10)},
+    # 功能键
+    **{f"F{i}": (f"F{i}", f"F{i}", 0x70 + (i - 1)) for i in range(1, 13)},
+    # 编辑/导航键
+    "Enter": ("Enter", "Enter", 13),
+    "Return": ("Enter", "Enter", 13),
+    "Tab": ("Tab", "Tab", 9),
+    "Backspace": ("Backspace", "Backspace", 8),
+    "Delete": ("Delete", "Delete", 46),
+    "Del": ("Delete", "Delete", 46),
+    "Escape": ("Escape", "Escape", 27),
+    "Esc": ("Escape", "Escape", 27),
+    "Space": (" ", "Space", 32),
+    "Home": ("Home", "Home", 36),
+    "End": ("End", "End", 35),
+    "PageUp": ("PageUp", "PageUp", 33),
+    "PageDown": ("PageDown", "PageDown", 34),
+    "ArrowUp": ("ArrowUp", "ArrowUp", 38),
+    "ArrowDown": ("ArrowDown", "ArrowDown", 40),
+    "ArrowLeft": ("ArrowLeft", "ArrowLeft", 37),
+    "ArrowRight": ("ArrowRight", "ArrowRight", 39),
+    "Up": ("ArrowUp", "ArrowUp", 38),
+    "Down": ("ArrowDown", "ArrowDown", 40),
+    "Left": ("ArrowLeft", "ArrowLeft", 37),
+    "Right": ("ArrowRight", "ArrowRight", 39),
+    "Insert": ("Insert", "Insert", 45),
+    # 标点/符号(常见)
+    "-": ("-", "Minus", 0xBD), "=": ("=", "Equal", 0xBB),
+    "[": ("[", "BracketLeft", 0xDB), "]": ("]", "BracketRight", 0xDD),
+    "\\": ("\\", "Backslash", 0xDC), ";": (";", "Semicolon", 0xBA),
+    "'": ("'", "Quote", 0xDE), ",": (",", "Comma", 0xBC),
+    ".": (".", "Period", 0xBE), "/": ("/", "Slash", 0xBF),
+    "`": ("`", "Backquote", 0xC0),
+}
+
+# 修饰键名 -> (key, code, windowsVirtualKeyCode, CDP modifiers 位)
+_MODIFIERS = {
+    "Control": ("Control", "ControlLeft", 17, 2),
+    "Ctrl": ("Control", "ControlLeft", 17, 2),
+    "Alt": ("Alt", "AltLeft", 18, 1),
+    "Shift": ("Shift", "ShiftLeft", 16, 8),
+    "Meta": ("Meta", "MetaLeft", 91, 4),
+    "Super": ("Meta", "MetaLeft", 91, 4),
+    "Command": ("Meta", "MetaLeft", 91, 4),
+}
+
+
+def _key_spec(name):
+    """把人类键名解析成 CDP 按键事件参数。
+
+    name 可带修饰键前缀，如 "Ctrl+A"、"Shift+Tab"、"Ctrl+Alt+Delete"。
+    返回 {"modifiers": [mod_spec...], "key": (key, code, vk), "mod_bits": int}
+    """
+    mods = {"Control": 0, "Alt": 0, "Shift": 0, "Meta": 0}
+    mod_specs = []
+    parts = name.split("+")
+    rest = []
+    for p in parts:
+        key = p.strip()
+        if key in _MODIFIERS and len(parts) > 1 and p is not parts[-1]:
+            # 是修饰键前缀(非最后一个)
+            mk, mc, mv, mbit = _MODIFIERS[key]
+            mods[mk] = 1
+            mod_specs.append((mk, mc, mv, mbit))
+        elif key in _MODIFIERS and len(parts) == 1:
+            # 单独按修饰键本身
+            rest.append(key)
+        else:
+            rest.append(key)
+    if not rest:
+        # 只有修饰键(如单独按 Ctrl)——需要至少一个按键
+        if mod_specs:
+            mk, mc, mv, mbit = mod_specs[0]
+            return {"modifiers": mod_specs, "key": (mk, mc, mv),
+                    "mod_bits": mods, "is_modifier_only": True}
+        return None
+    key = rest[-1]
+    if key not in _KEYS:
+        # 单字符(非表内)当作直接文本键：key=字符
+        if len(key) == 1:
+            return {"modifiers": mod_specs, "key": (key, "", 0),
+                    "mod_bits": mods, "raw_char": True}
+        return None
+    k, code, vk = _KEYS[key]
+    return {"modifiers": mod_specs, "key": (k, code, vk),
+            "mod_bits": mods}
+
+
 class DomClient:
     def __init__(self, debug_url="http://127.0.0.1:9222", page_url_match=None):
         self._debug_url = debug_url
@@ -289,12 +383,14 @@ class DomClient:
         }})()
         """)
 
-    async def click(self, selector, trusted=True):
+    async def click(self, selector, trusted=True, button="left", count=1):
         """点击元素（支持 __text__: 文本锚点）。
 
+        button: left|right|middle（右键=上下文菜单，中键=新开等）。
+        count: 点击次数（1=单击, 2=双击）。
         trusted=True（默认）：CDP Input.dispatchMouseEvent 真实点击（isTrusted=true），
         对合成 click 不响应的重框架站点可靠。
-        trusted=False：合成 el.click()（isTrusted=false），快。
+        trusted=False：合成 el.click()（isTrusted=false），快（仅左键单击）。
         """
         el_js = _el_js(selector)
         if not trusted:
@@ -307,29 +403,182 @@ class DomClient:
                 return {{ok: true}};
             }})()
             """)
-        # trusted 模式：真实鼠标点击。先求元素中心点坐标
+        # trusted 模式：真实鼠标事件。先求元素中心点坐标
+        pt = await self._center_of(selector)
+        if not pt:
+            return {"ok": False, "error": f"not found or invisible: {selector}"}
+        if not (0 <= pt["x"] <= pt["vw"] and 0 <= pt["y"] <= pt["vh"]):
+            return {"ok": False, "error": "element off-screen",
+                    "point": pt, "hint": "scroll it into view first"}
+        btn = "right" if button == "right" else ("middle" if button == "middle" else "left")
+        # 真实按键序列（支持双击：clickCount 由 CDP 判断）
+        for i in range(max(1, int(count))):
+            cc = 1 if count == 1 else (i + 1)
+            await self.cmd("Input.dispatchMouseEvent",
+                           {"type": "mousePressed", "x": pt["x"], "y": pt["y"],
+                            "button": btn, "clickCount": cc})
+            await self.cmd("Input.dispatchMouseEvent",
+                           {"type": "mouseReleased", "x": pt["x"], "y": pt["y"],
+                            "button": btn, "clickCount": cc})
+        return {"ok": True, "point": pt, "button": btn, "count": count}
+
+    async def scroll(self, direction="down", amount=1.0, selector=None):
+        """滚动页面（或元素内）。direction: down|up。amount: 约多少屏。
+
+        selector 给则滚那个可滚动元素内部；不给滚 window。
+        """
+        js_target = ("document.scrollingElement || document.documentElement"
+                     if not selector else _el_js(selector))
+        delta = int(amount * 800) * (1 if direction == "down" else -1)
+        return await self.eval_js(f"""
+        (() => {{
+            const el = {js_target};
+            if (!el) return {{ok: false, error: 'not found'}};
+            el.scrollBy({{top: {delta}, behavior: 'instant'}});
+            return {{ok: true, top: el.scrollTop}};
+        }})()
+        """)
+
+    async def _center_of(self, selector):
+        """返回元素中心点 + 视口尺寸（供真实鼠标事件用）。返回 None 若找不到/不可见。"""
+        el_js = _el_js(selector)
         pt = await self.eval_js(f"""
         (() => {{
             const el = {el_js};
             if (!el) return null;
             el.scrollIntoView({{block: 'center'}});
             const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) return null;
             return {{x: r.left + r.width / 2, y: r.top + r.height / 2,
                      vw: window.innerWidth, vh: window.innerHeight}};
         }})()
         """)
+        return pt
+
+    # ============ 原子输入原语 ============
+
+    async def press_key(self, keys, trusted=True):
+        """发任意按键/组合键（参数化，非每键一函数）。
+
+        keys: "Enter" / "Tab" / "Ctrl+A" / "Shift+Tab" / "ArrowDown" / "F5" 等。
+        修饰键前缀可多个：Ctrl+Alt+Delete。单个修饰键："Control"。
+        trusted=True(默认): CDP Input.dispatchKeyEvent 真实按键(isTrusted=true)。
+        trusted=False: 合成 KeyboardEvent。
+        """
+        spec = _key_spec(keys)
+        if not spec:
+            return {"ok": False, "error": f"unsupported key: {keys!r}",
+                    "hint": "见 _KEYS 支持表；修饰键用 + 前缀如 Ctrl+A"}
+        if not trusted:
+            return await self._press_key_synthetic(keys, spec)
+        return await self._press_key_trusted(spec)
+
+    async def _press_key_trusted(self, spec):
+        key, code, vk = spec["key"]
+        mb = spec["mod_bits"]
+        modifiers_bits = 0
+        for mk in ("Control", "Alt", "Shift", "Meta"):
+            if mb.get(mk):
+                modifiers_bits |= {"Control": 2, "Alt": 1, "Shift": 8, "Meta": 4}[mk]
+        # 先按下修饰键(若有)
+        for mk, mc, mv, mbit in spec.get("modifiers", []):
+            await self.cmd("Input.dispatchKeyEvent", {
+                "type": "keyDown", "key": mk, "code": mc,
+                "windowsVirtualKeyCode": mv, "modifiers": modifiers_bits})
+        # 主键：keyDown (无修饰) / rawKeyDown (有修饰, 触发浏览器编辑加速键
+        # 如 Ctrl+A 全选) + keyUp。char 仅无修饰可打印键发。
+        k, c, v = key, code, vk
+        has_mods = modifiers_bits != 0
+        down_type = "rawKeyDown" if has_mods else "keyDown"
+        await self.cmd("Input.dispatchKeyEvent", {
+            "type": down_type, "key": k, "code": c or "",
+            "windowsVirtualKeyCode": v or 0, "modifiers": modifiers_bits})
+        if (spec.get("raw_char") or (k and len(k) == 1
+                                     and not spec.get("is_modifier_only"))) and not has_mods:
+            await self.cmd("Input.dispatchKeyEvent", {
+                "type": "char", "text": k, "unmodifiedText": k,
+                "windowsVirtualKeyCode": v or 0, "modifiers": modifiers_bits})
+        await self.cmd("Input.dispatchKeyEvent", {
+            "type": "keyUp", "key": k, "code": c or "",
+            "windowsVirtualKeyCode": v or 0, "modifiers": modifiers_bits})
+        # 松开修饰键
+        for mk, mc, mv, mbit in spec.get("modifiers", []):
+            await self.cmd("Input.dispatchKeyEvent", {
+                "type": "keyUp", "key": mk, "code": mc,
+                "windowsVirtualKeyCode": mv, "modifiers": modifiers_bits})
+        return {"ok": True, "keys": key}
+
+    async def _press_key_synthetic(self, keys, spec):
+        """合成 KeyboardEvent 版本（快，isTrusted=false）。"""
+        key = spec["key"][0]
+        return await self.eval_js(f"""
+        (() => {{
+            const el = document.activeElement;
+            if (!el) return {{ok: false, error: 'no focus'}};
+            for (const t of ['keydown','keyup']) {{
+                el.dispatchEvent(new KeyboardEvent(t, {{
+                    key: {json.dumps(key)}, bubbles: true, cancelable: true}}));
+            }}
+            return {{ok: true}};
+        }})()
+        """)
+
+    async def type_text(self, text):
+        """真实输入任意文本（含中文/emoji）。走 CDP Input.insertText（IME 通道，
+        isTrusted=true）。文本整体注入，不做逐键。
+        """
+        try:
+            await self.cmd("Input.insertText", {"text": text})
+        except Exception as e:
+            return {"ok": False, "error": f"Input.insertText failed: {e}"}
+        return {"ok": True}
+
+    async def hover(self, selector, trusted=True):
+        """鼠标悬停在元素上（触发 tooltip/hover 态）。"""
+        if not trusted:
+            return {"ok": False, "error": "hover 需要 trusted(真实鼠标移动)"}
+        pt = await self._center_of(selector)
         if not pt:
-            return {"ok": False, "error": f"not found: {selector}"}
-        if not (0 <= pt["x"] <= pt["vw"] and 0 <= pt["y"] <= pt["vh"]):
-            return {"ok": False, "error": "element off-screen",
-                    "point": pt, "hint": "scroll it into view first"}
+            return {"ok": False, "error": f"not found or invisible: {selector}"}
         await self.cmd("Input.dispatchMouseEvent",
-                       {"type": "mousePressed", "x": pt["x"], "y": pt["y"],
-                        "button": "left", "clickCount": 1})
-        await self.cmd("Input.dispatchMouseEvent",
-                       {"type": "mouseReleased", "x": pt["x"], "y": pt["y"],
-                        "button": "left", "clickCount": 1})
+                       {"type": "mouseMoved", "x": pt["x"], "y": pt["y"]})
         return {"ok": True, "point": pt}
+
+    async def drag(self, src_selector, dst_selector=None, *, dx=None, dy=None,
+                   trusted=True):
+        """拖拽：从元素到目标元素（HTML5 drag/drop），或按像素偏移。
+
+        dst_selector: 拖到哪个元素上。
+        dx/dy: 或给像素偏移。
+        """
+        if not trusted:
+            return {"ok": False, "error": "drag 需要 trusted(真实鼠标)"}
+        if not dst_selector and dx is None and dy is None:
+            return {"ok": False, "error": "drag 需要 dst_selector 或 dx/dy"}
+        s = await self._center_of(src_selector)
+        if not s:
+            return {"ok": False, "error": f"source not found: {src_selector}"}
+        if dst_selector:
+            d = await self._center_of(dst_selector)
+            if not d:
+                return {"ok": False, "error": f"dest not found: {dst_selector}"}
+            ex, ey = d["x"], d["y"]
+        else:
+            ex, ey = s["x"] + dx, s["y"] + dy
+        # 真实拖拽序列
+        await self.cmd("Input.dispatchMouseEvent",
+                       {"type": "mousePressed", "x": s["x"], "y": s["y"],
+                        "button": "left", "clickCount": 1})
+        await self.cmd("Input.dispatchMouseEvent",
+                       {"type": "mouseMoved", "x": s["x"] + (ex - s["x"]) * 0.5,
+                        "y": s["y"] + (ey - s["y"]) * 0.5, "button": "left"})
+        await self.cmd("Input.dispatchMouseEvent",
+                       {"type": "mouseMoved", "x": ex, "y": ey, "button": "left"})
+        await self.cmd("Input.dispatchMouseEvent",
+                       {"type": "mouseReleased", "x": ex, "y": ey,
+                        "button": "left", "clickCount": 1})
+        return {"ok": True, "from": {"x": s["x"], "y": s["y"]},
+                "to": {"x": ex, "y": ey}}
 
     async def press_enter(self, trusted=True):
         """在当前焦点元素上触发回车。
