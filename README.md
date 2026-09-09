@@ -126,7 +126,7 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 | zhihu 登录填表 | 16.8s | **3.2s** | 5.3x |
 | runoob 站内搜 | 7.6s | **3.0s** | 2.5x |
 
-剩余耗时基本是 `navigate` 单步（~3.1s，页面真实加载，省不掉）。动作步本身：`set_value` 5–25ms，`click / enter` 100–1200ms。全部模板 pass，无回归。
+剩余耗时基本是 `navigate` 单步——**只等页面真实加载**（readyState complete 事件驱动，无固定 sleep；热站加载完成后单步 ~150ms）。动作步本身：`set_value` 5–25ms，`click / enter` 100–1200ms。全部模板 pass，无回归。
 
 ### AT-SPI 桌面通道：computer-use-linux 优化补丁
 

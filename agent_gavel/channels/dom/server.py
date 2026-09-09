@@ -135,7 +135,6 @@ def register_dom_tools(mcp):
             async with DomClient() as client:
                 await client.navigate(target)
                 await client.wait_page_load()
-                await asyncio.sleep(1.5)
                 r = {
                     "status": "pass",
                     "url": await client.eval_js("location.href"),

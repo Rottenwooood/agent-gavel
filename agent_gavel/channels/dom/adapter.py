@@ -15,6 +15,7 @@ WebSocket 连接。
 
 import asyncio
 import json
+import time
 import urllib.request
 
 import websockets
@@ -92,12 +93,19 @@ class DomClient:
                 return t["webSocketDebuggerUrl"]
         return pages[0]["webSocketDebuggerUrl"] if pages else None
 
-    async def cmd(self, method, params=None):
+    async def cmd(self, method, params=None, timeout=10.0):
         self._mid += 1
         mid = self._mid
         await self._ws.send(json.dumps({"id": mid, "method": method, "params": params or {}}))
+        deadline = time.monotonic() + timeout
         while True:
-            msg = json.loads(await self._ws.recv())
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"CDP {method} timed out after {timeout}s")
+            try:
+                msg = json.loads(await asyncio.wait_for(self._ws.recv(), remaining))
+            except asyncio.TimeoutError:
+                raise TimeoutError(f"CDP {method} timed out after {timeout}s") from None
             if msg.get("id") == mid:
                 if "error" in msg:
                     raise RuntimeError(f"CDP error: {msg['error']}")
@@ -499,14 +507,14 @@ class DomClient:
         """
         return await self.eval_js(js) or []
 
-    async def wait_page_load(self, settle_s=1.5, timeout_s=15.0):
-        """等页面加载完成。
+    async def wait_page_load(self, settle_s=0.15, timeout_s=15.0):
+        """等页面加载完成（事件不依赖固定 sleep）。
 
-        导航后 JS context 会重建，立即 eval 会挂起/报错，所以先固定等
-        settle_s 让 context 就绪，再轮询 readyState；eval 失败则重试。
-        readyState complete 后不再长等渲染——动作断言会轮询兜底。
+        导航后 JS context 会重建，立即 eval 可能超时（已由 cmd 超时保护）。
+        不固定长等——settle_s 只给 context 切换一个极短缓冲，然后轮询
+        readyState；eval 超时/抛错则重试。readyState complete 立即返回，
+        渲染兜底交给动作断言轮询。
         """
-        import time
         await asyncio.sleep(settle_s)
         start = time.monotonic()
         while time.monotonic() - start < timeout_s:
@@ -515,8 +523,8 @@ class DomClient:
                 if state == "complete":
                     return True
             except Exception:
-                pass  # context 未就绪，重试
-            await asyncio.sleep(0.4)
+                pass  # context 未就绪或 eval 超时，重试
+            await asyncio.sleep(0.2)
         return False
 
     async def wait_event(self, page_features, expected_feature, timeout_s=6.0):
