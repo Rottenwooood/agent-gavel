@@ -146,7 +146,7 @@ agent-gavel 端到端：`read_state` 620→235ms（2.6x）；`act_and_verify` �
 ### DOM（网页）
 
 - **Chrome 自管**：首次调用自动起独立 profile 调试 Chrome（可见窗口，永不用 headless），崩溃自愈，退出清理
-- **`dom_step`**：通用单步闭环（动作 + 选择器 + 断言一次调用），`navigate / set_value / click / press_enter / clear / focus`
+- **`dom_step`**：通用单步闭环（动作 + 选择器 + 断言一次调用），动作空间按**输入通道参数化**——键盘 `press_key`（任意键/组合键：Enter/Tab/Ctrl+A/F5…）+ 文本 `type_text`（含中文）+ 鼠标 `click`（左/右/中、单击/双击）+ `hover`/`drag`/`scroll` + 导航 `navigate`；`set_value/press_enter/clear/focus` 作便捷动作保留
 - **`dom_explore`**：枚举页面可交互元素，给验证过唯一的锚点（`#id` / `input[name=q]` / `__text__:登录` / 同名按钮用 `__text_nth__:N::`）
 - **模板复用**：跑通的流程存 JSON（`templates/`，按网站组织：`site` 纯站名，文件名 `site_功能.json`），换参数直接跑
 - **失败诊断**：环境错误（Chrome 没起 / DISPLAY 缺失 / CDP 断）返回 `reason + hint`，不会让 agent 对着一个 "Error executing tool" 猜
