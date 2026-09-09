@@ -1,52 +1,24 @@
 {
   "site": "baike",
-  "desc": "百度百科搜索：打开首页→输入关键词→回车跳转词条页",
+  "desc": "百度百科查词条：直接导航 /item/词条 直达页（首页搜索框非标准input难定位，URL直达更稳更快），断言 title 含词条名（不存在则 title 是通用页，断言自然失败）",
   "home": "https://baike.baidu.com/",
   "steps": [
     {
       "action": "navigate",
       "selectors": {
-        "url": "https://baike.baidu.com/"
+        "url": "https://baike.baidu.com/item/$QUERY"
       },
       "page_features": {
-        "t": "document.title"
+        "t": "document.title",
+        "url": "location.href"
       },
       "expected_feature": {
         "t": {
           "op": "contains",
-          "value": "百度百科"
-        }
-      }
-    },
-    {
-      "action": "set_value",
-      "selectors": {
-        "input": "input",
-        "value": "$QUERY"
-      },
-      "page_features": {
-        "v": "document.querySelector('input').value"
-      },
-      "expected_feature": {
-        "v": {
-          "op": "eq",
           "value": "$QUERY"
-        }
-      }
-    },
-    {
-      "action": "press_enter",
-      "page_features": {
-        "t": "document.title",
-        "u_decoded": "decodeURIComponent(location.href)"
-      },
-      "expected_feature": {
-        "u_decoded": {
-          "op": "contains",
-          "value": "word=$QUERY"
         }
       }
     }
   ],
-  "saved_at": "2026-09-08T01:34:42"
+  "saved_at": "2026-09-09T00:00:00"
 }
