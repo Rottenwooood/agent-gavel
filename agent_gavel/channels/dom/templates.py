@@ -141,6 +141,7 @@ def list_templates():
                         "site": t.get("site"),
                         "desc": t.get("desc"),
                         "steps": len(t.get("steps", [])),
+                        "params": t.get("params", []),
                         "consecutive_fails": s.get("consecutive_fails", 0),
                         "suspected": s.get("suspected", False),
                     }
@@ -149,11 +150,43 @@ def list_templates():
     return sorted(seen.values(), key=lambda x: x["file"])
 
 
+_SENSITIVE_VAR_HINTS = ("PASSWORD", "PASSWD", "PWD", "TOKEN", "SECRET",
+                        "API_KEY", "CREDENTIAL", "AUTH", "COOKIE")
+
+
+def is_sensitive_var(name):
+    """判断 $VAR 是否敏感(密码/token 等)——调用传值不落日志。"""
+    up = (name or "").upper()
+    return any(h in up for h in _SENSITIVE_VAR_HINTS)
+
+
+def _extract_vars(steps):
+    """从模板 steps 里递归扫出所有 $VAR 占位符名，保序去重。"""
+    import re
+    found = []
+
+    def rec(x):
+        if isinstance(x, dict):
+            for v in x.values():
+                rec(v)
+        elif isinstance(x, list):
+            for v in x:
+                rec(v)
+        elif isinstance(x, str):
+            for m in re.finditer(r"\$([A-Z][A-Z0-9_]*)", x):
+                if m.group(1) not in found:
+                    found.append(m.group(1))
+
+    rec(steps)
+    return found
+
+
 def save_template(site, desc, steps, home=None, name=None):
     """保存模板到用户目录，返回 {file, site, steps}。同名覆盖。
 
     T4 命名：site=纯网站名，文件名默认 = site_功能.json。
     name 参数给"功能"部分；不给则文件名 = site.json。
+    自动从 steps 提取 $VAR 存入 params（模板声明它需要哪些参数）。
     存到 ~/.agent-gavel/templates/（可写、跨环境持久）。
     """
     _ensure_user_dir()
@@ -166,6 +199,7 @@ def save_template(site, desc, steps, home=None, name=None):
         "site": _slugify(site) or site,
         "desc": desc,
         "home": home or "",
+        "params": _extract_vars(steps),
         "steps": steps,
         "saved_at": datetime.datetime.now().isoformat(timespec="seconds"),
     }
@@ -173,7 +207,8 @@ def save_template(site, desc, steps, home=None, name=None):
         json.dump(tmpl, f, ensure_ascii=False, indent=2)
     # 覆盖同名 → 清零该模板 stats
     reset_stats(os.path.basename(path))
-    return {"file": os.path.basename(path), "site": tmpl["site"], "steps": len(steps)}
+    return {"file": os.path.basename(path), "site": tmpl["site"],
+            "steps": len(steps), "params": tmpl["params"]}
 
 
 def _find_in_dirs(fname):

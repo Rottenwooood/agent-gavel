@@ -60,6 +60,22 @@ def _strip_evidence(result):
     return result
 
 
+def _redact(obj, secrets):
+    """递归替换结构里等于任一 secret 的值 -> '***'（防敏感值落日志/返回）。
+
+    只处理标量相等匹配（不误伤含敏感词的普通文本），secrets 为字符串列表。
+    """
+    if not secrets:
+        return obj
+    if isinstance(obj, str):
+        return "***" if obj in secrets else obj
+    if isinstance(obj, dict):
+        return {k: _redact(v, secrets) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_redact(v, secrets) for v in obj]
+    return obj
+
+
 async def _find_anchor(client, selector):
     """给失效的 CSS 选择器找一个可用的替代锚点。
 
@@ -290,6 +306,7 @@ async def dom_act_and_verify(
     trusted: bool = True,
     wait_mode: str = "poll",
     strict: bool = False,
+    redact_values: list = None,
 ):
     """执行网页动作 + 验证特征变化，一次调用返回。
 
@@ -423,6 +440,11 @@ async def dom_act_and_verify(
     except Exception as e:
         result = {"status": "error", "error": str(e),
                   "cost": {"elapsed_ms": int((time.monotonic() - start) * 1000)}}
+
+    # 敏感值脱敏（密码/token 等）——在写日志和返回前都打码，防真值落盘/回传
+    if redact_values:
+        call = _redact(call, redact_values)
+        result = _redact(result, redact_values)
 
     if debug:
         _write_log(log_prefix, call, result)

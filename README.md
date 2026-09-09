@@ -12,7 +12,7 @@
 
 ## 这是什么
 
-agent-gavel 是一个给 AI 用的 MCP server（stdio 模式），提供"操作网页 / 桌面 + 程序化验证"。
+agent-gavel 是一个给 AI 用的 MCP server，提供"操作网页 / 桌面 + 程序化验证"。
 
 典型的浏览器 agent 循环是：动作 → 页面快照喂回模型 → 模型判断成败 → 下一步。agent-gavel 改成：
 
@@ -20,7 +20,7 @@ agent-gavel 是一个给 AI 用的 MCP server（stdio 模式），提供"操作�
 AI 声明动作 + "做完后页面应该长什么样" → 执行 → 程序断言 → 返回 pass/fail + 实际值
 ```
 
-成败由程序判定，模型不用回头"看"一遍页面。省掉每次动作后的一次模型往返（慢 + 费 token + 靠"看"容易漏）。
+成败由程序判定，模型不用回头"看"一遍页面。省掉每次动作后的一次模型往返（慢 + 费 token + grep容易漏,全量看token花费大）。
 
 **两个通道，可独立安装：**
 
@@ -33,25 +33,22 @@ AI 声明动作 + "做完后页面应该长什么样" → 执行 → 程序断�
 
 ## Install
 
-**兼容性（诚实说明）**：Linux + Python 3.13 验证过，需本机有 Chrome/Chromium。Windows/macOS 未适配（见文末 TODO）。
+**兼容性**：Linux + Python 3.13 验证过，需本机有 Chrome/Chromium。Windows/macOS 未适配（见文末 TODO）。
 
 三种安装方式，按场景选：
 
 ```sh
-# ① 一次性运行（不装任何东西，临时缓存即装即跑）——适合"先试试"
-uvx agent-gavel
-
-# ② 全局安装（推荐正式用）——命令装进 ~/.local/bin，全局 PATH 可用
+# ① 全局安装（推荐正式用）——命令装进 ~/.local/bin，全局 PATH 可用
 uv tool install agent-gavel
 
-# ③ 装进当前 Python 环境（项目 venv / conda env）
+# ② 装进当前 Python 环境（项目 venv / conda env）
 pip install agent-gavel
 
 # 桌面操作（可选）：不装则 DOM 照常可用，只是桌面工具返回 atspi_unavailable
 npm install -g computer-use-linux
 ```
 
-装好后在 MCP 客户端（见下）里配置 `["uvx", "agent-gavel"]`（方式①）或 `["agent-gavel"]`（方式②③，命令已在 PATH），重启后 `doctor` 工具会报告 DOM / AT-SPI 双通道状态——这就是安装成功的信号。
+装好后在 MCP 客户端（见下）里配置`["agent-gavel"]`（方式①②，命令已在 PATH），重启后 `doctor` 工具会报告 DOM / AT-SPI 双通道状态——这就是安装成功的信号。
 
 ### 开发者：clone 源码运行
 
@@ -68,11 +65,7 @@ uv build                   # 本地构建 wheel/sdist
 
 ## 安装后到底发生了什么（流程说明）
 
-### 三种安装方式的区别
-
-**`uvx agent-gavel`** —— 一次性运行，不装进任何环境：
-- uvx 在 `~/.cache/uv` 建**临时虚拟环境**装包，跑完即弃（缓存留档，下次秒起）
-- 适合"先试试"，不污染你的 Python；代价是每次 `uvx` 首次要解析依赖
+### 两种安装方式的区别
 
 **`uv tool install agent-gavel`** —— 全局安装（推荐正式用）：
 - uv 把 agent-gavel 装进 `~/.local/share/uv/tools/` 的独立环境
@@ -95,8 +88,7 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
   "mcp": {
     "agent-gavel": {
       "type": "local",
-      "command": ["uvx", "agent-gavel"],   // 一次性
-      // 或 ["agent-gavel"]  // uv tool install 或 pip install 后(命令已在 PATH)
+      "command": ["agent-gavel"],
       "enabled": true
     }
   }
@@ -111,11 +103,11 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 - **你的模板**：`dom_save_template` / `desktop_save_template` 保存到你自己的用户目录 `~/.config/agent-gavel/{templates,desktop_templates}/`——跨 uvx 缓存、跨安装版本持久存在，不会被升级覆盖
 - 读取时**用户目录优先**：你保存的同名模板覆盖自带模板；失效检测记录（stats）也存用户目录
 
-## 实测耗时（优化前后对比）
+## 实测耗时
 
 ### DOM 通道：固定等待 → 断言轮询
 
-早期版本每个动作后固定 `sleep 3s` 再断言——`set_value` 这种立即生效的动作也白等 3s。改成动作后直接轮询断言（0.25s 间隔，满足即返）后，模板总耗时降 2.5–5.3x：
+改成动作后直接轮询断言（0.25s 间隔，满足即返）后，模板总耗时降 2.5–5.3x：
 
 | 模板 | 优化前总耗时 | 优化后总耗时 | 提速 |
 |---|---|---|---|
@@ -153,7 +145,7 @@ agent-gavel 端到端：`read_state` 620→235ms（2.6x）；`act_and_verify` �
 - **断言降级重试**：fail 自动换策略（trusted 翻转 → 重新 explore 换锚点 → 滚动 → 切换等待模式）；`strict` 参数关掉降级暴露真实 fail（写模板/排查时用）
 - **模板失效检测**：连续失败 ≥3 次标 suspected，再跑返回 warning 建议重新探索；任何一次 pass 清零
 
-### AT-SPI（桌面，可选）
+### AT-SPI（桌面，实验性，可选）
 
 - `act_and_verify` / `run_operation` / 桌面模板，经 computer-use-linux 无障碍树操作桌面应用
 - 默认走优化补丁版（`bin/computer-use-linux-fast`，连接复用 + fast_app_filter）
@@ -166,9 +158,8 @@ agent-gavel 端到端：`read_state` 620→235ms（2.6x）；`act_and_verify` �
 
 ## TODO
 
-"可用"和"正式发布"之间的差距：
-
 - [ ] **适配 Windows**：AT-SPI 桌面通道是 Linux 无障碍树，Windows 应走 UI Automation 或对应后端；DOM 通道理论上跨平台但只在 Linux 验证过
+- [x] **DOM中只声明原子动作**：修改为通过若干原子操作+传入参数覆盖绝大部分操作，更加优美，更加通用
 - [ ] **完善模板共享机制**：当前模板存本地用户目录，缺少"模板共享/导入"通道（如按站点从远端拉模板、版本化、社区模板源）
 - [ ] **登录态模板**：Chrome profile 登录态保留，覆盖真实登录类流程
 - [ ] **多步骤 / 分页 / 滚动模板**：现有模板多是"导航+填+提交"，缺连续点进详情、无限滚动、多 tab
@@ -198,7 +189,9 @@ agent-gavel 的模板按网站组织（`site` 纯站名，文件名 `site_功能
 - [ ] 真实跑通过（`dom_run_template` / `desktop_run_template` 全 pass），PR 描述里贴结果
 - [ ] 步骤含断言（`page_features` + `expected_feature`），不是只发动作不验证
 - [ ] 用了稳定锚点（`#id` / `input[name=x]` / `__text__:`），没有写死易变的 CSS 路径
-- [ ] 涉及登录/个人数据时用假凭据，PR 里说明依赖的登录态
+- [ ] 用 `$VAR` 占位符替代可变输入（关键词/账号/密码），**不要写死真实值**——保存时 `params` 字段会自动从 `$VAR` 提取（`dom_list_templates` 会显示模板需要哪些参数）
+- [ ] 密码/token 等敏感输入用 `$PASSWORD`/`$TOKEN` 这类名字（含 PASSWORD/TOKEN/SECRET/API_KEY 等会自动脱敏——真值只在调用时传 `params`，不落日志、不进返回、不进 git）
+- [ ] 涉及登录/个人数据时：模板文件里用**假凭据占位**（如 `$USERNAME`/`$PASSWORD`，跑的时候才传真实值）；若流程依赖"已登录浏览器"（如删订单），PR 里说明依赖的登录态，别假装模板能独立登录
 - [ ] 描述里写清：站点 URL、功能、测过的关键词/参数
 
 模板存疑或失效会走失效检测（连续失败 ≥3 次标 suspected），无需担心一次不完美。

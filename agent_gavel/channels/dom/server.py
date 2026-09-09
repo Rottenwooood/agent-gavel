@@ -71,6 +71,7 @@ def register_dom_tools(mcp):
         trusted: bool = True,
         wait_mode: str = "poll",
         strict: bool = False,
+        redact: list = None,
     ):
         """通用 DOM 单步闭环：对任意选择器执行一个动作并验证，不绑任何站点。
 
@@ -94,11 +95,20 @@ def register_dom_tools(mcp):
         strict: True 时不自动降级重试，失败直接返回（测试/调试用，暴露真实 fail）。
         debug: 1 保留 evidence 并写日志。
         例：设值并断言输入框内容：
-          dom_step("set_value",
-            selectors={"input":"#inp-query","value":"流浪地球"},
-            page_features={"v":"document.querySelector('#inp-query').value"},
-            expected_feature={"v":{"op":"eq","value":"流浪地球"}})
+           dom_step("set_value",
+             selectors={"input":"#inp-query","value":"流浪地球"},
+             page_features={"v":"document.querySelector('#inp-query').value"},
+             expected_feature={"v":{"op":"eq","value":"流浪地球"}})
+        redact: 可选，声明 selectors 里哪些字段值是敏感值(不落日志/不回传)，
+          如 ["value"]（填密码时用）。dom_run_template 的 $PASSWORD 等自动脱敏。
         """
+        # 收集要脱敏的值（redact 列出的 selectors 字段的实际值）
+        redact_values = []
+        if redact and selectors:
+            for k in redact:
+                v = (selectors or {}).get(k)
+                if v:
+                    redact_values.append(str(v))
         try:
             async with DomClient() as client:
                 return await dom_act_and_verify(
@@ -113,6 +123,7 @@ def register_dom_tools(mcp):
                     trusted=trusted,
                     wait_mode=wait_mode,
                     strict=strict,
+                    redact_values=redact_values,
                 )
         except Exception as e:
             return _dom_error(e)
@@ -250,11 +261,24 @@ def register_dom_tools(mcp):
         失效检测：每跑完记一次连续失败；连续失败>=3 标 suspected，
         pass 清零。suspected 模板执行时返回结果顶部带 warning。
         """
-        from .templates import resolve_template, _fill, record_run, get_stats
+        from .templates import (resolve_template, _fill, record_run, get_stats,
+                                is_sensitive_var)
         template_file, tmpl = resolve_template(name_or_site)
         if not tmpl:
             return {"status": "not_found", "name": name_or_site,
                     "available": [t["file"] for t in _list_template_summaries()]}
+        # 校验模板声明需要的参数是否齐（params 自动从 $VAR 提取）
+        need = tmpl.get("params") or []
+        params = params or {}
+        missing = [p for p in need if p not in params]
+        if missing:
+            return {"status": "fail", "reason": "missing_params",
+                    "missing": missing, "needs": need,
+                    "desc": tmpl.get("desc"),
+                    "hint": f"dom_run_template 需传参数: {need}"}
+        # 敏感参数(密码/token 等)值收集——供脱敏, 不落日志/不回传
+        redact_values = [str(params[p]) for p in params
+                         if is_sensitive_var(p) and params[p]]
         # 执行前查失效状态
         pre = get_stats(template_file)
         warning = None
@@ -278,6 +302,7 @@ def register_dom_tools(mcp):
                         trusted=step.get("trusted", True),
                         wait_mode=step.get("wait_mode", "poll"),
                         strict=strict,
+                        redact_values=redact_values,
                     )
                     results.append({"step": i, "action": step["action"], **r})
                     if r.get("status") != "pass":
