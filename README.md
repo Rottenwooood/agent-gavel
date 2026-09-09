@@ -27,7 +27,7 @@ AI 声明动作 + "做完后页面应该长什么样" → 执行 → 程序断�
 | 通道 | 干什么 | 需要什么 |
 |---|---|---|
 | **DOM**（网页，主通道） | 通过 Chrome CDP 操作真实浏览器：填表 / 点击 / 搜索 / 登录，全部 `isTrusted=true` 真实输入 | 本机 Chrome + Python 3.13，纯 Python 依赖 |
-| **AT-SPI**（桌面，可选） | 通过无障碍树操作桌面应用 | 额外 `npm i -g computer-use-linux` |
+| **AT-SPI**（桌面，实验性·停止开发） | 通过无障碍树操作桌面应用 | 额外 `npm i -g computer-use-linux` |
 
 不装 computer-use-linux 也能用 DOM；装了才解锁桌面工具（不装时桌面工具返回 `atspi_unavailable` 的明确提示）。
 
@@ -156,12 +156,11 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 - **断言降级重试**：fail 自动换策略（trusted 翻转 → 重新 explore 换锚点 → 滚动 → 切换等待模式）；`strict` 参数关掉降级暴露真实 fail（写模板/排查时用）
 - **模板失效检测**：连续失败 ≥3 次标 suspected，再跑返回 warning 建议重新探索；任何一次 pass 清零
 
-### AT-SPI（桌面，实验性，可选）
+### AT-SPI（桌面，实验性·停止开发）
 
-- `act_and_verify` / `run_operation` / 桌面模板，经 computer-use-linux 无障碍树操作桌面应用
-- 默认走优化补丁版（`bin/computer-use-linux-fast`，连接复用 + fast_app_filter）
+> 曾用于操作桌面应用（`act_and_verify` / `run_operation` / 桌面模板，经 computer-use-linux 无障碍树）。Linux 上性能不佳、微信等闭源应用 A11y 树不完整，已停止开发。工具保留可用但不投入；纯 DOM 用法无需安装 computer-use-linux。
 
-### 验证机制（两个通道共用）
+### 验证机制（核心，DOM 在用）
 
 - 断言：`eq / neq / exists / not_exists / contains`（特征用 JS 表达式提取）
 - 等待：`poll`（轮询断言）/ `event`（MutationObserver，DOM 一变即醒，适合异步长等待）
@@ -169,14 +168,28 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 
 ## TODO
 
-- [ ] **适配 Windows**：AT-SPI 桌面通道是 Linux 无障碍树，Windows 应走 UI Automation 或对应后端；DOM 通道理论上跨平台但只在 Linux 验证过
-- [x] **DOM中只声明原子动作**：修改为通过若干原子操作+传入参数覆盖绝大部分操作，更加优美，更加通用
-- [ ] **完善模板共享机制**：当前模板存本地用户目录，缺少"模板共享/导入"通道（如按站点从远端拉模板、版本化、社区模板源）
-- [ ] **登录态模板**：Chrome profile 登录态保留，覆盖真实登录类流程
-- [ ] **多步骤 / 分页 / 滚动模板**：现有模板多是"导航+填+提交"，缺连续点进详情、无限滚动、多 tab
-- [ ] **断言语言增强**：`eq/neq/exists/contains` 之外，补数值比较 / 正则 / 列表断言（结果条数等）
-- [ ] **权限 / 确认机制**：高危操作（提交表单 / 发送）前人工确认
-- [ ] **可观测性**：debug 日志之上，补任务级 trace / 会话重放
+### 通道状态
+
+- **DOM（网页）**：主通道，维护中。
+- **AT-SPI（桌面）**：**实验性，Linux 上性能不佳（读树慢、微信等闭源应用 A11y 树不完整），暂时停止开发**。不装 computer-use-linux 也可用 DOM；桌面工具保留但不再投入。
+
+### 修复（动作空间）
+
+- [ ] **press_key 组合键 bug**：三种拼写行为不一致——`Ctrl+A`/`Control+A` 能识别修饰键但主键 `A` 走 raw_char 分支（`_KEYS` 只收小写字母）；`ctrl+a` 的修饰键完全丢失（`_MODIFIERS` 只认 `Control` 不认 `Ctrl`/小写）。需：修饰键名规范化（大小写/全称 `Control`↔`Ctrl`），主键字母统一转小写查 `_KEYS`，组合按下带修饰位。当前单键特殊键 OK（Enter/Tab/F5 等），普通字符键走 type_text。
+- [x] **单键特殊键已确认**：Home 光标归零、双击选词（click count=2）、及其他原子动作（type_text 中文/右键/hover/drag/scroll）实测正常（`tests/dom_atomic_coverage.py` 17 步全过）。
+
+### 平台 / 能力
+
+- [ ] **适配其他平台**：DOM 理论跨平台但只在 Linux 验证过；Windows/macOS 需补 Chrome 自管 + 测试。
+- [ ] **完善模板共享机制**：当前模板存本地用户目录，缺少"模板共享/导入"通道（按站点从远端拉模板、版本化、社区模板源）。
+- [ ] **登录态模板**：Chrome profile 登录态保留，覆盖真实登录类流程。
+- [ ] **多步骤 / 分页 / 滚动模板**：现有模板多是"导航+填+提交"，缺连续点进详情、无限滚动、多 tab。
+- [ ] **断言语言增强**：`eq/neq/exists/contains` 之外，补数值比较 / 正则 / 列表断言（结果条数等）。
+
+### 产品化
+
+- [ ] **权限 / 确认机制**：高危操作（提交表单 / 发送）前人工确认。
+- [ ] **可观测性**：debug 日志之上，补任务级 trace / 会话重放。
 
 ## 贡献你验证过的模板（PR template）
 
