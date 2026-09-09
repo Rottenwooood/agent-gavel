@@ -1,0 +1,267 @@
+{
+  "site": "atomic-coverage",
+  "desc": "动作空间全覆盖自检：本地测试页跑遍全部 DOM 原子动作(navigate/type_text/press_key/click 左中右+单击双击/hover/drag/scroll/set_value/clear/focus/press_enter)，每步带断言。开发自检资产，非真实站点模板。",
+  "home": "",
+  "steps": [
+    {
+      "action": "navigate",
+      "selectors": {
+        "url": "$FILE"
+      },
+      "page_features": {
+        "t": "document.title"
+      },
+      "expected_feature": {
+        "t": {
+          "op": "contains",
+          "value": "动作空间全覆盖"
+        }
+      }
+    },
+    {
+      "action": "focus",
+      "selectors": {
+        "input": "#box"
+      },
+      "page_features": {
+        "focused": "document.activeElement.id"
+      },
+      "expected_feature": {
+        "focused": {
+          "op": "eq",
+          "value": "box"
+        }
+      }
+    },
+    {
+      "action": "type_text",
+      "selectors": {
+        "target": "#box",
+        "text": "你好世界"
+      },
+      "page_features": {
+        "v": "window.__boxVal()"
+      },
+      "expected_feature": {
+        "v": {
+          "op": "eq",
+          "value": "你好世界"
+        }
+      }
+    },
+    {
+      "action": "press_key",
+      "selectors": {
+        "keys": "ArrowLeft"
+      },
+      "page_features": {
+        "sel": "document.querySelector('#box').selectionStart"
+      },
+      "expected_feature": {
+        "sel": {
+          "op": "eq",
+          "value": 3
+        }
+      }
+    },
+    {
+      "action": "type_text",
+      "selectors": {
+        "text": "+tail"
+      },
+      "page_features": {
+        "v": "window.__boxVal()"
+      },
+      "expected_feature": {
+        "v": {
+          "op": "eq",
+          "value": "你好世+tail界"
+        }
+      }
+    },
+    {
+      "action": "press_key",
+      "selectors": {
+        "keys": "Ctrl+A"
+      },
+      "page_features": {
+        "kbd": "window.__kbd()"
+      },
+      "expected_feature": {
+        "kbd": {
+          "op": "contains",
+          "value": "keydown:A(C)"
+        }
+      }
+    },
+    {
+      "action": "set_value",
+      "selectors": {
+        "input": "#box",
+        "value": "opencode"
+      },
+      "page_features": {
+        "v": "window.__boxVal()"
+      },
+      "expected_feature": {
+        "v": {
+          "op": "eq",
+          "value": "opencode"
+        }
+      }
+    },
+    {
+      "action": "press_key",
+      "selectors": {
+        "keys": "Tab"
+      },
+      "page_features": {
+        "active": "document.activeElement.id"
+      },
+      "expected_feature": {
+        "active": {
+          "op": "eq",
+          "value": "btn"
+        }
+      }
+    },
+    {
+      "action": "click",
+      "selectors": {
+        "target": "#btn"
+      },
+      "page_features": {
+        "n": "window.__clicks()"
+      },
+      "expected_feature": {
+        "n": {
+          "op": "eq",
+          "value": 1
+        }
+      }
+    },
+    {
+      "action": "click",
+      "selectors": {
+        "target": "#btn",
+        "count": 2
+      },
+      "page_features": {
+        "n": "window.__clicks()"
+      },
+      "expected_feature": {
+        "n": {
+          "op": "eq",
+          "value": 3
+        }
+      }
+    },
+    {
+      "action": "click",
+      "selectors": {
+        "target": "#rightme",
+        "button": "right"
+      },
+      "page_features": {
+        "txt": "document.querySelector('#rightme').textContent"
+      },
+      "expected_feature": {
+        "txt": {
+          "op": "eq",
+          "value": "right-clicked"
+        }
+      }
+    },
+    {
+      "action": "hover",
+      "selectors": {
+        "target": "#hoverme"
+      },
+      "page_features": {
+        "txt": "document.querySelector('#hoverme').textContent"
+      },
+      "expected_feature": {
+        "txt": {
+          "op": "eq",
+          "value": "hovered"
+        }
+      }
+    },
+    {
+      "action": "scroll",
+      "selectors": {
+        "target": "#scroller",
+        "direction": "down",
+        "amount": 0.5
+      },
+      "page_features": {
+        "top": "window.__scrollerTop()"
+      },
+      "expected_feature": {
+        "top": {
+          "op": "neq",
+          "value": 0
+        }
+      }
+    },
+    {
+      "action": "clear",
+      "selectors": {
+        "input": "#box"
+      },
+      "page_features": {
+        "v": "window.__boxVal()"
+      },
+      "expected_feature": {
+        "v": {
+          "op": "eq",
+          "value": ""
+        }
+      }
+    },
+    {
+      "action": "type_text",
+      "selectors": {
+        "target": "#box",
+        "text": "press enter now"
+      },
+      "page_features": {
+        "v": "window.__boxVal()"
+      },
+      "expected_feature": {
+        "v": {
+          "op": "eq",
+          "value": "press enter now"
+        }
+      }
+    },
+    {
+      "action": "press_enter",
+      "page_features": {
+        "kbd": "window.__kbd()"
+      },
+      "expected_feature": {
+        "kbd": {
+          "op": "contains",
+          "value": "keydown:Enter"
+        }
+      }
+    },
+    {
+      "action": "drag",
+      "selectors": {
+        "source": "#dragme",
+        "destination": "#dropzone"
+      },
+      "page_features": {
+        "dz": "window.__dropzone()"
+      },
+      "expected_feature": {
+        "dz": {
+          "op": "eq",
+          "value": "dropped!"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>agent-gavel 动作空间全覆盖测试页</title>
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  .box { border: 1px solid #999; padding: 8px; margin: 6px 0; }
+  #kbd-log { font-family: monospace; min-height: 18px; color: #07c; }
+  #btn { padding: 6px 16px; font-size: 15px; }
+  #hoverme { width: 160px; height: 40px; background: #ffe; line-height: 40px;
+             text-align: center; border: 1px solid #ccc; cursor: default; }
+  #rightme { width: 160px; height: 40px; background: #eef; line-height: 40px;
+             text-align: center; border: 1px solid #ccc; }
+  #dragme { width: 90px; height: 34px; background: #dfd; line-height: 34px;
+            text-align: center; border: 1px solid #090; }
+  #dropzone { width: 200px; height: 80px; border: 2px dashed #090; margin-top: 8px;
+              line-height: 80px; text-align: center; color: #666; }
+  #scroller { width: 220px; height: 70px; overflow: auto; border: 1px solid #999; }
+  #scroller-inner { height: 500px; padding: 6px; }
+  #box { width: 260px; padding: 6px; font-size: 15px; }
+</style>
+</head>
+<body>
+<h3>动作空间全覆盖测试</h3>
+
+<p>键盘日志（每次按键追加）：</p>
+<div class="box"><div id="kbd-log"></div></div>
+
+<p><label>输入框 <input id="box" type="text" placeholder="type here"></label></p>
+<p><button id="btn">count=0</button>（单击 +1，双击 +2）</p>
+<p><div id="hoverme">hover me</div></p>
+<p><div id="rightme">right-click me</div></p>
+<p>拖拽：<span id="dragme" draggable="true">drag me</span></p>
+<p><div id="dropzone">drop here</div></p>
+<p><div id="scroller"><div id="scroller-inner">第1行<br>第2行<br>第3行<br>第4行<br>第5行<br>第6行<br>第7行<br>第8行<br>第9行<br>第10行<br>第11行<br>第12行</div></div></p>
+
+<script>
+  const box = document.getElementById('box');
+  const kbd = document.getElementById('kbd-log');
+  const btn = document.getElementById('btn');
+  let clicks = 0;
+  btn.addEventListener('click', () => { clicks++; btn.textContent = 'count=' + clicks; });
+
+  // 键盘日志（追加模式，含修饰键状态）
+  ['keydown','keyup'].forEach(t => box.addEventListener(t, e => {
+    const mods = [e.ctrlKey?'C':'', e.altKey?'A':'', e.shiftKey?'S':'', e.metaKey?'M':''].filter(Boolean).join('+');
+    kbd.textContent += (kbd.textContent ? ' | ' : '') + t + ':' + e.key + (mods?'('+mods+')':'');
+  }));
+
+  const hover = document.getElementById('hoverme');
+  hover.addEventListener('mouseenter', () => { hover.textContent = 'hovered'; });
+  hover.addEventListener('mouseleave', () => { hover.textContent = 'hover me'; });
+
+  const right = document.getElementById('rightme');
+  right.addEventListener('contextmenu', e => { e.preventDefault(); right.textContent = 'right-clicked'; });
+  right.addEventListener('click', () => { right.textContent = 'left-on-rightme'; });
+
+  const dz = document.getElementById('dropzone');
+  dz.addEventListener('dragover', e => e.preventDefault());
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.textContent = 'dropped!'; });
+
+  window.__clicks = () => clicks;
+  window.__boxVal = () => box.value;
+  window.__kbd = () => kbd.textContent;
+  window.__dropzone = () => dz.textContent;
+  window.__scrollerTop = () => document.getElementById('scroller').scrollTop;
+</script>
+</body>
+</html>
