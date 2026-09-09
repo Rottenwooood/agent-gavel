@@ -15,6 +15,7 @@ strict=True 时只跑一次尝试，暴露真实 fail(测试/调试用)。
 """
 
 import asyncio
+import difflib
 import datetime
 import json
 import os
@@ -118,14 +119,151 @@ async def _find_anchor(client, selector):
     return None
 
 
+# ==================== DOM diff 兜底（scoped before/after） ====================
+# 背景：无显式断言(fuzzy)时原实现直接 sleep 0.5 -> pass，等于不验证；
+# 断言失败也只给 fail。桌面通道靠 before/after diff + ambiguous 升级模型，
+# DOM 复用同一思路：对动作作用域做轻量结构签名快照，程序判定
+# pass / fail / ambiguous，把『重新看页面』留给少数拿不准的场景。
+
+_DIFF_MAX_NODES = 6000
+
+
+def _diff_snapshot_js(target_sel, scope_sel):
+    """生成『取动作作用域 DOM 结构签名』的 JS 表达式（返回 {lines, bodyScope, root}）。
+
+    target_sel: 动作目标 CSS；scope_sel: 可选显式作用域。作用域取：显式 scope >
+    目标最近的容器(含 FORM/MAIN/SECTION/ARTICLE/DIV/UL/OL/TABLE/NAV) > body。
+    每节点签名 = tag#id.classes[attrs]+输入值/叶子文本，前面带 URL/TITLE 两行头。
+    遍历上限 _DIFF_MAX_NODES，超限截断仍可比（头行保留判定导航）。
+    """
+    t = json.dumps(target_sel) if target_sel else "null"
+    sc = json.dumps(scope_sel) if scope_sel else "null"
+    return (
+        "(() => {"
+        f"  const MAX = {_DIFF_MAX_NODES};"
+        f"  const target = {t};"
+        f"  const scopeSel = {sc};"
+        "  let root = null;"
+        "  if (scopeSel) root = document.querySelector(scopeSel);"
+        "  if (!root && target) {"
+        "    const el = document.querySelector(target);"
+        "    if (el) {"
+        "      let n = el;"
+        "      while (n && n !== document.body && n.parentElement) {"
+        "        if (/^(FORM|MAIN|SECTION|ARTICLE|DIV|UL|OL|TABLE|NAV)$/.test(n.tagName)) { root = n; break; }"
+        "        n = n.parentElement;"
+        "      }"
+        "      if (!root) root = el.parentElement || el;"
+        "    }"
+        "  }"
+        "  if (!root) root = document.body;"
+        "  const bodyScope = (root === document.body);"
+        "  const out = [];"
+        "  const norm = (x) => { const s = (x == null ? '' : String(x)).replace(/\\s+/g, ' ').trim(); return s; };"
+        "  out.push('URL=' + location.href); out.push('TITLE=' + norm(document.title));"
+        "  let count = 0;"
+        "  const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);"
+        "  let el;"
+        "  while ((el = w.nextNode())) {"
+        "    if (++count > MAX) break;"
+        "    const tag = el.tagName.toLowerCase();"
+        "    let line = tag + (el.id ? '#' + el.id : '');"
+        "    if (el.classList && el.classList.length) {"
+        "      const cls = Array.from(el.classList).filter(c => !/^(sc-|jss|css-)/.test(c)).sort().join('.');"
+        "      if (cls) line += '.' + cls;"
+        "    }"
+        "    for (const a of ['name','type','role','aria-expanded','aria-hidden','placeholder','alt']) {"
+        "      const av = el.getAttribute(a); if (av) line += '[' + a + '=' + norm(av).slice(0, 60) + ']';"
+        "    }"
+        "    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') { line += '=' + norm(el.value).slice(0, 200); }"
+        "    else if (el.tagName === 'SELECT') { const so = el.selectedOptions && el.selectedOptions[0]; line += '=' + norm(so ? so.text : ''); }"
+        "    if (!el.children.length) { const tx = norm(el.textContent || el.getAttribute('placeholder') || ''); if (tx) line += '::' + tx.slice(0, 120); }"
+        "    out.push(line);"
+        "  }"
+        "  return { lines: out, bodyScope: bodyScope, root: (root === document.body ? 'body' : (root.tagName + (root.id ? '#' + root.id : ''))) };"
+        "})()"
+    )
+
+
+async def _diff_snapshot(client, target_sel=None, scope_sel=None):
+    """取一次动作作用域的 DOM 结构签名。失败返回 None（调用方按无法 diff 处理）。"""
+    try:
+        r = await client.eval_js(_diff_snapshot_js(target_sel, scope_sel), timeout=5.0)
+        if isinstance(r, dict) and isinstance(r.get("lines"), list):
+            return r
+    except Exception:
+        pass
+    return None
+
+
+def _diff_verdict(before, after):
+    """对比前后签名，给出 {changed, meaningful, added, removed, ratio, samples_*, scope}。
+
+    语义：
+      - URL/TITLE 头变化 => 一定 meaningful（导航级变化）
+      - 非 body 作用域：任意 1 处节点增删即 meaningful（作用域小而纯净）
+      - body 作用域：需 >=4 处增删才 meaningful（过滤无关噪音）
+    """
+    bl = (before or {}).get("lines") or []
+    al = (after or {}).get("lines") or []
+    if not bl or not al:
+        return None
+    sm = difflib.SequenceMatcher(None, bl, al)
+    added = removed = 0
+    s_add, s_rem = [], []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag in ("insert", "replace"):
+            added += (j2 - j1)
+            s_add += al[j1:j2]
+        if tag in ("delete", "replace"):
+            removed += (i2 - i1)
+            s_rem += bl[i1:i2]
+    header_changed = bl[:2] != al[:2]
+    body = bool(before.get("bodyScope")) or bool(after.get("bodyScope"))
+    n_changed = added + removed
+    if header_changed:
+        meaningful = True
+    else:
+        if body:
+            # body 作用域噪音多：需足够增删，或相对占比明显(过滤大页面零星广告位变动)
+            total = max(len(bl), len(al))
+            meaningful = (n_changed >= 4) or (total > 0 and n_changed / total >= 0.02)
+        else:
+            # 局部作用域小而纯净：任意 1 处变化即 meaningful
+            meaningful = n_changed >= 1
+    return {
+        "changed": (added + removed) > 0,
+        "meaningful": meaningful,
+        "added": added,
+        "removed": removed,
+        "ratio": round(sm.ratio(), 4),
+        "samples_added": s_add[:6],
+        "samples_removed": s_rem[:6],
+        "scope": before.get("root") or after.get("root"),
+    }
+
+
 async def _attempt(client, *, action, selectors, page_features, expected_feature,
-                   wait_s, trusted, wait_mode, start):
+                   wait_s, trusted, wait_mode, start, diff=True):
     """执行一次动作 + 验证。返回 (result_dict, ok_bool)。
 
     ok=False 表示动作执行失败(选择器失效等)；ok=True 但 status=fail 表示
     动作做了但断言没过。返回 result 含 status/verification/evidence。
     """
     sel = selectors or {}
+    # diff 兜底：动作前抓 scoped 快照（仅对会产生 DOM/导航效果、且命中目标动作）。
+    before = None
+    diff_target = sel.get("target") or sel.get("input")
+    diff_wanted = (diff and action in ("click", "press_key", "press_enter",
+                                       "type_text", "set_value", "focus",
+                                       "clear", "hover", "drag"))
+    if diff_wanted and diff_target:
+        before = await _diff_snapshot(client, diff_target, sel.get("diff_scope"))
+    elif diff and action == "navigate":
+        before = await _diff_snapshot(client, None, sel.get("diff_scope"))
+    else:
+        before = None
+
     r = None
     if action == "set_value":
         target = sel.get("input")
@@ -257,7 +395,7 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
                                              timeout_s=wait_s)
         except Exception:
             ev_res = None
-        ev_pass = (isinstance(ev_res, dict) and ev_res.get("status") == "pass")
+        ev_pass = (isinstance(ev_res, dict) and ev_res.get("status") in ("pass", "ambiguous"))
         if ev_pass:
             evidence = ev_res.get("values", {}) if isinstance(ev_res, dict) else {}
             status = "pass"
@@ -282,6 +420,25 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
             await asyncio.sleep(0.5)
             status, detail, evidence = "pass", {"mode": "feature"}, {}
 
+    # ---- diff 兜底判定：无显式断言(fuzzy)或断言失败时，用 scoped 前后变化兜底 ----
+    verdict = None
+    if diff and before is not None and (status != "pass" or not expected_feature):
+        after = await _diff_snapshot(client, diff_target, sel.get("diff_scope"))
+        verdict = _diff_verdict(before, after) if after else None
+        if verdict is not None:
+            if expected_feature:
+                # 有断言：只有"断言没过但页面确实有变化"才算拿不准 -> ambiguous
+                if status != "pass" and verdict.get("meaningful"):
+                    detail = dict(detail)
+                    detail["mode"] = "feature->diff"
+                    detail["diff"] = verdict
+                    status = "ambiguous"
+            else:
+                # 无断言：用 diff 做程序判定，不再盲 sleep 放行
+                detail = dict(detail)
+                detail["mode"] = "diff"
+                detail["diff"] = verdict
+                status = "pass" if verdict.get("meaningful") else "ambiguous"
     res = {
         "status": status,
         "action": {"name": action, "result": r},
@@ -293,7 +450,10 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
         "evidence": evidence,
         "cost": {"elapsed_ms": int((time.monotonic() - start) * 1000)},
     }
-    if status != "pass":
+    if status == "ambiguous":
+        res["reason"] = ("assertion_mismatch_but_change"
+                         if expected_feature else "no_observable_change")
+    elif status != "pass":
         res["reason"] = "assertion_timeout" if expected_feature else "action_failed"
     return res, True
 
@@ -312,6 +472,7 @@ async def dom_act_and_verify(
     wait_mode: str = "poll",
     strict: bool = False,
     redact_values: list = None,
+    diff: bool = True,
 ):
     """执行网页动作 + 验证特征变化，一次调用返回。
 
@@ -347,7 +508,7 @@ async def dom_act_and_verify(
             result, _ = await _attempt(
                 client, action=action, selectors=selectors,
                 page_features=page_features, expected_feature=expected_feature,
-                wait_s=wait_s, trusted=trusted, wait_mode=wait_mode, start=start)
+                wait_s=wait_s, trusted=trusted, wait_mode=wait_mode, start=start, diff=diff)
         else:
             # 降级序列：S1 原样 → S2 trusted 翻转 → S3 换锚点 → S4 滚动 → S5 翻转 wait_mode
             # navigate 不做降级（导航语义明确，重试没意义且会重复跳转）。
@@ -355,7 +516,7 @@ async def dom_act_and_verify(
                 result, _ = await _attempt(
                     client, action=action, selectors=selectors,
                     page_features=page_features, expected_feature=expected_feature,
-                    wait_s=wait_s, trusted=trusted, wait_mode=wait_mode, start=start)
+                    wait_s=wait_s, trusted=trusted, wait_mode=wait_mode, start=start, diff=diff)
             else:
                 attempts = []
                 strategies = [("retry", trusted, wait_mode)]
@@ -382,10 +543,10 @@ async def dom_act_and_verify(
                     res, _ = await _attempt(
                         client, action=action, selectors=selectors,
                         page_features=page_features, expected_feature=expected_feature,
-                        wait_s=wait_s, trusted=tr, wait_mode=wm, start=start)
+                        wait_s=wait_s, trusted=tr, wait_mode=wm, start=start, diff=diff)
                     res["strategy"] = name
                     attempts.append(res)
-                    if res.get("status") == "pass":
+                    if res.get("status") in ("pass", "ambiguous"):
                         final = res
                         break
                     # 动作执行失败(选择器失效)——尝试换锚点
@@ -398,10 +559,10 @@ async def dom_act_and_verify(
                                 client, action=action, selectors=new_sel,
                                 page_features=page_features,
                                 expected_feature=expected_feature,
-                                wait_s=wait_s, trusted=tr, wait_mode=wm, start=start)
+                                wait_s=wait_s, trusted=tr, wait_mode=wm, start=start, diff=diff)
                             res2["strategy"] = "anchor_replace"
                             attempts.append(res2)
-                            if res2.get("status") == "pass":
+                            if res2.get("status") in ("pass", "ambiguous"):
                                 final = res2
                                 break
 
@@ -414,10 +575,10 @@ async def dom_act_and_verify(
                     res4, _ = await _attempt(
                         client, action=action, selectors=selectors,
                         page_features=page_features, expected_feature=expected_feature,
-                        wait_s=wait_s, trusted=trusted, wait_mode=alt_mode, start=start)
+                        wait_s=wait_s, trusted=trusted, wait_mode=alt_mode, start=start, diff=diff)
                     res4["strategy"] = "scroll+" + alt_mode
                     attempts.append(res4)
-                    if res4.get("status") == "pass":
+                    if res4.get("status") in ("pass", "ambiguous"):
                         final = res4
 
                 # S5 独立：wait_mode 翻转（若上面 scroll 已试过 alt_mode 则跳过重复）
@@ -429,17 +590,17 @@ async def dom_act_and_verify(
                             page_features=page_features,
                             expected_feature=expected_feature,
                             wait_s=wait_s, trusted=trusted, wait_mode=alt_mode,
-                            start=start)
+                            start=start, diff=diff)
                         res5["strategy"] = "wait_mode_flip"
                         attempts.append(res5)
-                        if res5.get("status") == "pass":
+                        if res5.get("status") in ("pass", "ambiguous"):
                             final = res5
 
                 final = final or attempts[-1]
                 final["retries"] = [
                     {"strategy": a.get("strategy"), "status": a.get("status")}
                     for a in attempts]
-                if final.get("status") != "pass":
+                if final.get("status") not in ("pass", "ambiguous"):
                     final["reason"] = "all_strategies_failed"
                 result = final
     except Exception as e:

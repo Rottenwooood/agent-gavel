@@ -71,6 +71,7 @@ def register_dom_tools(mcp):
         trusted: bool = True,
         wait_mode: str = "poll",
         strict: bool = False,
+        diff: bool = True,
         redact: list = None,
     ):
         """通用 DOM 单步闭环：对任意选择器执行一个动作并验证，不绑任何站点。
@@ -105,6 +106,9 @@ def register_dom_tools(mcp):
                   等结果出现的异步长等待，DOM 变化即刻唤醒，无定时轮询；
                   注意只对"变化反映到 DOM"的断言有效）
         strict: True 时不自动降级重试，失败直接返回（测试/调试用，暴露真实 fail）。
+        diff: True（默认）启用 scoped diff 兜底：无 expected_feature 时用动作前后
+          DOM 变化程序判定 pass/ambiguous（取代盲 sleep 放行）；有断言但失败且页面
+          确有实质变化时返回 ambiguous 而非直接 fail——只在拿不准处让模型介入。
         debug: 1 保留 evidence 并写日志。
         redact: 可选，声明 selectors 里哪些字段值是敏感值(不落日志/不回传)，
           如 ["value"]（填密码时用）。dom_run_template 的 $PASSWORD 等自动脱敏。
@@ -139,6 +143,7 @@ def register_dom_tools(mcp):
                     trusted=trusted,
                     wait_mode=wait_mode,
                     strict=strict,
+                    diff=diff,
                     redact_values=redact_values,
                 )
         except Exception as e:
