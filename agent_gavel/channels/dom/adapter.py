@@ -111,13 +111,13 @@ class DomClient:
                     raise RuntimeError(f"CDP error: {msg['error']}")
                 return msg.get("result", {})
 
-    async def eval_js(self, expression, return_by_value=True):
+    async def eval_js(self, expression, return_by_value=True, timeout=10.0):
         """执行 JS，返回结果值。"""
         r = await self.cmd("Runtime.evaluate", {
             "expression": expression,
             "returnByValue": return_by_value,
             "awaitPromise": True,
-        })
+        }, timeout=timeout)
         res = r.get("result", {})
         if res.get("type") == "object" and res.get("subtype") == "error":
             raise RuntimeError(f"JS error: {res.get('description')}")
@@ -507,24 +507,26 @@ class DomClient:
         """
         return await self.eval_js(js) or []
 
-    async def wait_page_load(self, settle_s=0.15, timeout_s=15.0):
+    async def wait_page_load(self, settle_s=0.0, timeout_s=15.0):
         """等页面加载完成（事件不依赖固定 sleep）。
 
-        导航后 JS context 会重建，立即 eval 可能超时（已由 cmd 超时保护）。
-        不固定长等——settle_s 只给 context 切换一个极短缓冲，然后轮询
-        readyState；eval 超时/抛错则重试。readyState complete 立即返回，
+        不固定等——直接轮询 readyState；eval 超时/抛错（导航中 context 重建）
+        由 cmd 超时保护转异常，这里重试即可。readyState complete 立即返回，
         渲染兜底交给动作断言轮询。
         """
-        await asyncio.sleep(settle_s)
+        if settle_s:
+            await asyncio.sleep(settle_s)
         start = time.monotonic()
         while time.monotonic() - start < timeout_s:
             try:
-                state = await self.eval_js("document.readyState")
+                # 导航中 context 重建会让 eval 挂起/报错——短超时(3s)让它快速
+                # 失败进重试，而非卡满 cmd 默认 10s
+                state = await self.eval_js("document.readyState", timeout=3.0)
                 if state == "complete":
                     return True
             except Exception:
                 pass  # context 未就绪或 eval 超时，重试
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.1)
         return False
 
     async def wait_event(self, page_features, expected_feature, timeout_s=6.0):
