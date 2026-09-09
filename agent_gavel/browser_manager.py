@@ -97,21 +97,29 @@ def _write_pidfile(pid):
 
 
 def _bring_to_front():
-    """把调试 Chrome 窗口置前可见（best-effort，失败不影响）。
+    """把调试 Chrome 窗口置前可见（best-effort，失败不影响且要快）。
 
     用户要看着浏览器操作，所以每次 ensure 后就把它带到前台。
-    用 xdotool 按 user-data-dir 特征找窗口激活；无 xdotool 则跳过。
+    注意：xdotool windowactivate --sync 会阻塞等激活完成，在 GNOME/Wayland
+    下常等满超时(曾实测每次固定吃 5s)——改用非阻塞 windowactivate +
+    短超时，失败立即返回，绝不让 ensure 变慢。
     """
     try:
         import subprocess as _sp
         import shutil as _sh
         if not _sh.which("xdotool"):
             return False
-        # 按窗口类名或标题找 agent-gavel 的 chrome 窗口激活
-        r = _sp.run(["xdotool", "search", "--class", "Google-chrome",
-                     "windowactivate", "--sync", "%1"],
-                    capture_output=True, timeout=5)
-        return r.returncode == 0
+        # 找 agent-gavel 的 chrome 窗口 id（可能有多个，取第一个）
+        sr = _sp.run(["xdotool", "search", "--onlyvisible",
+                      "--class", "Google-chrome"],
+                     capture_output=True, timeout=1)
+        if sr.returncode != 0 or not sr.stdout.strip():
+            return False
+        wid = sr.stdout.decode().strip().split("\n")[0]
+        # 非阻塞激活 + 短超时：激活失败也不阻塞调用方
+        _sp.run(["xdotool", "windowactivate", wid],
+                capture_output=True, timeout=1)
+        return True
     except Exception:
         return False
 
