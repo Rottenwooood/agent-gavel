@@ -376,10 +376,8 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
                     break
                 detail["checks"] = checks
             else:
-                if not first:
-                    break
-                await asyncio.sleep(0.5)
-                continue
+                # expected 为空：不再固定等 0.5s，交给动作后的 diff 兜底判定
+                break
             if time.monotonic() >= deadline:
                 break
             await asyncio.sleep(0.1)  # 细间隔：整页跳转后新页面~130ms 就绪,
@@ -417,7 +415,7 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
         if page_features:
             status, detail, evidence = await _poll_verify(wait_s)
         else:
-            await asyncio.sleep(0.5)
+            # 无 page_features/expected：不固定睡 0.5s，直接交 diff 兜底判定
             status, detail, evidence = "pass", {"mode": "feature"}, {}
 
     # ---- diff 兜底判定：无显式断言(fuzzy)或断言失败时，用 scoped 前后变化兜底 ----
