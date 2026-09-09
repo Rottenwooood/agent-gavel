@@ -490,17 +490,35 @@ class DomClient:
         k, c, v = key, code, vk
         has_mods = modifiers_bits != 0
         down_type = "rawKeyDown" if has_mods else "keyDown"
-        await self.cmd("Input.dispatchKeyEvent", {
-            "type": down_type, "key": k, "code": c or "",
-            "windowsVirtualKeyCode": v or 0, "modifiers": modifiers_bits})
+        # Windows: CDP 裸 Enter(缺 nativeVirtualKeyCode) 不触发表单提交等
+        # 系统级行为(Chrome 在 Windows 按 native key code 路由)。
+        native = 13 if k == "Enter" else None
+        down = {"type": down_type, "key": k, "code": c or "",
+                "windowsVirtualKeyCode": v or 0, "modifiers": modifiers_bits}
+        up = {"type": "keyUp", "key": k, "code": c or "",
+              "windowsVirtualKeyCode": v or 0, "modifiers": modifiers_bits}
+        if native is not None:
+            down["nativeVirtualKeyCode"] = native
+            up["nativeVirtualKeyCode"] = native
+        await self.cmd("Input.dispatchKeyEvent", down)
         if (spec.get("raw_char") or (k and len(k) == 1
                                      and not spec.get("is_modifier_only"))) and not has_mods:
             await self.cmd("Input.dispatchKeyEvent", {
                 "type": "char", "text": k, "unmodifiedText": k,
                 "windowsVirtualKeyCode": v or 0, "modifiers": modifiers_bits})
-        await self.cmd("Input.dispatchKeyEvent", {
-            "type": "keyUp", "key": k, "code": c or "",
-            "windowsVirtualKeyCode": v or 0, "modifiers": modifiers_bits})
+        await self.cmd("Input.dispatchKeyEvent", up)
+        # Enter 兜底：与 press_enter 一致。仅原生按键对"监听 keydown 的受控站"
+        # 有效；对只认 form 提交的站(必应首页等)原生 Enter 仍可能不触发(实测
+        # Windows 上 CDP Enter 无 requestSubmit 不提交)。补 form 语义提交。
+        if k == "Enter" and not has_mods:
+            await self.eval_js("""
+            (() => {
+                const el = document.activeElement;
+                const form = el && el.closest ? el.closest('form') : null;
+                if (form && form.requestSubmit) { form.requestSubmit(); }
+                return {ok: true, submitted: !!(form && form.requestSubmit)};
+            })()
+            """)
         # 松开修饰键
         for mk, mc, mv, mbit in spec.get("modifiers", []):
             await self.cmd("Input.dispatchKeyEvent", {
