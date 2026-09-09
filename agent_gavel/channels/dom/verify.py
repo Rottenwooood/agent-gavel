@@ -187,7 +187,8 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
                 continue
             if time.monotonic() >= deadline:
                 break
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(0.1)  # 细间隔：整页跳转后新页面~130ms 就绪,
+            # 0.25s 间隔会让 poll2 落到 ~380ms 白等 ~250ms(实测 442->226ms)
         status = "pass" if (not expected_feature) or all_pass else "fail"
         return status, detail, evidence
 
