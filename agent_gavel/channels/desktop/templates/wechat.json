@@ -1,25 +1,45 @@
 {
   "app": "wechat",
-  "desc": "发消息到文件传输助手(模板机制验证)",
+  "desc": "发消息到文件传输助手(安全版)：切换会话→守卫断言确认在文件传输助手→才发送。守卫失败即中止, 绝不误发到其他会话。",
   "app_id": "wechat.desktop",
   "steps": [
     {
       "action": "activate_window",
-      "action_args": {}
+      "action_args": {},
+      "timeout_s": 6.0
+    },
+    {
+      "action": "move_window",
+      "action_args": {"x": 0, "y": 32},
+      "timeout_s": 6.0
     },
     {
       "action": "click",
-      "action_args": {
-        "role": "text",
-        "name": "文件传输助手"
-      }
+      "locate": {"role": "list item", "name": "文件传输助手", "center": true},
+      "action_args": {},
+      "assertions": [
+        {
+          "type": "element_appears",
+          "role": "label",
+          "name": "文件传输助手"
+        }
+      ],
+      "timeout_s": 8.0
     },
     {
       "action": "type",
       "action_args": {
         "text": "$MSG",
         "method": "clipboard"
-      }
+      },
+      "assertions": [
+        {
+          "type": "element_appears",
+          "role": "label",
+          "name": "文件传输助手"
+        }
+      ],
+      "timeout_s": 6.0
     },
     {
       "action": "click",
@@ -33,8 +53,8 @@
           "role": "list item",
           "name": "$MSG"
         }
-      ]
+      ],
+      "timeout_s": 10.0
     }
-  ],
-  "saved_at": "2026-09-08T13:41:38"
+  ]
 }

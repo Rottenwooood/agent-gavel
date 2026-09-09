@@ -20,8 +20,10 @@ _DYNAMIC_FIELDS = {
 
 # 某些 role 的 text 几乎必然是动态的（时钟、秒表、进度），
 # 丢弃其文本以防持续触发 diff。
+# 注意：label 不在 volatile——label 常承载稳定语义(微信会话标题/控件文案)，
+# volatile 化会清掉 name 导致断言够不到它(实测微信顶部会话标题是 label)。
 _VOLATILE_ROLES = {
-    "panel", "timer", "progressbar", "clock", "label", "statusbar",
+    "panel", "timer", "progressbar", "clock", "statusbar",
 }
 
 # 判定为"结构噪音"的 role——元素树里频繁出现但无信息量。
