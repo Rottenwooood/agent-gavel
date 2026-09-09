@@ -75,14 +75,26 @@ def register_dom_tools(mcp):
     ):
         """通用 DOM 单步闭环：对任意选择器执行一个动作并验证，不绑任何站点。
 
-        这是 AI 现场试错/建流程的核心原语。action 是通用动作：
-          navigate  -> selectors.url 导航
-          set_value -> selectors.input + selectors.value 设值
-          click     -> selectors.target 点击（可用 __text__: / __text_nth__:N:: 锚点）
-          press_enter -> 当前焦点触发回车/form 提交
-          clear     -> selectors.input 清空（trusted=True 时用真实 Ctrl+A+Backspace，
-                       对 React 受控组件有效）
-          focus     -> selectors.input 仅聚焦（不清空已填内容）
+        这是 AI 现场试错/建流程的核心原语。action 是原子动作（按输入通道参数化，
+        覆盖人类绝大部分网页操作）：
+          导航: navigate  -> selectors.url 跳转页面
+          键盘: press_key -> selectors.keys 发任意键/组合键，如 "Enter"/"Tab"/
+                "Ctrl+A"/"Shift+Tab"/"ArrowDown"/"F5"（修饰键 + 前缀）
+          文本: type_text -> selectors.text(或 value) 真实输入任意文本到当前焦点
+                （先 focus/click 目标）；含中文/emoji
+          鼠标: click     -> selectors.target 点击；selectors.button=left|right|
+                middle，selectors.count=1|2（右键/双击）
+          悬停: hover     -> selectors.target 鼠标悬停（触发 tooltip/hover 态）
+          拖拽: drag      -> selectors.source 拖到 selectors.destination（或 dx/dy）
+          滚动: scroll    -> selectors.direction=down|up, selectors.amount(屏数),
+                selectors.target 指定滚动容器(可选, 缺省滚整页)
+        便捷动作（组合原语的糖，旧模板兼容）：
+          set_value -> selectors.input + selectors.value 填框（内部真实清空+输入）
+          press_enter -> 发 Enter（等价 press_key keys="Enter"）
+          clear     -> selectors.input 清空
+          focus     -> selectors.input 仅聚焦（不清空）
+        目标寻址: 任意选择器可用 CSS 或锚点 __text__:完整文本 /
+          __text_nth__:N::文本（同名按钮按序号）。
         page_features: {特征名: JS表达式}，动作后提取页面状态
         expected_feature: {特征名: {op: eq|neq|exists|not_exists|contains, value}}
         trusted: True（默认）用 CDP 真实输入/点击/按键（isTrusted=true）。对 React
@@ -94,13 +106,17 @@ def register_dom_tools(mcp):
                   注意只对"变化反映到 DOM"的断言有效）
         strict: True 时不自动降级重试，失败直接返回（测试/调试用，暴露真实 fail）。
         debug: 1 保留 evidence 并写日志。
+        redact: 可选，声明 selectors 里哪些字段值是敏感值(不落日志/不回传)，
+          如 ["value"]（填密码时用）。dom_run_template 的 $PASSWORD 等自动脱敏。
         例：设值并断言输入框内容：
            dom_step("set_value",
              selectors={"input":"#inp-query","value":"流浪地球"},
              page_features={"v":"document.querySelector('#inp-query').value"},
              expected_feature={"v":{"op":"eq","value":"流浪地球"}})
-        redact: 可选，声明 selectors 里哪些字段值是敏感值(不落日志/不回传)，
-          如 ["value"]（填密码时用）。dom_run_template 的 $PASSWORD 等自动脱敏。
+        例：按键+断言：
+           dom_step("press_key", selectors={"keys":"Enter"},
+             page_features={"t":"document.title"},
+             expected_feature={"t":{"op":"contains","value":"结果"}})
         """
         # 收集要脱敏的值（redact 列出的 selectors 字段的实际值）
         redact_values = []
@@ -214,15 +230,20 @@ def register_dom_tools(mcp):
     async def dom_save_template(site: str, desc: str, steps: list,
                                 home: str = None, name: str = None,
                                 sensitive_params: list = None):
-        """把现场跑通的一套网页流程固化成可复用模板。
+        """把现场跑通的一套网页流程固化成可复用模板（存到用户目录，跨版本持久）。
 
-        steps 每项 = {"action": navigate|set_value|click|press_enter|focus,
+        site: 纯网站名（bing/zhihu/douban…），文件名自动 = site_功能.json。
+        steps 每项 = {"action": navigate|press_key|type_text|click|hover|drag|
+                      scroll|set_value|press_enter|clear|focus,
                       "selectors": {...},
                       "page_features": {特征名: JS表达式},   # 动作后提取
                       "expected_feature": {特征名: {op, value}}}  # 断言
-        sensitive_params: 可选，显式声明哪些参数是敏感的(密码/token)，
-          如 ["PASSWORD"]——运行时传的真实值不落日志/不进返回。不声明则
-          不脱敏(除非参数名命中 PASSWORD/TOKEN 等关键词兜底)。
+        可变输入用 $VAR 占位（如 "$QUERY"/"$USERNAME"）——保存时自动提取进
+        params 声明，dom_list_templates 可查；运行时由 dom_run_template 的
+        params 传入真实值。**不要写死真实值/密码进模板**。
+        sensitive_params: 可选，显式声明哪些 $VAR 是敏感的(密码/token)，
+          如 ["PASSWORD"] → 模板 params 标 sensitive，运行时真实值不落日志/
+          不进返回。不声明默认不敏感(仅名含 PASSWORD/TOKEN 等关键词时兜底)。
         例：
           [{"action":"navigate","selectors":{"url":"https://.../"},
             "page_features":{"title":"document.title"},
@@ -242,7 +263,12 @@ def register_dom_tools(mcp):
 
     @mcp.tool()
     async def dom_list_templates():
-        """列出已保存的 DOM 流程模板。"""
+        """列出已保存的 DOM 流程模板，含每模板所需 params（含 sensitive 标记）。
+
+        返回每项: {file, site, desc, steps, params: {参数名: {sensitive: bool}},
+                  consecutive_fails, suspected}。用 params 看跑该模板要传哪些
+        参数（dom_run_template 的 params 键）。
+        """
         from .templates import list_templates
         return list_templates()
 
@@ -263,7 +289,9 @@ def register_dom_tools(mcp):
         """执行已保存的 DOM 流程模板，逐步验证，任一步 fail 即停。
 
         name_or_site: 模板文件名或 site 标识。
-        params: 替换模板里的 $VAR（如 {"QUERY": "..."}）。
+        params: 替换模板里的 $VAR 占位符（如 {"QUERY": "搜索词"}）。模板声明的
+          参数(dom_list_templates 可查)必须都传，缺参数返回 missing_params。
+          敏感参数(模板标 sensitive 的，如 $PASSWORD)真实值不落日志/不进返回。
         strict: True 时不自动降级重试（测试/调试用，暴露模板真实 fail）。
         debug: 1 保留 evidence 并写日志。
         失效检测：每跑完记一次连续失败；连续失败>=3 标 suspected，
