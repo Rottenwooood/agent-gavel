@@ -1,6 +1,6 @@
 [project]
 name = "agent-gavel"
-version = "0.2.1"
+version = "0.2.2"
 description = "验证驱动的多端操作框架：动作发出去，程序断言判成败，省掉一次模型往返"
 readme = "README.md"
 requires-python = ">=3.13"
