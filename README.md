@@ -17,10 +17,12 @@ agent-gavel 是一个给 AI 用的 MCP server，提供"操作网页 / 桌面 + �
 典型的浏览器 agent 循环是：动作 → 页面快照喂回模型 → 模型判断成败 → 下一步。agent-gavel 改成：
 
 ```
-AI 声明动作 + "做完后页面应该长什么样" → 执行 → 程序断言 → 返回 pass/fail + 实际值
+AI 声明动作 + "做完后页面应该长什么样" → 执行 → 程序断言 → 返回 pass/fail/ambiguous + 实际值
 ```
 
 成败由程序判定，模型不用回头"看"一遍页面。省掉每次动作后的一次模型往返（慢 + 费 token + grep容易漏,全量看token花费大）。
+
+结果**三态**：`pass`（断言满足）/ `fail`（断言未满足且页面无变化，明确失败）/ `ambiguous`（拿不准——断言没过但页面确实变了、或无断言但检测到变化，交回模型仲裁）。多数场景是明确的 pass/fail，ambiguous 只留给少数真拿不准的情况。
 
 **两个通道，可独立安装：**
 
@@ -119,6 +121,20 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 
 数据来自 `tests/dom_smoke.py` 分段计时与 `tests/dom_smoke_loop.py` 多模板循环压测（5 模板 × 3 轮全过，平均单次 ~0.6s）。慢的是页面真实加载，工具本身动作步都在毫秒级。
 
+**验证判定耗时**（`tests/verify_branches.py`，10 个分支全过）：
+
+| 分支 | 结果 | 耗时 |
+|---|---|---|
+| 有断言 + 满足 | pass | ~3ms |
+| 有断言 + 不满足 + 页面有变化 | ambiguous | ~5ms（不等超时，立即判定）|
+| 有断言 + 不满足 + 页面无变化 | fail | ~wait_s（等满才判失败）|
+| 无断言 + 有变化 | pass | ~4ms |
+| 无断言 + 无变化 | ambiguous | ~5ms |
+| 有断言 + 延迟 500ms 满足 | pass | ~511ms |
+| 降级全失败（strict=False，3 策略）| fail | ~1.8s |
+
+DOM diff 兜底让"无断言"从原来固定 sleep 0.5s → **~4ms**（~100x）；early ambiguous 让"断言失败但页面有变"从等满 wait_s → **~5ms**。只有真 fail 和降级才耗超时。
+
 ### AT-SPI 桌面通道：微信发消息模板
 
 微信发消息模板（4 步：激活窗口→点会话→输入→发送）的耗时构成，实测微信窗口开着时（优化前基准）：
@@ -149,10 +165,11 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 ### DOM（网页）
 
 - **Chrome 自管**：首次调用自动起独立 profile 调试 Chrome（可见窗口，永不用 headless），崩溃自愈，退出清理
-- **`dom_step`**：通用单步闭环（动作 + 选择器 + 断言一次调用），动作空间按**输入通道参数化**——键盘 `press_key`（任意键/组合键：Enter/Tab/Ctrl+A/F5…）+ 文本 `type_text`（含中文）+ 鼠标 `click`（左/右/中、单击/双击）+ `hover`/`drag`/`scroll` + 导航 `navigate`；`set_value/press_enter/clear/focus` 作便捷动作保留
+- **`dom_step`**：通用单步闭环（动作 + 选择器 + 断言一次调用），动作空间按**输入通道参数化**——键盘 `press_key`（特殊键：Enter/Tab/F5/ArrowDown…；组合键 `Ctrl+A` 有解析 bug，见 TODO）+ 文本 `type_text`（含中文）+ 鼠标 `click`（左/右/中、单击/双击）+ `hover`/`drag`/`scroll` + 导航 `navigate`；`set_value/press_enter/clear/focus` 作便捷动作保留
 - **`dom_explore`**：枚举页面可交互元素，给验证过唯一的锚点（`#id` / `input[name=q]` / `__text__:登录` / 同名按钮用 `__text_nth__:N::`）
 - **模板复用**：跑通的流程存 JSON（`templates/`，按网站组织：`site` 纯站名，文件名 `site_功能.json`），换参数直接跑
 - **失败诊断**：环境错误（Chrome 没起 / DISPLAY 缺失 / CDP 断）返回 `reason + hint`，不会让 agent 对着一个 "Error executing tool" 猜
+- **三态验证 + DOM diff 兜底**：无断言时不再盲 sleep 放行——抓动作作用域前后 DOM 结构签名做 diff，变化明显判 `pass`、无变化判 `ambiguous`；断言失败但页面确实变化 → `ambiguous`（可能点错/断言写窄），断言失败且无变化 → `fail`
 - **断言降级重试**：fail 自动换策略（trusted 翻转 → 重新 explore 换锚点 → 滚动 → 切换等待模式）；`strict` 参数关掉降级暴露真实 fail（写模板/排查时用）
 - **模板失效检测**：连续失败 ≥3 次标 suspected，再跑返回 warning 建议重新探索；任何一次 pass 清零
 
@@ -162,9 +179,12 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 
 ### 验证机制（核心，DOM 在用）
 
-- 断言：`eq / neq / exists / not_exists / contains`（特征用 JS 表达式提取）
-- 等待：`poll`（轮询断言）/ `event`（MutationObserver，DOM 一变即醒，适合异步长等待）
-- 每动作返回 `cost.phase` 毫秒级拆分（before_read / action / wait / after_verify），性能可观测
+- **三态判定**：`pass` / `fail` / `ambiguous`——程序能明确判的就判，判不了的交回模型
+- **断言**：`eq / neq / exists / not_exists / contains`（特征用 JS 表达式提取）
+- **DOM diff 兜底**：无断言、或断言失败时，抓动作作用域的前后 DOM 结构签名做 diff——URL/TITLE 变化=导航级，局部作用域任意 1 处变化即算，body 作用域需足够增删（过滤广告位等噪音），据此程序判 `pass`/`ambiguous`
+- **等待**：`poll`（轮询断言，间隔 0.1s）/ `event`（MutationObserver，DOM 一变即醒，适合异步长等待）
+- **降级重试**：fail 自动换策略（trusted 翻转 → 换锚点 → 滚动 → 切等待模式）；`strict=True` 关降级暴露真实 fail
+- 每动作返回 `cost.elapsed_ms`（端到端毫秒）；各分支结果与计时见 `tests/verify_branches.py`
 
 ## TODO
 
@@ -175,6 +195,7 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 
 ### 修复（动作空间）
 
+- [x] **三态验证 + DOM diff 兜底**（本次）：无断言/断言失败时抓动作作用域前后 DOM 结构签名做 diff，程序判定 `pass`/`fail`/`ambiguous`；修复 early ambiguous 被 `all_pass=False → fail` 覆盖的 bug；`tests/verify_branches.py` 10 分支全过
 - [ ] **press_key 组合键 bug**：三种拼写行为不一致——`Ctrl+A`/`Control+A` 能识别修饰键但主键 `A` 走 raw_char 分支（`_KEYS` 只收小写字母）；`ctrl+a` 的修饰键完全丢失（`_MODIFIERS` 只认 `Control` 不认 `Ctrl`/小写）。需：修饰键名规范化（大小写/全称 `Control`↔`Ctrl`），主键字母统一转小写查 `_KEYS`，组合按下带修饰位。当前单键特殊键 OK（Enter/Tab/F5 等），普通字符键走 type_text。
 - [x] **单键特殊键已确认**：Home 光标归零、双击选词（click count=2）、及其他原子动作（type_text 中文/右键/hover/drag/scroll）实测正常（`tests/dom_atomic_coverage.py` 17 步全过）。
 
