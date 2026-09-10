@@ -60,18 +60,16 @@ Chrome 需能在 PATH 里找到（`google-chrome` / `google-chrome-stable` / `ch
 **Windows**
 
 ```powershell
-# 1. 装 Chrome 或直接用系统自带 Edge
+# 1. 装 Chrome
 #    自动探测顺序：Program Files / Program Files(x86) / LOCALAPPDATA 下的 chrome.exe、msedge.exe，再查 PATH
 
-# 2. 确认在正常桌面会话即可（Windows 天然有窗口，无 DISPLAY 概念）
+# 2. 确认在正常桌面会话即可
 ```
-
-无需额外配置。Chrome 没装时用 Edge 也能跑。
 
 两种安装方式，按场景选：
 
 ```sh
-# ① 全局安装（推荐正式用）——命令装进 ~/.local/bin，全局 PATH 可用
+# ① 全局安装 ——命令装进 ~/.local/bin，全局 PATH 可用
 uv tool install agent-gavel
 
 # ② 装进当前 Python 环境（项目 venv / conda env）
@@ -83,7 +81,7 @@ npm install -g computer-use-linux
 
 装好后在 MCP 客户端（见下）里配置`["agent-gavel"]`（方式①②，命令已在 PATH），重启后 `doctor` 工具会报告 DOM 通道状态（Linux 上还含 AT-SPI）——这就是安装成功的信号。
 
-### 开发者：clone 源码运行
+### 从源码安装
 
 ```sh
 git clone https://github.com/Rottenwooood/agent-gavel.git
