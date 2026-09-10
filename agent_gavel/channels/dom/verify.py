@@ -393,7 +393,10 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
                 break
             await asyncio.sleep(0.1)  # 细间隔：整页跳转后新页面~130ms 就绪,
             # 0.25s 间隔会让 poll2 落到 ~380ms 白等 ~250ms(实测 442->226ms)
-        status = "pass" if (not expected_feature) or all_pass else "fail"
+        # early 分支已判 ambiguous(断言没过但页面确实变了)——别被下面的
+        # "all_pass=False -> fail" 覆盖(否则 mode 标签丢失，after 快照失败时会误判 fail)
+        if status != "ambiguous":
+            status = "pass" if (not expected_feature) or all_pass else "fail"
         return status, detail, evidence
 
     if wait_mode == "event" and page_features and expected_feature:
@@ -434,8 +437,10 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
             status, detail, evidence = "pass", {"mode": "feature"}, {}
 
     # ---- diff 兜底判定：无显式断言(fuzzy)或断言失败时，用 scoped 前后变化兜底 ----
+    # 注意：poll 内已判 ambiguous(early) 的不再兜底——否则会覆盖 mode 标签，
+    # 且 after 快照失败时会把 ambiguous 误降为 fail。
     verdict = None
-    if diff and before is not None and (status != "pass" or not expected_feature):
+    if diff and before is not None and (status == "fail" or not expected_feature):
         after = await _diff_snapshot(client, diff_target, sel.get("diff_scope"))
         verdict = _diff_verdict(before, after) if after else None
         if verdict is not None:

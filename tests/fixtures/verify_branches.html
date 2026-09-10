@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>verify branches</title></head>
+<body>
+  <div id="panel">
+    <button id="btn-change">change</button>
+    <button id="btn-noop">noop</button>
+    <button id="btn-assert">assert</button>
+    <button id="btn-delay">delay</button>
+    <input id="inp">
+    <div id="result">init</div>
+  </div>
+  <div id="far">far-region</div>
+  <script>
+    let n = 0;
+    document.getElementById('btn-change').onclick = () => {
+      n++;
+      document.getElementById('result').textContent = 'changed-' + n;
+    };
+    document.getElementById('btn-noop').onclick = () => {};
+    document.getElementById('btn-assert').onclick = () => {
+      document.getElementById('result').textContent = 'DONE';
+    };
+    document.getElementById('btn-delay').onclick = () => {
+      setTimeout(() => { document.getElementById('result').textContent = 'DONE'; }, 500);
+    };
+  </script>
+</body>
+</html>
