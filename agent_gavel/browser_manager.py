@@ -9,9 +9,12 @@ T1 后按需自启。要点：
   - 崩溃自愈：下一次连接时探测发现死了，自动重拉
   - 退出清理：stop_own() 由 main.py 的退出 handler（父进程死亡）调用
 
+可选无头：默认有头（可见窗口）。设 AGENT_GAVEL_HEADLESS=1 走 --headless=new，
+无桌面会话也能跑（服务器/CI）；无头时跳过 DISPLAY 检查与窗口置顶。
+
 Windows 适配说明（相对 Linux 版差异）：
   - Chrome 路径发现：额外探测 chrome.exe/msedge.exe 的常见安装路径
-  - 无 DISPLAY 概念：可见窗口即桌面会话，直接 spawn（不降级 headless）
+  - 无 DISPLAY 概念：可见窗口即桌面会话，直接 spawn
   - 进程存活/归属校验用 psutil（pid_exists + cmdline 含 user-data-dir），
     不再依赖 /proc 与 os.killpg
   - 前台置顶：Windows 用 user32（EnumWindows + ShowWindow +
@@ -56,6 +59,12 @@ LOGFILE = os.environ.get(
 CHROME_BIN = os.environ.get("AGENT_GAVEL_CHROME_BIN", "")
 
 _IS_WINDOWS = os.name == "nt"
+
+# 可选无头模式：默认有头（可见窗口，用户能看操作过程）。设
+# AGENT_GAVEL_HEADLESS=1 切无头（服务器/CI/无桌面会话用）。进程级开关——
+# 在 MCP 客户端的 environment 字段里设（见 README），不在 shell 里 export。
+_HEADLESS = os.environ.get(
+    "AGENT_GAVEL_HEADLESS", "").strip().lower() in ("1", "true", "yes", "on")
 
 # 启动 Chrome 用参数：独立 profile、开调试口、不弹"恢复会话"等干扰。
 # 注: --no-sandbox 在部分 Linux 发行版必需；--disable-gpu 避免无头渲染告警。
@@ -154,6 +163,8 @@ def _bring_to_front(pid=None):
       注意：windowactivate --sync 会阻塞等激活完成，GNOME/Wayland 常等满超时
       曾实测每次固定吃 5s——绝不用 --sync。
     """
+    if _HEADLESS:
+        return False  # 无头没有窗口可置顶
     if _IS_WINDOWS:
         return _win_bring_to_front(pid)
     return _x11_bring_to_front()
@@ -222,21 +233,27 @@ def _own_process_alive(pid):
 def _spawn(port=DEBUG_PORT):
     """拉起 Chrome（组长 pid 记入 pidfile）。
 
-    永不用 headless：agent-gavel 的调试 Chrome 必须有可见窗口（用户要看
-    操作过程）。Linux 无 DISPLAY 时直接报错；Windows 桌面会话天然有窗口，
-    跳过该检查。
+    默认有头：调试 Chrome 用可见窗口（用户要看操作过程），Linux 无 DISPLAY
+    时报错；Windows 桌面会话天然有窗口，跳过该检查。设 AGENT_GAVEL_HEADLESS=1
+    则走无头（--headless=new），此时不要求 DISPLAY。
     """
     binary = chrome_binary()
     if not binary:
         return {"ok": False, "error": "no chrome binary found"}
-    if not _IS_WINDOWS:
+    if not _IS_WINDOWS and not _HEADLESS:
         disp = os.environ.get("DISPLAY", "") or os.environ.get("WAYLAND_DISPLAY", "")
         if not disp:
             return {"ok": False, "error":
-                    "DISPLAY 未设置——调试 Chrome 需要可见窗口(不用 headless)。"
-                    "请在桌面会话里运行，或 export DISPLAY=:0"}
+                    "DISPLAY 未设置——调试 Chrome 默认要可见窗口。请在桌面会话里"
+                    "运行，或 export DISPLAY=:0；无桌面会话可切无头：在 MCP 客户端"
+                    "的 environment 里设 AGENT_GAVEL_HEADLESS=1（见 README）"}
     _log_dir()
-    cmd = [binary, *list(_CHROME_FLAGS),
+    flags = list(_CHROME_FLAGS)
+    if _HEADLESS:
+        # 新版无头（Chrome 112+），渲染/UA 更接近有头；固定窗口尺寸避免默认
+        # 800x600 影响响应式布局。
+        flags += ["--headless=new", "--window-size=1920,1080"]
+    cmd = [binary, *flags,
            f"--user-data-dir={USER_DATA_DIR}",
            f"--remote-debugging-port={port}",
            "about:blank"]
@@ -371,6 +388,7 @@ def status(port=DEBUG_PORT):
         "cdp_ready": probe.get("ok"),
         "browser": probe.get("browser", ""),
         "owner": "self" if mine else ("external" if probe.get("ok") else "none"),
+        "mode": "headless" if _HEADLESS else "headed",
         "pidfile_pid": pid,
         "port": port,
     }

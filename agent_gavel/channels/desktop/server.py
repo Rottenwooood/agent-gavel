@@ -536,6 +536,7 @@ def register_desktop_tools(mcp):
         checks["cdp_ready"] = bm["cdp_ready"]
         checks["cdp_browser"] = bm["browser"]
         checks["cdp_owner"] = bm["owner"]
+        checks["cdp_mode"] = bm["mode"]
         checks["cdp_pidfile"] = bm["pidfile_pid"]
         checks["chrome_hint"] = (
             "ok: agent-gavel 管理的 Chrome 在跑" if bm["owner"] == "self"

@@ -39,7 +39,7 @@ AI 声明动作 + "做完后页面应该长什么样" → 执行 → 程序断�
 
 ### 环境准备（Ubuntu / Windows）
 
-两者都需要 **Python 3.13**（`uv` 会自动装，`pip` 方式请自备）和一个 **Chrome/Chromium**；DOM 通道**必须在桌面会话里跑**（调试 Chrome 是可见窗口，不用 headless）。
+两者都需要 **Python 3.13**（`uv` 会自动装，`pip` 方式请自备）和一个 **Chrome/Chromium**；DOM 通道默认**在桌面会话里跑**（调试 Chrome 是可见窗口）。无桌面会话（服务器 / CI / SSH）可切无头模式，见下文"怎么接到 opencode"的 `AGENT_GAVEL_HEADLESS`。
 
 **Ubuntu**
 
@@ -68,7 +68,7 @@ Chrome 需能在 PATH 里找到（`google-chrome` / `google-chrome-stable` / `ch
 
 无需额外配置。Chrome 没装时用 Edge 也能跑。
 
-三种安装方式，按场景选：
+两种安装方式，按场景选：
 
 ```sh
 # ① 全局安装（推荐正式用）——命令装进 ~/.local/bin，全局 PATH 可用
@@ -77,11 +77,11 @@ uv tool install agent-gavel
 # ② 装进当前 Python 环境（项目 venv / conda env）
 pip install agent-gavel
 
-# 桌面操作（可选）：不装则 DOM 照常可用，只是桌面工具返回 atspi_unavailable
+# 桌面操作（可选，仅 Linux）：不装则 DOM 照常可用，只是桌面工具返回 atspi_unavailable
 npm install -g computer-use-linux
 ```
 
-装好后在 MCP 客户端（见下）里配置`["agent-gavel"]`（方式①②，命令已在 PATH），重启后 `doctor` 工具会报告 DOM / AT-SPI 双通道状态——这就是安装成功的信号。
+装好后在 MCP 客户端（见下）里配置`["agent-gavel"]`（方式①②，命令已在 PATH），重启后 `doctor` 工具会报告 DOM 通道状态（Linux 上还含 AT-SPI）——这就是安装成功的信号。
 
 ### 开发者：clone 源码运行
 
@@ -89,10 +89,12 @@ npm install -g computer-use-linux
 git clone https://github.com/Rottenwooood/agent-gavel.git
 cd agent-gavel
 uv sync                    # 装依赖（Python 3.13）
-uv run python3 -m agent_gavel.main    # 起 MCP server（等价 ./run-mcp.sh）
-uv run python3 tests/browser_manager_smoke.py   # Chrome 生命周期冒烟测试
+uv run python -m agent_gavel.main    # 起 MCP server
+uv run python tests/browser_manager_smoke.py   # Chrome 生命周期冒烟测试
 uv build                   # 本地构建 wheel/sdist
 ```
+
+`uv run python ...` 两端通用。Linux 上另有 `./run-mcp.sh`——带优化版 computer-use-linux 的启动器（仅源码运行用）；Windows 直接用上面的 `uv run python -m agent_gavel.main`。
 
 源码跑通后，想贡献你验证过的模板 → 见文末"贡献你验证过的模板"。
 
@@ -101,22 +103,21 @@ uv build                   # 本地构建 wheel/sdist
 ### 两种安装方式的区别
 
 **`uv tool install agent-gavel`** —— 全局安装（推荐正式用）：
-- uv 把 agent-gavel 装进 `~/.local/share/uv/tools/` 的独立环境
-- 可执行命令 `agent-gavel` 链接到 `~/.local/bin/`（已在你的 PATH 里）
+- uv 把 agent-gavel 装进 uv 的 tool 目录（`uv tool dir` 可查；Linux 默认 `~/.local/share/uv/tools/`）
+- 可执行命令 `agent-gavel` 链接到 uv 的 bin 目录（Linux `~/.local/bin/`，Windows `%USERPROFILE%\.local\bin`），已在 PATH 里
 - 任何目录都能直接 `agent-gavel` 起 server，类似 `npm i -g`
 
 **`pip install agent-gavel`** —— 装进当前 Python 环境（项目 venv / conda env）：
-- `agent_gavel/` 包落到 `<venv>/lib/python3.13/site-packages/`
+- `agent_gavel/` 包落到 site-packages（Linux `<venv>/lib/python3.13/site-packages/`，Windows `<venv>\Lib\site-packages\`）
 - 同时生成可执行命令 `agent-gavel`（指向 `agent_gavel.main:main`），在所在环境 PATH 里
 
 三种方式最终效果一致：**启动一个在 stdio 上说话的 MCP server 进程**，等 MCP 客户端连它。区别只在命令装在哪、是否全局可用。
 
 ### 怎么接到 opencode
 
-opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
+opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信（配置在 opencode 的配置文件里，Linux/macOS 通常是 `~/.config/opencode/opencode.json`；Windows 路径见 opencode 文档）：
 
 ```json
-// ~/.config/opencode/opencode.json
 {
   "mcp": {
     "agent-gavel": {
@@ -128,12 +129,25 @@ opencode 通过 `command` 数组拉起这个进程，两者用 stdio 通信：
 }
 ```
 
-重启 opencode，工具列表出现 `agent-gavel_dom_*` 系列。**无需手动开 Chrome**——首次 DOM 调用时 server 自动用独立 profile 拉起可见窗口的调试 Chrome，崩溃自动重拉，退出自动清理。
+重启 opencode，工具列表出现 `agent-gavel_dom_*` 系列。**无需手动开 Chrome**——首次 DOM 调用时 server 自动用独立 profile 拉起调试 Chrome，崩溃自动重拉，退出自动清理。
+
+**可选无头**：默认拉起**可见窗口**的调试 Chrome（能看到操作过程）。无桌面会话（服务器 / CI / SSH）时，在 MCP 客户端给这个 server 传环境变量切无头：
+
+```json
+"agent-gavel": {
+  "type": "local",
+  "command": ["agent-gavel"],
+  "environment": { "AGENT_GAVEL_HEADLESS": "1" },
+  "enabled": true
+}
+```
+
+无头用 `--headless=new`（Chrome 112+），**不要求 `DISPLAY`**；`doctor` 的 `cdp_mode` 会报告当前模式（`headed` / `headless`）。切换模式后**重启 opencode**（旧 Chrome 随 server 退出被清理）。注意：无头下无法人工扫码/验证码，登录类流程需依赖已登录 profile。
 
 ### 模板存在哪
 
 - **随包模板**：安装自带的模板在 `site-packages/agent_gavel/channels/{dom,desktop}/templates/`（只读默认，如百度/必应/豆瓣等 8 个验证过的）
-- **你的模板**：`dom_save_template` / `desktop_save_template` 保存到你自己的用户目录 `~/.config/agent-gavel/{templates,desktop_templates}/`——跨 uvx 缓存、跨安装版本持久存在，不会被升级覆盖
+- **你的模板**：`dom_save_template` / `desktop_save_template` 保存到你自己的用户目录——Linux `~/.config/agent-gavel/`，Windows `%APPDATA%\agent-gavel\`（下分 `templates/`、`desktop_templates/`）——跨缓存、跨安装版本持久存在，不会被升级覆盖
 - 读取时**用户目录优先**：你保存的同名模板覆盖自带模板；失效检测记录（stats）也存用户目录
 
 ## 实测耗时
@@ -195,11 +209,11 @@ DOM diff 兜底让"无断言"从原来固定 sleep 0.5s → **~4ms**（~100x）�
 
 ### DOM（网页）
 
-- **Chrome 自管**：首次调用自动起独立 profile 调试 Chrome（可见窗口，永不用 headless），崩溃自愈，退出清理
+- **Chrome 自管**：首次调用自动起独立 profile 调试 Chrome（默认可见窗口；`AGENT_GAVEL_HEADLESS=1` 切无头），崩溃自愈，退出清理
 - **`dom_step`**：通用单步闭环（动作 + 选择器 + 断言一次调用），动作空间按**输入通道参数化**——键盘 `press_key`（特殊键：Enter/Tab/F5/ArrowDown…；组合键 `Ctrl+A` 有解析 bug，见 TODO）+ 文本 `type_text`（含中文）+ 鼠标 `click`（左/右/中、单击/双击）+ `hover`/`drag`/`scroll` + 导航 `navigate`；`set_value/press_enter/clear/focus` 作便捷动作保留
 - **`dom_explore`**：枚举页面可交互元素，给验证过唯一的锚点（`#id` / `input[name=q]` / `__text__:登录` / 同名按钮用 `__text_nth__:N::`）
 - **模板复用**：跑通的流程存 JSON（`templates/`，按网站组织：`site` 纯站名，文件名 `site_功能.json`），换参数直接跑
-- **失败诊断**：环境错误（Chrome 没起 / DISPLAY 缺失 / CDP 断）返回 `reason + hint`，不会让 agent 对着一个 "Error executing tool" 猜
+- **失败诊断**：环境错误（Chrome 没起 / Linux 缺 DISPLAY / CDP 断）返回 `reason + hint`，hint 里会提示可切无头（`AGENT_GAVEL_HEADLESS=1`），不会让 agent 对着一个 "Error executing tool" 猜
 - **三态验证 + DOM diff 兜底**：无断言时不再盲 sleep 放行——抓动作作用域前后 DOM 结构签名做 diff，变化明显判 `pass`、无变化判 `ambiguous`；断言失败但页面确实变化 → `ambiguous`（可能点错/断言写窄），断言失败且无变化 → `fail`
 - **断言降级重试**：fail 自动换策略（trusted 翻转 → 重新 explore 换锚点 → 滚动 → 切换等待模式）；`strict` 参数关掉降级暴露真实 fail（写模板/排查时用）
 - **模板失效检测**：连续失败 ≥3 次标 suspected，再跑返回 warning 建议重新探索；任何一次 pass 清零
@@ -253,7 +267,7 @@ agent-gavel 的模板按网站组织（`site` 纯站名，文件名 `site_功能
 
 ### 模板去哪、怎么存
 
-模板默认读**用户目录**优先（`~/.config/agent-gavel/{templates,desktop_templates}/`），随包模板在 `agent_gavel/channels/{dom,desktop}/templates/`。
+模板默认读**用户目录**优先（Linux `~/.config/agent-gavel/`，Windows `%APPDATA%\agent-gavel\`；下分 `templates/`、`desktop_templates/`），随包模板在 `agent_gavel/channels/{dom,desktop}/templates/`。
 
 贡献模板的路径：源码 clone → 用 `dom_explore` + `dom_step` 现场探索跑通 → `dom_save_template` 存 JSON → 确认稳定后放进仓库对应目录提 PR。
 
