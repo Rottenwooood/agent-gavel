@@ -37,6 +37,37 @@ AI 声明动作 + "做完后页面应该长什么样" → 执行 → 程序断�
 
 **兼容性**：Linux + Python 3.13 验证过，需本机有 Chrome/Chromium。**Windows 上 DOM 通道已适配**（Chrome 自管/进程清理/置顶已跨平台，Windows + Chrome 实测跑通；见文末 TODO）；macOS 与桌面(AT-SPI)通道仍仅限 Linux。
 
+### 环境准备（Ubuntu / Windows）
+
+两者都需要 **Python 3.13**（`uv` 会自动装，`pip` 方式请自备）和一个 **Chrome/Chromium**；DOM 通道**必须在桌面会话里跑**（调试 Chrome 是可见窗口，不用 headless）。
+
+**Ubuntu**
+
+```sh
+# 1. 装 Chrome（二选一）
+sudo apt install -y ./google-chrome-stable_current_amd64.deb   # 先从 google.com/chrome 下载 deb
+sudo apt install -y chromium-browser                            # 或装 Chromium
+
+# 2. 置顶工具（可选，装了才能把调试 Chrome 窗口自动置顶）
+sudo apt install -y xdotool
+
+# 3. 确认在桌面会话（有 DISPLAY 或 WAYLAND_DISPLAY）
+echo "$DISPLAY $WAYLAND_DISPLAY"
+```
+
+Chrome 需能在 PATH 里找到（`google-chrome` / `google-chrome-stable` / `chromium` / `chromium-browser` 任一）。
+
+**Windows**
+
+```powershell
+# 1. 装 Chrome 或直接用系统自带 Edge
+#    自动探测顺序：Program Files / Program Files(x86) / LOCALAPPDATA 下的 chrome.exe、msedge.exe，再查 PATH
+
+# 2. 确认在正常桌面会话即可（Windows 天然有窗口，无 DISPLAY 概念）
+```
+
+无需额外配置。Chrome 没装时用 Edge 也能跑。
+
 三种安装方式，按场景选：
 
 ```sh
