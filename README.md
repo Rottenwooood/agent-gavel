@@ -222,14 +222,16 @@ DOM diff 兜底让"无断言"从原来固定 sleep 0.5s → **~4ms**（~100x）�
 
 | 我要做的事 | 用哪个 |
 |---|---|
-| 打开一个网址 | `dom_navigate`（给 url；自动验证到没到，返回最终 url / 是否跳转 / content_type）|
-| 读页面上的值（标题 / 输入框 / 某字段 / 一段文本） | `dom_read`（给"名字 → 取值规则"，直接返回值，不判定不重试）|
-| 读整页或某块的正文、或页面所有链接 | `dom_text`（`text` / `content` / `html` / `links`）|
-| 做一个动作并验证结果 | `dom_step`（动作 + 断言一次调用）|
-| 看页面有哪些可点 / 可填元素 | `dom_explore`（可传 url 一次性探索）|
-| 读 .pdf / .docx 直链文件内容 | `dom_document` |
+| 打开一个网址 | `dom_navigate`（**唯一导航入口**；自动验证到没到，返回最终 url / 是否跳转 / content_type）|
+| 读页面上的值（标题 / 输入框 / 某字段 / 一段文本） | `dom_read`（**通用读**：给"名字 → 取值规则"，直接返回值，不判定不重试）|
+| 读整页或某块的正文、或页面所有链接 | `dom_text`（`text` / `content` / `html` / `links`；dom_read 的专用视图）|
+| 做一个动作并验证结果 | `dom_step`（动作 + 断言；**不含导航**——导航用 dom_navigate）|
+| 看页面有哪些可点 / 可填元素 | `dom_explore`（dom_read 的专用视图，锚点带唯一性校验；可传 url 一次性探索）|
+| 读 .pdf / .docx 直链文件内容 | `dom_document`（dom_read 读不到的"文件"视图）|
 | 重复跑同一套流程 | `dom_save_template` 存模板 → `dom_run_template` |
 | 以"读"为主、几乎不点 | `dom_navigate` + `dom_text` + `dom_read` 三件套足够 |
+
+一句话边界：**改页面用 `dom_step`（导航除外），纯读用 `dom_read`（或它的三个专用视图 `dom_text` / `dom_explore` / `dom_document`），导航只用 `dom_navigate`。**
 
 ### AT-SPI（桌面，实验性·停止开发）
 

@@ -154,9 +154,13 @@ def register_dom_tools(mcp):
     ):
         """通用 DOM 单步闭环：对任意选择器执行一个动作并验证，不绑任何站点。
 
+        边界（别混用）：本工具只做"页面内动作 + 判定"。导航用 dom_navigate
+        （唯一导航入口，会验证是否真到达）；纯读值用 dom_read（不判定/不重试，
+        更快）；读文本/链接/元素锚点/文件分别用 dom_text / dom_explore /
+        dom_document。
+
         这是 AI 现场试错/建流程的核心原语。action 是原子动作（按输入通道参数化，
         覆盖人类绝大部分网页操作）：
-          导航: navigate  -> selectors.url 跳转页面
           键盘: press_key -> selectors.keys 发任意键/组合键，如 "Enter"/"Tab"/
                 "Ctrl+A"/"Shift+Tab"/"ArrowDown"/"F5"（修饰键 + 前缀）
           文本: type_text -> selectors.text(或 value) 真实输入任意文本到当前焦点
@@ -202,6 +206,11 @@ def register_dom_tools(mcp):
              page_features={"t":"document.title"},
              expected_feature={"t":{"op":"contains","value":"结果"}})
         """
+        if action == "navigate":
+            return {"status": "error", "reason": "use_dom_navigate",
+                    "hint": "导航请用 dom_navigate（唯一导航入口，会验证是否真到达、"
+                            "返回最终 url / content_type）；dom_step 只做页面内动作。"
+                            "纯读值用 dom_read。"}
         # 收集要脱敏的值（redact 列出的 selectors 字段的实际值）
         redact_values = []
         if redact and selectors:
@@ -236,6 +245,8 @@ def register_dom_tools(mcp):
                            expected_feature: dict = None,
                            debug: int = 0):
         """导航浏览器到指定站点/URL，并验证是否真的到达（不再"发出即成功"）。
+
+        这是**唯一的导航入口**——dom_step 不接受 navigate。导航一律用这个。
 
         url: 直接跳这个 URL（给了就用它）。
         site: 可选；只有没给 url 时，才用它查已存模板的 home 跳转。
@@ -339,6 +350,10 @@ def register_dom_tools(mcp):
                        wait_s: float = 0.0, debug: int = 0):
         """只读取值：按 page_features 到页面取值返回——不判定、不重试、不 diff。
 
+        这是**通用读**。读文本/链接、枚举可交互元素、读文件分别有省事的专用工具
+        dom_text / dom_explore / dom_document——它们本质是这里的特化视图；能用
+        表达式做的，用它们更省事（不必手写 JS）。要动作/判定用 dom_step。
+
         与 dom_step 的区别：不做成功/失败判定，不触发降级重试，不抓 diff 快照。
         纯一次页面求值（毫秒级）。适合读标题/输入框内容/正文/PDF 文字层等。
         之前只能故意制造断言失败才能拿到值，且要跑全策略重试（慢）；这个工具
@@ -402,7 +417,7 @@ def register_dom_tools(mcp):
     async def dom_text(selector: str = None, mode: str = "text", *,
                        wait_s: float = 0.0, max_chars: int = 200000,
                        max_links: int = 500):
-        """取页面/元素文本（正文提取）。
+        """取页面/元素文本（正文提取）——dom_read 的专用视图（省去手写 JS）。
 
         selector: CSS 选择器；缺省取整页 body。
         mode: text(可见文字) | content(原始文字) | html(结构) |
@@ -478,7 +493,7 @@ def register_dom_tools(mcp):
 
     @mcp.tool()
     async def dom_document(url: str = None, max_chars: int = 200000):
-        """下载并抽取文档文本（PDF / Word），用于直链是文件的场景。
+        """下载并抽取文档文本（PDF / Word）——dom_read 读不到的"文件"专用视图。
 
         很多政策文件是 .pdf/.doc/.docx 直链，Chrome 会下载而非导航，DOM 通道读不到
         （dom_navigate 会返回 not_navigated）。这个工具用 HTTP 直接取文件并按类型抽文本。
@@ -528,7 +543,8 @@ def register_dom_tools(mcp):
         include_all: bool = False,
         url: str = None,
     ):
-        """探索当前浏览器页面：返回可交互元素的锚点清单。
+        """探索当前浏览器页面：返回可交互元素的锚点清单——dom_read 的专用视图
+        （锚点带唯一性校验，比手写表达式省事）。
 
         锚点分三类：id（#kw）、name（input[name=q]）、文本（__text__: 或
         __text_nth__:N::，重复文本用组内序号区分）。

@@ -136,6 +136,13 @@ async def main():
                 check("8 dom_document docx", r.get("extracted") is True
                       and "保研政策测试文档" in txt and r.get("kind") == "docx",
                       f"{ms}ms kind={r.get('kind')} len={r.get('length')}")
+
+                # 9 dom_step 拒绝 navigate（导航唯一入口是 dom_navigate）
+                r, ms = await call(s, "dom_step",
+                                   {"action": "navigate", "selectors": {"url": FIX}})
+                check("9 dom_step 拒绝 navigate", r.get("status") == "error"
+                      and r.get("reason") == "use_dom_navigate",
+                      f"{ms}ms reason={r.get('reason')}")
     finally:
         httpd.shutdown()
 
