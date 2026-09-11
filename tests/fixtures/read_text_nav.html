@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>read-text-nav</title></head>
+<body>
+  <div id="panel">
+    <p id="para">第一行
+第二行 文本内容 ABC</p>
+    <button id="btn">set</button>
+    <a id="nav" href="page2.html">next</a>
+    <div id="out">init</div>
+  </div>
+  <script>
+    document.getElementById('btn').onclick = () => {
+      document.getElementById('out').textContent = 'clicked';
+    };
+  </script>
+</body>
+</html>

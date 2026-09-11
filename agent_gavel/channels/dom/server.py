@@ -5,9 +5,11 @@ T2 拆分：DOM 网页操作相关工具全部集中于此，通过 register_dom
 """
 
 import asyncio
+import json
+import time
 
 from .adapter import DomClient
-from .verify import dom_act_and_verify, _write_log
+from .verify import dom_act_and_verify, _write_log, _feature_expr
 
 
 def _dom_error(e):
@@ -26,8 +28,8 @@ def _dom_error(e):
             "status": "error",
             "reason": "chrome_env",
             "error": msg,
-            "hint": "调试 Chrome 没起来——调 chrome(ensure) 或确认 DISPLAY；"
-                    "headless 已禁用，需桌面会话",
+            "hint": "调试 Chrome 没起来——调 chrome(ensure)，或确认 DISPLAY；"
+                    "无桌面会话可在 MCP 客户端 environment 里设 AGENT_GAVEL_HEADLESS=1",
         }
     if "no matching CDP page target" in msg:
         return {
@@ -37,6 +39,20 @@ def _dom_error(e):
             "hint": "Chrome 在跑但没有可用页面 tab——导航一个 URL 或开新 tab",
         }
     return {"status": "error", "reason": "dom_error", "error": msg}
+
+
+async def _wait_selector(client, selector, timeout):
+    """轮询等选择器命中的元素出现。返回 True/False。"""
+    deadline = time.monotonic() + timeout
+    js = f"!!document.querySelector({json.dumps(selector)})"
+    while time.monotonic() < deadline:
+        try:
+            if await client.eval_js(js):
+                return True
+        except Exception:
+            pass
+        await asyncio.sleep(0.1)
+    return False
 
 
 def register_dom_tools(mcp):
@@ -72,6 +88,7 @@ def register_dom_tools(mcp):
         wait_mode: str = "poll",
         strict: bool = False,
         diff: bool = True,
+        wait_navigation: bool = None,
         redact: list = None,
     ):
         """通用 DOM 单步闭环：对任意选择器执行一个动作并验证，不绑任何站点。
@@ -109,6 +126,8 @@ def register_dom_tools(mcp):
         diff: True（默认）启用 scoped diff 兜底：无 expected_feature 时用动作前后
           DOM 变化程序判定 pass/ambiguous（取代盲 sleep 放行）；有断言但失败且页面
           确有实质变化时返回 ambiguous 而非直接 fail——只在拿不准处让模型介入。
+        wait_navigation: 点击/按键可能触发跳转——True 时轮询等跳转完成再验证，
+          返回最终 url（默认 None 只做即时判断，不拖慢普通点击）。
         debug: 1 保留 evidence 并写日志。
         redact: 可选，声明 selectors 里哪些字段值是敏感值(不落日志/不回传)，
           如 ["value"]（填密码时用）。dom_run_template 的 $PASSWORD 等自动脱敏。
@@ -144,19 +163,21 @@ def register_dom_tools(mcp):
                     wait_mode=wait_mode,
                     strict=strict,
                     diff=diff,
+                    wait_navigation=wait_navigation,
                     redact_values=redact_values,
                 )
         except Exception as e:
             return _dom_error(e)
 
     @mcp.tool()
-    async def dom_navigate(site: str, url: str = None, *, debug: int = 0):
+    async def dom_navigate(site: str = None, url: str = None, *, debug: int = 0):
         """导航浏览器到指定站点/URL（DOM 通道）。
 
-        site: 已存模板的站点名（用其 home 跳转）或任意标识；url 给了则直接跳 url。
+        url: 直接跳这个 URL（给了就用它）。
+        site: 可选；只有没给 url 时，才用它查已存模板的 home 跳转。
         """
         target = url
-        if not target:
+        if not target and site:
             from .templates import load_template
             tmpl = load_template(site)
             target = (tmpl or {}).get("home")
@@ -176,6 +197,90 @@ def register_dom_tools(mcp):
                     _write_log("dom_navigate",
                                {"tool": "dom_navigate", "site": site, "url": target}, r)
                 return r
+        except Exception as e:
+            return _dom_error(e)
+
+    @mcp.tool()
+    async def dom_read(page_features: dict, selector: str = None, *,
+                       wait_s: float = 0.0, debug: int = 0):
+        """只读取值：按 page_features 到页面取值返回——不判定、不重试、不 diff。
+
+        与 dom_step 的区别：不做成功/失败判定，不触发降级重试，不抓 diff 快照。
+        纯一次页面求值（毫秒级）。适合读标题/输入框内容/正文/PDF 文字层等。
+        之前只能故意制造断言失败才能拿到值，且要跑全策略重试（慢）；这个工具
+        直接把值给你。
+
+        page_features: {名字: 表达式或函数}。纯表达式直接算；需要多步/赋值时
+          写成函数形式 "() => { ...; return ...; }"（换行在函数体里合法）。
+        selector: 可选，先等该元素出现再取值。
+        wait_s: selector 存在时的等待上限（秒）。
+        """
+        t0 = time.monotonic()
+        try:
+            async with DomClient() as client:
+                if selector and wait_s > 0:
+                    await _wait_selector(client, selector, wait_s)
+                feats = {}
+                for name, expr in (page_features or {}).items():
+                    feats[name] = await client.eval_js(_feature_expr(expr))
+                out = {
+                    "status": "ok",
+                    "features": feats,
+                    "url": await client.eval_js("location.href"),
+                    "title": await client.get_title(),
+                    "cost": {"elapsed_ms": int((time.monotonic() - t0) * 1000)},
+                }
+                if debug:
+                    _write_log("dom_read", {"page_features": page_features}, out)
+                return out
+        except Exception as e:
+            return _dom_error(e)
+
+    @mcp.tool()
+    async def dom_text(selector: str = None, mode: str = "text", *,
+                       wait_s: float = 0.0, max_chars: int = 200000):
+        """取页面/元素文本（正文提取）。
+
+        selector: CSS 选择器；缺省取整页 body。
+        mode: text(可见文字) | content(原始文字) | html(结构)。
+        wait_s: 元素等待上限（秒），0=不等待。
+        max_chars: 返回文本上限（默认 200000），超出截断并标 truncated。
+        注意：浏览器内置 PDF 阅读界面不是页面元素，取不到；站点自渲染的 PDF
+        文字层（如 .textLayer）可正常取。
+        """
+        t0 = time.monotonic()
+        sel = json.dumps(selector) if selector else "null"
+        getter = {"html": "el.outerHTML", "content": "el.textContent"}.get(
+            mode, "el.innerText")
+        expr = (
+            "(() => {"
+            f"  const sel = {sel};"
+            "  const el = sel ? document.querySelector(sel) : document.body;"
+            "  if (!el) return {found:false, text:''};"
+            f"  const t = ({getter}) || '';"
+            "  return {found:true, text:t, tag:el.tagName.toLowerCase()};"
+            "})()"
+        )
+        try:
+            async with DomClient() as client:
+                if selector and wait_s > 0:
+                    await _wait_selector(client, selector, wait_s)
+                r = await client.eval_js(expr)
+                if not isinstance(r, dict) or not r.get("found"):
+                    return {"status": "not_found", "selector": selector,
+                            "hint": "元素没找到——检查选择器或加 wait_s"}
+                text = r.get("text") or ""
+                out = {
+                    "status": "ok",
+                    "text": text[:max_chars],
+                    "length": len(text),
+                    "truncated": len(text) > max_chars,
+                    "tag": r.get("tag"),
+                    "url": await client.eval_js("location.href"),
+                    "title": await client.get_title(),
+                    "cost": {"elapsed_ms": int((time.monotonic() - t0) * 1000)},
+                }
+                return out
         except Exception as e:
             return _dom_error(e)
 

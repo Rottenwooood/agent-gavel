@@ -208,7 +208,9 @@ DOM diff 兜底让"无断言"从原来固定 sleep 0.5s → **~4ms**（~100x）�
 ### DOM（网页）
 
 - **Chrome 自管**：首次调用自动起独立 profile 调试 Chrome（默认可见窗口；`AGENT_GAVEL_HEADLESS=1` 切无头），崩溃自愈，退出清理
-- **`dom_step`**：通用单步闭环（动作 + 选择器 + 断言一次调用），动作空间按**输入通道参数化**——键盘 `press_key`（特殊键：Enter/Tab/F5/ArrowDown…；组合键 `Ctrl+A` 有解析 bug，见 TODO）+ 文本 `type_text`（含中文）+ 鼠标 `click`（左/右/中、单击/双击）+ `hover`/`drag`/`scroll` + 导航 `navigate`；`set_value/press_enter/clear/focus` 作便捷动作保留
+- **`dom_step`**：通用单步闭环（动作 + 选择器 + 断言一次调用），动作空间按**输入通道参数化**——键盘 `press_key`（特殊键：Enter/Tab/F5/ArrowDown…；组合键 `Ctrl+A` 有解析 bug，见 TODO）+ 文本 `type_text`（含中文）+ 鼠标 `click`（左/右/中、单击/双击）+ `hover`/`drag`/`scroll` + 导航 `navigate`；`set_value/press_enter/clear/focus` 作便捷动作保留。点击/按键可能跳转时用 `wait_navigation=True`，等跳转完成再返回最终 url
+- **`dom_read`**：只读取值——给一组"名字 → 取值规则"直接返回实际值，不判定 / 不重试 / 不 diff（读标题、输入框内容、正文、PDF 文字层）。取值规则支持纯表达式，或函数形式 `"() => { ...; return ...; }"`（多语句 / 赋值）
+- **`dom_text`**：取页面/元素文本（`text` 可见文字 / `content` 原始文字 / `html` 结构），正文提取；浏览器内置 PDF 阅读界面不是页面元素，取不到
 - **`dom_explore`**：枚举页面可交互元素，给验证过唯一的锚点（`#id` / `input[name=q]` / `__text__:登录` / 同名按钮用 `__text_nth__:N::`）
 - **模板复用**：跑通的流程存 JSON（`templates/`，按网站组织：`site` 纯站名，文件名 `site_功能.json`），换参数直接跑
 - **失败诊断**：环境错误（Chrome 没起 / Linux 缺 DISPLAY / CDP 断）返回 `reason + hint`，hint 里会提示可切无头（`AGENT_GAVEL_HEADLESS=1`），不会让 agent 对着一个 "Error executing tool" 猜

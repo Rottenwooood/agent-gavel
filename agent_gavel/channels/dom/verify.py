@@ -82,6 +82,21 @@ def _redact(obj, secrets):
     return obj
 
 
+def _feature_expr(expr):
+    """页面特征表达式归一化。
+
+    纯表达式原样用；函数形式（"() => {...}" / "function(){...}"）包成立即调用，
+    从而支持多语句/赋值（如先改值再返回）。换行在函数体内是合法的，也顺带绕开
+    "JSON 里 '\\n' 变成真换行截断单行表达式"的坑。
+    """
+    if not isinstance(expr, str):
+        return expr
+    s = expr.strip()
+    if s.startswith("()=>") or s.startswith("() =>") or s.startswith("function"):
+        return f"({s})()"
+    return expr
+
+
 async def _find_anchor(client, selector):
     """给失效的 CSS 选择器找一个可用的替代锚点。
 
@@ -243,14 +258,48 @@ def _diff_verdict(before, after):
     }
 
 
+async def _settle_navigation(client, url_before, wait_navigation, wait_s):
+    """动作后等可能的页面跳转，跳转完成返回 True。
+
+    URL 已变 → 等页面加载完成再返回；wait_navigation=True 时轮询等更久（慢导航）。
+    wait_navigation 默认 None：只做一次即时判断，不额外等待——不拖慢普通点击。
+    """
+    try:
+        cur = await client.eval_js("location.href")
+    except Exception:
+        return False
+    if cur and url_before and cur != url_before:
+        await client.wait_page_load()
+        return True
+    if wait_navigation is True:
+        deadline = time.monotonic() + min(max(wait_s, 0.5), 5.0)
+        while time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+            try:
+                cur = await client.eval_js("location.href")
+            except Exception:
+                return False
+            if cur and url_before and cur != url_before:
+                await client.wait_page_load()
+                return True
+    return False
+
+
 async def _attempt(client, *, action, selectors, page_features, expected_feature,
-                   wait_s, trusted, wait_mode, start, diff=True):
+                   wait_s, trusted, wait_mode, start, diff=True, wait_navigation=None):
     """执行一次动作 + 验证。返回 (result_dict, ok_bool)。
 
     ok=False 表示动作执行失败(选择器失效等)；ok=True 但 status=fail 表示
     动作做了但断言没过。返回 result 含 status/verification/evidence。
     """
     sel = selectors or {}
+    # 导航检测：记录动作前 URL（click/press_key/press_enter 可能触发跳转）。
+    url_before = None
+    if action in ("click", "press_key", "press_enter") and wait_navigation is not False:
+        try:
+            url_before = await client.eval_js("location.href")
+        except Exception:
+            url_before = None
     # diff 兜底：动作前抓 scoped 快照（仅对会产生 DOM/导航效果、且命中目标动作）。
     before = None
     diff_target = sel.get("target") or sel.get("input")
@@ -340,6 +389,10 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
         return {"status": "fail", "reason": "action_failed",
                 "action_error": r, "action": {"name": action}}, False
 
+    # 导航检测：动作可能触发跳转——等跳转完成，再验证/读 url（否则读到旧 url）
+    if url_before is not None:
+        await _settle_navigation(client, url_before, wait_navigation, wait_s)
+
     # ---- 验证特征 ----
     async def _poll_verify(remaining_s, *, before=None, diff_target=None,
                            diff_scope=None, diff_enabled=False):
@@ -353,7 +406,7 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
             ev = {}
             try:
                 for fname, expr in page_features.items():
-                    ev[fname] = await client.eval_js(expr)
+                    ev[fname] = await client.eval_js(_feature_expr(expr))
             except Exception:
                 ev = {f: "<eval-error>" for f in page_features} if first else ev
             if first:
@@ -491,6 +544,7 @@ async def dom_act_and_verify(
     strict: bool = False,
     redact_values: list = None,
     diff: bool = True,
+    wait_navigation: bool = None,
 ):
     """执行网页动作 + 验证特征变化，一次调用返回。
 
@@ -526,7 +580,7 @@ async def dom_act_and_verify(
             result, _ = await _attempt(
                 client, action=action, selectors=selectors,
                 page_features=page_features, expected_feature=expected_feature,
-                wait_s=wait_s, trusted=trusted, wait_mode=wait_mode, start=start, diff=diff)
+                wait_s=wait_s, trusted=trusted, wait_mode=wait_mode, start=start, diff=diff, wait_navigation=wait_navigation)
         else:
             # 降级序列：S1 原样 → S2 trusted 翻转 → S3 换锚点 → S4 滚动 → S5 翻转 wait_mode
             # navigate 不做降级（导航语义明确，重试没意义且会重复跳转）。
@@ -534,7 +588,7 @@ async def dom_act_and_verify(
                 result, _ = await _attempt(
                     client, action=action, selectors=selectors,
                     page_features=page_features, expected_feature=expected_feature,
-                    wait_s=wait_s, trusted=trusted, wait_mode=wait_mode, start=start, diff=diff)
+                    wait_s=wait_s, trusted=trusted, wait_mode=wait_mode, start=start, diff=diff, wait_navigation=wait_navigation)
             else:
                 attempts = []
                 strategies = [("retry", trusted, wait_mode)]
@@ -561,7 +615,7 @@ async def dom_act_and_verify(
                     res, _ = await _attempt(
                         client, action=action, selectors=selectors,
                         page_features=page_features, expected_feature=expected_feature,
-                        wait_s=wait_s, trusted=tr, wait_mode=wm, start=start, diff=diff)
+                        wait_s=wait_s, trusted=tr, wait_mode=wm, start=start, diff=diff, wait_navigation=wait_navigation)
                     res["strategy"] = name
                     attempts.append(res)
                     if res.get("status") in ("pass", "ambiguous"):
@@ -577,7 +631,7 @@ async def dom_act_and_verify(
                                 client, action=action, selectors=new_sel,
                                 page_features=page_features,
                                 expected_feature=expected_feature,
-                                wait_s=wait_s, trusted=tr, wait_mode=wm, start=start, diff=diff)
+                                wait_s=wait_s, trusted=tr, wait_mode=wm, start=start, diff=diff, wait_navigation=wait_navigation)
                             res2["strategy"] = "anchor_replace"
                             attempts.append(res2)
                             if res2.get("status") in ("pass", "ambiguous"):
@@ -593,7 +647,7 @@ async def dom_act_and_verify(
                     res4, _ = await _attempt(
                         client, action=action, selectors=selectors,
                         page_features=page_features, expected_feature=expected_feature,
-                        wait_s=wait_s, trusted=trusted, wait_mode=alt_mode, start=start, diff=diff)
+                        wait_s=wait_s, trusted=trusted, wait_mode=alt_mode, start=start, diff=diff, wait_navigation=wait_navigation)
                     res4["strategy"] = "scroll+" + alt_mode
                     attempts.append(res4)
                     if res4.get("status") in ("pass", "ambiguous"):
@@ -608,7 +662,7 @@ async def dom_act_and_verify(
                             page_features=page_features,
                             expected_feature=expected_feature,
                             wait_s=wait_s, trusted=trusted, wait_mode=alt_mode,
-                            start=start, diff=diff)
+                            start=start, diff=diff, wait_navigation=wait_navigation)
                         res5["strategy"] = "wait_mode_flip"
                         attempts.append(res5)
                         if res5.get("status") in ("pass", "ambiguous"):
