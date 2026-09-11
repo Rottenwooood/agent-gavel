@@ -273,14 +273,16 @@ def register_dom_tools(mcp):
     async def dom_navigate(site: str = None, url: str = None, *,
                            page_features: dict = None,
                            expected_feature: dict = None,
-                           debug: int = 0):
+                           wait_s: float = 8.0, debug: int = 0):
         """导航浏览器到指定站点/URL，并验证是否真的到达（不再"发出即成功"）。
 
         这是**唯一的导航入口**——dom_step 不接受 navigate。导航一律用这个。
 
         url: 直接跳这个 URL（给了就用它）。
         site: 可选；只有没给 url 时，才用它查已存模板的 home 跳转。
-        page_features / expected_feature: 可选，到达后按断言判定（语义同 dom_step）。
+        page_features / expected_feature: 可选，到达后按断言判定（语义同 dom_step）；
+          断言在 wait_s 内**轮询等待**（页面动态内容晚于 load 事件出现时不会误判）。
+        wait_s: 断言轮询上限（秒，默认 8）。
         返回 requested_url / final_url / navigated / redirected / content_type。
         内置判定：最终 url 没变（目标其实是下载/doc/pdf，Chrome 不导航）→ fail；
           跳到 */error* 或标题像错误页 → warning。
@@ -316,19 +318,21 @@ def register_dom_tools(mcp):
                     "content_type": ctype,
                     "cost": {"elapsed_ms": int((time.monotonic() - t0) * 1000)},
                 }
-                # 可选断言（复用 dom_step 语义）
+                # 可选断言——在 wait_s 内轮询等待（页面动态内容可能晚于 load 事件出现，
+                # 一次性评估会误判 fail）
                 assertion_ok = None
                 if page_features:
-                    feats, errs = {}, {}
-                    for name, expr in page_features.items():
-                        try:
-                            feats[name] = await client.eval_js(_feature_expr(expr))
-                        except Exception as ex:
-                            errs[name] = str(ex)[:200]
-                    out["features"] = feats
-                    if errs:
-                        out["feature_errors"] = errs
-                    if expected_feature:
+                    deadline = time.monotonic() + wait_s
+                    feats, errs, checks = {}, {}, []
+                    while True:
+                        feats, errs = {}, {}
+                        for name, expr in page_features.items():
+                            try:
+                                feats[name] = await client.eval_js(_feature_expr(expr))
+                            except Exception as ex:
+                                errs[name] = str(ex)[:200]
+                        if not expected_feature:
+                            break  # 只读特征，不判定
                         checks, all_pass = [], True
                         for name, exp in expected_feature.items():
                             passed = _passes(exp, feats.get(name))
@@ -338,16 +342,36 @@ def register_dom_tools(mcp):
                                            "passed": passed})
                             if not passed:
                                 all_pass = False
+                        if all_pass:
+                            assertion_ok = True
+                            break
+                        if time.monotonic() >= deadline:
+                            assertion_ok = False
+                            break
+                        await asyncio.sleep(0.1)
+                    out["features"] = feats
+                    if errs:
+                        out["feature_errors"] = errs
+                    if expected_feature:
                         out["checks"] = checks
-                        assertion_ok = all_pass
-                        if not all_pass:
+                        if not assertion_ok:
                             out["status"] = "fail"
-                            out["reason"] = "assertion_failed"
-                            out["hint"] = "到达了页面但断言不满足"
+                            out["reason"] = "assertion_timeout"
+                            out["hint"] = (f"到达页面但 {wait_s}s 内断言未满足——"
+                                           "确认特征/期望值，或加大 wait_s")
                             if debug:
                                 _write_log("dom_navigate",
                                            {"site": site, "url": target}, out)
                             return out
+                # 断言等待期间页面可能还在变——重读 url/title 供内置判定
+                try:
+                    final_url = await client.eval_js("location.href")
+                    title = await client.get_title()
+                    out["final_url"] = out["url"] = final_url
+                    out["title"] = title
+                    out["navigated"] = bool(final_url and final_url != url_before)
+                except Exception:
+                    pass
                 # 内置判定（错误页优先；其次"是否到达请求的 URL"）
                 reached_target = bool(final_url and target and (
                     final_url == target

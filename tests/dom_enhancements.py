@@ -168,6 +168,15 @@ async def main():
                 check("11 dom_resolve 跳转链", r.get("status") == "ok"
                       and "read_text_nav" in (r.get("final_url") or ""),
                       f"{ms}ms final={r.get('final_url')}")
+
+                # 12 dom_navigate 断言轮询（延迟 2.5s 出现的特征不应误判 fail）
+                r, ms = await call(s, "dom_navigate", {
+                    "url": FIX,
+                    "page_features": {"d": "document.querySelector('#delayed').textContent"},
+                    "expected_feature": {"d": {"op": "eq", "value": "ready"}},
+                    "wait_s": 6})
+                check("12 navigate 断言轮询", r.get("status") == "pass",
+                      f"{ms}ms status={r.get('status')} d={r.get('features',{}).get('d')}")
     finally:
         httpd.shutdown()
 

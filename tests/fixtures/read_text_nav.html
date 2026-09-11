@@ -9,11 +9,15 @@
     <a id="nav" href="page2.html">next</a>
     <a id="blank" href="page2.html" target="_blank">newtab</a>
     <div id="out">init</div>
+    <div id="delayed">pending</div>
   </div>
   <script>
     document.getElementById('btn').onclick = () => {
       document.getElementById('out').textContent = 'clicked';
     };
+    setTimeout(() => {
+      document.getElementById('delayed').textContent = 'ready';
+    }, 2500);
   </script>
 </body>
 </html>
