@@ -110,12 +110,12 @@ async def main():
                 check("3 dom_read no_match", r.get("status") == "no_match",
                       f"{ms}ms status={r.get('status')}")
 
-                # 4 dom_read empty
+                # 4 dom_read empty（全部为空 -> status=empty）
                 r, ms = await call(s, "dom_read", {"page_features": {
                     "e": "document.querySelector('#nope') ? 1 : null"}})
-                check("4 dom_read empty", r.get("status") == "ok"
+                check("4 dom_read empty", r.get("status") == "empty"
                       and "e" in (r.get("empty") or []),
-                      f"{ms}ms empty={r.get('empty')}")
+                      f"{ms}ms status={r.get('status')} empty={r.get('empty')}")
 
                 # 5 dom_read error
                 r, ms = await call(s, "dom_read",

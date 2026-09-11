@@ -140,7 +140,7 @@ def _extract_document(data, ctype):
 
 
 def _extract_legacy_doc(data):
-    """老 .doc（OLE 复合文档）：尝试 antiword / catdoc 转换。"""
+    """老 .doc（OLE 复合文档）：优先 soffice/libreoffice，回退 antiword/catdoc。"""
     import os as _os
     import shutil as _shutil
     import subprocess as _sp
@@ -149,6 +149,27 @@ def _extract_legacy_doc(data):
         f.write(data)
         path = f.name
     try:
+        # LibreOffice headless（最通用；独立 profile 避免与已开实例冲突）
+        soffice = _shutil.which("soffice") or _shutil.which("libreoffice")
+        if soffice:
+            outdir = tempfile.mkdtemp()
+            profile = tempfile.mkdtemp()
+            try:
+                _sp.run([soffice, "--headless",
+                         f"-env:UserInstallation=file://{profile}",
+                         "--convert-to", "txt:Text", "--outdir", outdir, path],
+                        capture_output=True, timeout=90)
+                base = _os.path.splitext(_os.path.basename(path))[0] + ".txt"
+                txtpath = _os.path.join(outdir, base)
+                if _os.path.isfile(txtpath):
+                    with open(txtpath, encoding="utf-8", errors="ignore") as fh:
+                        return fh.read(), "doc"
+            except Exception:
+                pass
+            finally:
+                _shutil.rmtree(outdir, ignore_errors=True)
+                _shutil.rmtree(profile, ignore_errors=True)
+        # 回退 antiword / catdoc
         for tool in ("antiword", "catdoc"):
             exe = _shutil.which(tool)
             if not exe:
@@ -475,6 +496,8 @@ def register_dom_tools(mcp):
                     status = "partial_error"
                 elif errors:
                     status = "error"
+                elif feats and len(empty) == len(feats):
+                    status = "empty"
                 else:
                     status = "ok"
                 out = {
@@ -496,7 +519,7 @@ def register_dom_tools(mcp):
 
     @mcp.tool()
     async def dom_text(selector: str = None, mode: str = "text", *,
-                       wait_s: float = 0.0, max_chars: int = 200000,
+                       wait_s: float = 0.0, max_chars: int = 50000,
                        max_links: int = 500):
         """取页面/元素文本（正文提取）——dom_read 的专用视图（省去手写 JS）。
 
@@ -504,7 +527,7 @@ def register_dom_tools(mcp):
         mode: text(可见文字) | content(原始文字) | html(结构) |
               links(所有链接 [{text, href}]，省去手写 JS/翻 HTML)。
         wait_s: 元素等待上限（秒），0=不等待。
-        max_chars: 返回文本上限（默认 200000），超出截断并标 truncated。
+        max_chars: 返回文本上限（默认 50000），超出截断并标 truncated。
         max_links: mode=links 时的链接数上限（默认 500）。
         注意：浏览器内置 PDF 阅读界面不是页面元素，取不到；站点自渲染的 PDF
         文字层（如 .textLayer）可正常取。
@@ -677,8 +700,16 @@ def register_dom_tools(mcp):
         try:
             final, chain = await asyncio.to_thread(_follow)
             if final and final != url:
-                return {"status": "ok", "requested_url": url,
-                        "final_url": final, "redirect_chain": chain}
+                out = {"status": "ok", "requested_url": url,
+                       "final_url": final, "redirect_chain": chain}
+                fl = final.lower()
+                if _looks_like_error(final, "") or any(
+                        k in fl for k in ("captcha", "验证", "wappoc")):
+                    out["status"] = "warning"
+                    out["reason"] = "final_looks_blocked"
+                    out["hint"] = ("解析出的最终 URL 像验证码/错误页——真实内容可能拿不到"
+                                   "（如微信需验证）")
+                return out
             return {"status": "no_redirect", "requested_url": url,
                     "final_url": final or url,
                     "hint": "未发生 HTTP 重定向——可能是 JS 跳转（需真导航），"
@@ -750,11 +781,24 @@ def register_dom_tools(mcp):
                 if head_total == 0:
                     if total == 0:
                         out["hint"] = ("当前页没有可交互元素——可能是静态/纯文本页，"
-                                       "或内容是 PDF/图片。用 dom_text 读正文、"
-                                       "dom_read 取值、dom_text(mode=links) 取链接")
+                                       "或内容是 PDF/图片。读正文用 dom_text、"
+                                       "取值用 dom_read、取链接用 dom_text(mode=links)")
                     else:
-                        out["hint"] = (f"共 {total} 个可交互元素，但当前过滤条件命中 0——"
-                                       "去掉 tag/text_contains，或换关键词/大小写")
+                        extra = ""
+                        if tag:
+                            try:
+                                cnt = await client.eval_js(
+                                    f"document.querySelectorAll({json.dumps(tag)}).length")
+                                if cnt:
+                                    extra = (f"页面有 {cnt} 个 <{tag}> 元素，但都不在可交互集合"
+                                             f"或不可见——加 include_hidden=True 试试；")
+                                else:
+                                    extra = f"页面没有 <{tag}> 元素；"
+                            except Exception:
+                                pass
+                        out["hint"] = (f"共 {total} 个可交互元素，过滤后 0 命中。{extra}"
+                                       "找链接用 dom_text(mode=links)、读值用 dom_read、"
+                                       "读正文用 dom_text")
                 return out
         except Exception as e:
             return _dom_error(e)

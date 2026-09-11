@@ -780,6 +780,7 @@ class DomClient:
                     tag, type, id, name,
                     placeholder,
                     text,
+                    href: tag === 'a' ? (el.href || null) : null,
                     visible, unique,
                     why: selector ? why : 'no-unique-selector',
                     same_text_count,
