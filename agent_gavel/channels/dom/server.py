@@ -188,6 +188,11 @@ def _extract_legacy_doc(data):
             pass
 
 
+# 页面级互斥：并发调用会抢同一 Chrome 的导航/页面状态（如两个 dom_navigate
+# 同时发出，一个会落到另一个的页面却报 pass）。导航串行化。
+_PAGE_LOCK = asyncio.Lock()
+
+
 def register_dom_tools(mcp):
     """把 DOM 通道全部 MCP 工具注册到给定 mcp server。"""
 
@@ -338,6 +343,7 @@ def register_dom_tools(mcp):
             return {"status": "error", "error": "no url and no template home for site",
                     "hint": "pass url= directly, or dom_save_template first"}
         t0 = time.monotonic()
+        await _PAGE_LOCK.acquire()
         try:
             async with DomClient() as client:
                 try:
@@ -446,6 +452,8 @@ def register_dom_tools(mcp):
                 return out
         except Exception as e:
             return _dom_error(e)
+        finally:
+            _PAGE_LOCK.release()
 
     @mcp.tool()
     async def dom_read(page_features: dict, selector: str = None, *,
@@ -526,6 +534,8 @@ def register_dom_tools(mcp):
         selector: CSS 选择器；缺省取整页 body。
         mode: text(可见文字) | content(原始文字) | html(结构) |
               links(所有链接 [{text, href}]，省去手写 JS/翻 HTML)。
+              注：links 含导航/榜单等全部链接；搜索结果页想精准取结果链接，
+              用 dom_read 写 JS 过滤更稳。
         wait_s: 元素等待上限（秒），0=不等待。
         max_chars: 返回文本上限（默认 50000），超出截断并标 truncated。
         max_links: mode=links 时的链接数上限（默认 500）。
@@ -631,7 +641,8 @@ def register_dom_tools(mcp):
         url: 文件 URL；缺省用当前页 URL。
         max_chars: 返回文本上限。
         返回 content_type + text（能抽则抽）+ extracted(bool) + kind。
-        .doc（老二进制格式）暂不支持抽取，返回 status=unsupported + content_type。
+        .doc（老二进制格式）经 soffice/libreoffice（或 antiword/catdoc）转换抽取；
+        都没有时返回 status=unsupported + content_type。
         """
         t0 = time.monotonic()
         target = url

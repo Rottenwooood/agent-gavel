@@ -183,6 +183,16 @@ async def main():
                 check("13 navigate 同主域重定向", r.get("status") == "pass"
                       and r.get("reached_target") is True,
                       f"{ms}ms status={r.get('status')} reached={r.get('reached_target')}")
+
+                # 14 并发 navigate 串行化（不互相抢导航）
+                g = await asyncio.gather(
+                    call(s, "dom_navigate", {"url": BASE + "/read_text_nav.html"}),
+                    call(s, "dom_navigate", {"url": BASE + "/page2.html"}))
+                f1 = (g[0][0] or {}).get("final_url", "") if isinstance(g[0][0], dict) else ""
+                f2 = (g[1][0] or {}).get("final_url", "") if isinstance(g[1][0], dict) else ""
+                check("14 并发 navigate 串行化",
+                      "read_text_nav" in f1 and "page2" in f2,
+                      f"f1=...{f1.split('/')[-1]} f2=...{f2.split('/')[-1]}")
     finally:
         httpd.shutdown()
 
