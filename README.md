@@ -218,6 +218,19 @@ DOM diff 兜底让"无断言"从原来固定 sleep 0.5s → **~4ms**（~100x）�
 - **断言降级重试**：fail 自动换策略（trusted 翻转 → 重新 explore 换锚点 → 滚动 → 切换等待模式）；`strict` 参数关掉降级暴露真实 fail（写模板/排查时用）
 - **模板失效检测**：连续失败 ≥3 次标 suspected，再跑返回 warning 建议重新探索；任何一次 pass 清零
 
+#### 工具选型（该用哪个）
+
+| 我要做的事 | 用哪个 |
+|---|---|
+| 打开一个网址 | `dom_navigate`（给 url；自动验证到没到，返回最终 url / 是否跳转 / content_type）|
+| 读页面上的值（标题 / 输入框 / 某字段 / 一段文本） | `dom_read`（给"名字 → 取值规则"，直接返回值，不判定不重试）|
+| 读整页或某块的正文、或页面所有链接 | `dom_text`（`text` / `content` / `html` / `links`）|
+| 做一个动作并验证结果 | `dom_step`（动作 + 断言一次调用）|
+| 看页面有哪些可点 / 可填元素 | `dom_explore`（可传 url 一次性探索）|
+| 读 .pdf / .docx 直链文件内容 | `dom_document` |
+| 重复跑同一套流程 | `dom_save_template` 存模板 → `dom_run_template` |
+| 以"读"为主、几乎不点 | `dom_navigate` + `dom_text` + `dom_read` 三件套足够 |
+
 ### AT-SPI（桌面，实验性·停止开发）
 
 > 曾用于操作桌面应用（`act_and_verify` / `run_operation` / 桌面模板，经 computer-use-linux 无障碍树）。Linux 上性能不佳、微信等闭源应用 A11y 树不完整，已停止开发。工具保留可用但不投入；纯 DOM 用法无需安装 computer-use-linux。

@@ -34,7 +34,7 @@ agent 核心（外部：opencode / subagent）
 
 - `act_and_verify` / `run_operation`：AT-SPI 桌面闭环（带 debug 参数）
 - `dom_step`：通用 DOM 单步闭环（任意 action+选择器+断言，不绑站点）
-- `dom_read` / `dom_text`：只读取值 / 正文提取（不判定、不重试）
+- `dom_read` / `dom_text` / `dom_document`：只读取值 / 正文提取 / 文档(PDF/Word)抽取（不判定、不重试）
 - `dom_navigate` / `dom_explore`：导航 + 锚点探索（head/tail/tag/text 裁剪）
 - `dom_save_template` / `dom_run_template` / `dom_list_templates`：流程固化与复用
 

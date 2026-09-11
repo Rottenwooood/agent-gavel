@@ -7,9 +7,10 @@ T2 拆分：DOM 网页操作相关工具全部集中于此，通过 register_dom
 import asyncio
 import json
 import time
+import urllib.request
 
 from .adapter import DomClient
-from .verify import dom_act_and_verify, _write_log, _feature_expr
+from .verify import dom_act_and_verify, _write_log, _feature_expr, _passes
 
 
 def _dom_error(e):
@@ -53,6 +54,66 @@ async def _wait_selector(client, selector, timeout):
             pass
         await asyncio.sleep(0.1)
     return False
+
+
+def _head_content_type(url, timeout=6.0):
+    """HEAD 请求拿 Content-Type（公开 URL；失败返回 None）。"""
+    if not url or not str(url).startswith(("http://", "https://")):
+        return None
+    try:
+        req = urllib.request.Request(url, method="HEAD",
+                                     headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return (r.headers.get("Content-Type") or "").split(";")[0].strip()
+    except Exception:
+        return None
+
+
+def _looks_like_error(url, title):
+    """最终页是否像错误页（url/title 含 error/出错/404 等）。"""
+    u = (url or "").lower()
+    if "404" in u or any(k in u for k in ("error", "notfound", "not-found")):
+        return True
+    s = f"{u} {title or ''}".lower()
+    return any(k in s for k in ("出错", "无法访问", "禁止访问", "not found",
+                                "404", "page not found", "error response"))
+
+
+def _download(url, timeout=30.0):
+    """HTTP 下载文件，返回 (bytes, content_type)。"""
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip()
+        return r.read(), ctype
+
+
+def _extract_document(data, ctype):
+    """按类型抽取文档文本。返回 (text|None, kind)。
+
+    PDF 用 pypdf；.docx 用 python-docx；两者都先看 magic bytes（content-type
+    常不准）。.doc 老二进制格式不支持。
+    """
+    import io
+    ct = (ctype or "").lower()
+    if data[:4] == b"%PDF" or "pdf" in ct:
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(data))
+            return "\n".join((p.extract_text() or "") for p in reader.pages), "pdf"
+        except Exception as e:
+            return None, f"pdf-error:{str(e)[:120]}"
+    if data[:2] == b"PK" or "wordprocessingml" in ct or "officedocument" in ct:
+        try:
+            from docx import Document
+            d = Document(io.BytesIO(data))
+            parts = [p.text for p in d.paragraphs]
+            for t in d.tables:
+                for row in t.rows:
+                    parts.append("\t".join(c.text for c in row.cells))
+            return "\n".join(parts), "docx"
+        except Exception as e:
+            return None, f"docx-error:{str(e)[:120]}"
+    return None, ct or "unknown"
 
 
 def register_dom_tools(mcp):
@@ -170,11 +231,18 @@ def register_dom_tools(mcp):
             return _dom_error(e)
 
     @mcp.tool()
-    async def dom_navigate(site: str = None, url: str = None, *, debug: int = 0):
-        """导航浏览器到指定站点/URL（DOM 通道）。
+    async def dom_navigate(site: str = None, url: str = None, *,
+                           page_features: dict = None,
+                           expected_feature: dict = None,
+                           debug: int = 0):
+        """导航浏览器到指定站点/URL，并验证是否真的到达（不再"发出即成功"）。
 
         url: 直接跳这个 URL（给了就用它）。
         site: 可选；只有没给 url 时，才用它查已存模板的 home 跳转。
+        page_features / expected_feature: 可选，到达后按断言判定（语义同 dom_step）。
+        返回 requested_url / final_url / navigated / redirected / content_type。
+        内置判定：最终 url 没变（目标其实是下载/doc/pdf，Chrome 不导航）→ fail；
+          跳到 */error* 或标题像错误页 → warning。
         """
         target = url
         if not target and site:
@@ -184,19 +252,85 @@ def register_dom_tools(mcp):
         if not target:
             return {"status": "error", "error": "no url and no template home for site",
                     "hint": "pass url= directly, or dom_save_template first"}
+        t0 = time.monotonic()
         try:
             async with DomClient() as client:
+                try:
+                    url_before = await client.eval_js("location.href")
+                except Exception:
+                    url_before = None
                 await client.navigate(target)
                 await client.wait_page_load()
-                r = {
-                    "status": "pass",
-                    "url": await client.eval_js("location.href"),
-                    "title": await client.get_title(),
+                final_url = await client.eval_js("location.href")
+                title = await client.get_title()
+                navigated = bool(final_url and final_url != url_before)
+                ctype = await asyncio.to_thread(_head_content_type, target)
+                out = {
+                    "requested_url": target,
+                    "final_url": final_url,
+                    "url": final_url,
+                    "title": title,
+                    "navigated": navigated,
+                    "redirected": bool(navigated and final_url != target),
+                    "content_type": ctype,
+                    "cost": {"elapsed_ms": int((time.monotonic() - t0) * 1000)},
                 }
+                # 可选断言（复用 dom_step 语义）
+                assertion_ok = None
+                if page_features:
+                    feats, errs = {}, {}
+                    for name, expr in page_features.items():
+                        try:
+                            feats[name] = await client.eval_js(_feature_expr(expr))
+                        except Exception as ex:
+                            errs[name] = str(ex)[:200]
+                    out["features"] = feats
+                    if errs:
+                        out["feature_errors"] = errs
+                    if expected_feature:
+                        checks, all_pass = [], True
+                        for name, exp in expected_feature.items():
+                            passed = _passes(exp, feats.get(name))
+                            checks.append({"feature": name, "op": exp.get("op", "eq"),
+                                           "actual": feats.get(name),
+                                           "expected": exp.get("value"),
+                                           "passed": passed})
+                            if not passed:
+                                all_pass = False
+                        out["checks"] = checks
+                        assertion_ok = all_pass
+                        if not all_pass:
+                            out["status"] = "fail"
+                            out["reason"] = "assertion_failed"
+                            out["hint"] = "到达了页面但断言不满足"
+                            if debug:
+                                _write_log("dom_navigate",
+                                           {"site": site, "url": target}, out)
+                            return out
+                # 内置判定（错误页优先；其次"是否到达请求的 URL"）
+                reached_target = bool(final_url and target and (
+                    final_url == target
+                    or final_url.rstrip("/") == str(target).rstrip("/")))
+                out["reached_target"] = reached_target
+                if assertion_ok:
+                    out["status"] = "pass"
+                elif _looks_like_error(final_url, title):
+                    out["status"] = "warning"
+                    out["reason"] = "error_page"
+                    out["hint"] = "最终页面疑似错误页（url/title 含 error）"
+                elif reached_target:
+                    out["status"] = "pass"
+                elif not navigated:
+                    out["status"] = "fail"
+                    out["reason"] = "not_navigated"
+                    out["hint"] = (f"最终 url 未变（{url_before}）且没到达请求的 URL"
+                                   f"——目标可能是下载/非 HTML（content_type={ctype}）。"
+                                   "文件类用 dom_document 读内容")
+                else:
+                    out["status"] = "pass"
                 if debug:
-                    _write_log("dom_navigate",
-                               {"tool": "dom_navigate", "site": site, "url": target}, r)
-                return r
+                    _write_log("dom_navigate", {"site": site, "url": target}, out)
+                return out
         except Exception as e:
             return _dom_error(e)
 
@@ -212,24 +346,52 @@ def register_dom_tools(mcp):
 
         page_features: {名字: 表达式或函数}。纯表达式直接算；需要多步/赋值时
           写成函数形式 "() => { ...; return ...; }"（换行在函数体里合法）。
-        selector: 可选，先等该元素出现再取值。
+        selector: 可选，先等该元素出现再取值；没命中返回 status=no_match。
+        返回 status: ok | no_match(selector 没命中) | partial_error(部分表达式抛错)
+          | error(全部抛错)；features 是成功取到的值；errors 是抛错的；
+          empty 是命中但值为空的名字列表（区分"没选到"与"选到但是空"）。
         wait_s: selector 存在时的等待上限（秒）。
         """
         t0 = time.monotonic()
         try:
             async with DomClient() as client:
-                if selector and wait_s > 0:
-                    await _wait_selector(client, selector, wait_s)
-                feats = {}
+                if selector:
+                    found = (await _wait_selector(client, selector, wait_s)
+                             if wait_s > 0
+                             else await client.eval_js(
+                                 f"!!document.querySelector({json.dumps(selector)})"))
+                    if not found:
+                        return {"status": "no_match", "selector": selector,
+                                "hint": "选择器没命中任何元素——检查选择器或加 wait_s",
+                                "url": await client.eval_js("location.href"),
+                                "title": await client.get_title()}
+                feats, errors, empty = {}, {}, []
                 for name, expr in (page_features or {}).items():
-                    feats[name] = await client.eval_js(_feature_expr(expr))
+                    try:
+                        v = await client.eval_js(_feature_expr(expr))
+                    except Exception as ex:
+                        errors[name] = str(ex)[:200]
+                        continue
+                    feats[name] = v
+                    if v is None or v == "" or v == [] or v == {}:
+                        empty.append(name)
+                if errors and feats:
+                    status = "partial_error"
+                elif errors:
+                    status = "error"
+                else:
+                    status = "ok"
                 out = {
-                    "status": "ok",
+                    "status": status,
                     "features": feats,
                     "url": await client.eval_js("location.href"),
                     "title": await client.get_title(),
                     "cost": {"elapsed_ms": int((time.monotonic() - t0) * 1000)},
                 }
+                if errors:
+                    out["errors"] = errors
+                if empty:
+                    out["empty"] = empty
                 if debug:
                     _write_log("dom_read", {"page_features": page_features}, out)
                 return out
@@ -238,29 +400,46 @@ def register_dom_tools(mcp):
 
     @mcp.tool()
     async def dom_text(selector: str = None, mode: str = "text", *,
-                       wait_s: float = 0.0, max_chars: int = 200000):
+                       wait_s: float = 0.0, max_chars: int = 200000,
+                       max_links: int = 500):
         """取页面/元素文本（正文提取）。
 
         selector: CSS 选择器；缺省取整页 body。
-        mode: text(可见文字) | content(原始文字) | html(结构)。
+        mode: text(可见文字) | content(原始文字) | html(结构) |
+              links(所有链接 [{text, href}]，省去手写 JS/翻 HTML)。
         wait_s: 元素等待上限（秒），0=不等待。
         max_chars: 返回文本上限（默认 200000），超出截断并标 truncated。
+        max_links: mode=links 时的链接数上限（默认 500）。
         注意：浏览器内置 PDF 阅读界面不是页面元素，取不到；站点自渲染的 PDF
         文字层（如 .textLayer）可正常取。
         """
         t0 = time.monotonic()
-        sel = json.dumps(selector) if selector else "null"
-        getter = {"html": "el.outerHTML", "content": "el.textContent"}.get(
-            mode, "el.innerText")
-        expr = (
-            "(() => {"
-            f"  const sel = {sel};"
-            "  const el = sel ? document.querySelector(sel) : document.body;"
-            "  if (!el) return {found:false, text:''};"
-            f"  const t = ({getter}) || '';"
-            "  return {found:true, text:t, tag:el.tagName.toLowerCase()};"
-            "})()"
-        )
+        if mode == "links":
+            root = json.dumps(selector) if selector else "document.body"
+            expr = (
+                "(() => {"
+                f"  const root = {root};"
+                "  if (!root) return {found:false, links:[]};"
+                "  const out = Array.from(root.querySelectorAll('a[href]'))"
+                "    .map(a => ({text:(a.innerText||a.textContent||'').trim().slice(0,200),"
+                "                href:a.href}))"
+                "    .filter(x => x.text || x.href);"
+                "  return {found:true, links: out};"
+                "})()"
+            )
+        else:
+            sel = json.dumps(selector) if selector else "null"
+            getter = {"html": "el.outerHTML", "content": "el.textContent"}.get(
+                mode, "el.innerText")
+            expr = (
+                "(() => {"
+                f"  const sel = {sel};"
+                "  const el = sel ? document.querySelector(sel) : document.body;"
+                "  if (!el) return {found:false, text:''};"
+                f"  const t = ({getter}) || '';"
+                "  return {found:true, text:t, tag:el.tagName.toLowerCase()};"
+                "})()"
+            )
         try:
             async with DomClient() as client:
                 if selector and wait_s > 0:
@@ -268,10 +447,24 @@ def register_dom_tools(mcp):
                 r = await client.eval_js(expr)
                 if not isinstance(r, dict) or not r.get("found"):
                     return {"status": "not_found", "selector": selector,
-                            "hint": "元素没找到——检查选择器或加 wait_s"}
+                            "hint": "元素没找到——检查选择器或加 wait_s",
+                            "url": await client.eval_js("location.href")}
+                if mode == "links":
+                    links = r.get("links") or []
+                    return {
+                        "status": "ok",
+                        "mode": "links",
+                        "links": links[:max_links],
+                        "count": len(links),
+                        "truncated": len(links) > max_links,
+                        "url": await client.eval_js("location.href"),
+                        "title": await client.get_title(),
+                        "cost": {"elapsed_ms": int((time.monotonic() - t0) * 1000)},
+                    }
                 text = r.get("text") or ""
-                out = {
+                return {
                     "status": "ok",
+                    "mode": mode,
                     "text": text[:max_chars],
                     "length": len(text),
                     "truncated": len(text) > max_chars,
@@ -280,7 +473,49 @@ def register_dom_tools(mcp):
                     "title": await client.get_title(),
                     "cost": {"elapsed_ms": int((time.monotonic() - t0) * 1000)},
                 }
+        except Exception as e:
+            return _dom_error(e)
+
+    @mcp.tool()
+    async def dom_document(url: str = None, max_chars: int = 200000):
+        """下载并抽取文档文本（PDF / Word），用于直链是文件的场景。
+
+        很多政策文件是 .pdf/.doc/.docx 直链，Chrome 会下载而非导航，DOM 通道读不到
+        （dom_navigate 会返回 not_navigated）。这个工具用 HTTP 直接取文件并按类型抽文本。
+
+        url: 文件 URL；缺省用当前页 URL。
+        max_chars: 返回文本上限。
+        返回 content_type + text（能抽则抽）+ extracted(bool) + kind。
+        .doc（老二进制格式）暂不支持抽取，返回 status=unsupported + content_type。
+        """
+        t0 = time.monotonic()
+        target = url
+        try:
+            if not target:
+                async with DomClient() as client:
+                    target = await client.eval_js("location.href")
+            if not target or not str(target).startswith(("http://", "https://")):
+                return {"status": "error", "reason": "no_http_url",
+                        "error": f"需要 http(s) URL（当前 {target}）",
+                        "hint": "给 url= 参数，或先 dom_navigate 到一个 http 页面"}
+            data, ctype = await asyncio.to_thread(_download, target)
+            out = {"url": target, "content_type": ctype, "bytes": len(data),
+                   "cost": {"elapsed_ms": int((time.monotonic() - t0) * 1000)}}
+            text, kind = _extract_document(data, ctype)
+            if text is None:
+                out["status"] = "unsupported"
+                out["extracted"] = False
+                out["kind"] = kind
+                out["hint"] = (f"content_type={ctype}——暂不支持抽取（.doc 老格式/其它）。"
+                               "HTML 用 dom_text 读；其它文件下载后用办公软件打开")
                 return out
+            out["status"] = "ok"
+            out["extracted"] = True
+            out["kind"] = kind
+            out["text"] = text[:max_chars]
+            out["length"] = len(text)
+            out["truncated"] = len(text) > max_chars
+            return out
         except Exception as e:
             return _dom_error(e)
 
@@ -291,6 +526,7 @@ def register_dom_tools(mcp):
         head: int = None,
         tail: int = None,
         include_all: bool = False,
+        url: str = None,
     ):
         """探索当前浏览器页面：返回可交互元素的锚点清单。
 
@@ -303,9 +539,14 @@ def register_dom_tools(mcp):
           head: 只返回前 N 个（页面顶部元素）
           tail: 只返回后 N 个（页面底部元素，如确认按钮/弹窗）
           include_all: True 时返回全部（含 no-unique-selector），默认只返锚点
+          url: 可选，先导航到该 URL 再探索（一次性，省去先调 dom_navigate）
+        过滤后 0 命中时附 hint（当前页可能没这类元素/是静态页），便于决定下一步。
         """
         try:
             async with DomClient() as client:
+                if url:
+                    await client.navigate(url)
+                    await client.wait_page_load()
                 items = await client.explore()
                 total = len(items)
 
@@ -323,7 +564,7 @@ def register_dom_tools(mcp):
                 elif tail is not None and tail > 0:
                     items = items[-tail:]
 
-                return {
+                out = {
                     "url": await client.eval_js("location.href"),
                     "title": await client.get_title(),
                     "total_elements": total,
@@ -333,6 +574,15 @@ def register_dom_tools(mcp):
                     "tail": tail,
                     "elements": items,
                 }
+                if head_total == 0:
+                    if total == 0:
+                        out["hint"] = ("当前页没有可交互元素——可能是静态/纯文本页，"
+                                       "或内容是 PDF/图片。用 dom_text 读正文、"
+                                       "dom_read 取值、dom_text(mode=links) 取链接")
+                    else:
+                        out["hint"] = (f"共 {total} 个可交互元素，但当前过滤条件命中 0——"
+                                       "去掉 tag/text_contains，或换关键词/大小写")
+                return out
         except Exception as e:
             return _dom_error(e)
 
