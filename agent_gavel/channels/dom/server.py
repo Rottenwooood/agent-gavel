@@ -79,6 +79,27 @@ def _looks_like_error(url, title):
                                 "404", "page not found", "error response"))
 
 
+def _same_site(a, b):
+    """两个 URL 是否同主域（忽略子域/端口/path）——判断重定向是否算"到达"。
+
+    www.bing.com → cn.bing.com、或 URL 仅追加 &rdr 跟踪参数 → 同主域，算到达。
+    """
+    from urllib.parse import urlparse
+    try:
+        ha = (urlparse(a or "").hostname or "").lower()
+        hb = (urlparse(b or "").hostname or "").lower()
+    except Exception:
+        return False
+    if not ha or not hb:
+        return (a or "") == (b or "")
+
+    def _reg(h):
+        parts = h.split(".")
+        return ".".join(parts[-2:]) if len(parts) >= 2 else h
+
+    return _reg(ha) == _reg(hb)
+
+
 def _download(url, timeout=30.0):
     """HTTP 下载文件，返回 (bytes, content_type)。"""
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -373,9 +394,11 @@ def register_dom_tools(mcp):
                 except Exception:
                     pass
                 # 内置判定（错误页优先；其次"是否到达请求的 URL"）
+                # 同主域（含区域重定向 www→cn、或仅追加 &rdr 跟踪参数）也算到达
                 reached_target = bool(final_url and target and (
                     final_url == target
-                    or final_url.rstrip("/") == str(target).rstrip("/")))
+                    or final_url.rstrip("/") == str(target).rstrip("/")
+                    or _same_site(final_url, target)))
                 out["reached_target"] = reached_target
                 if assertion_ok:
                     out["status"] = "pass"
@@ -670,6 +693,7 @@ def register_dom_tools(mcp):
         head: int = None,
         tail: int = None,
         include_all: bool = False,
+        include_hidden: bool = False,
         url: str = None,
     ):
         """探索当前浏览器页面：返回可交互元素的锚点清单——dom_read 的专用视图
@@ -684,8 +708,9 @@ def register_dom_tools(mcp):
           head: 只返回前 N 个（页面顶部元素）
           tail: 只返回后 N 个（页面底部元素，如确认按钮/弹窗）
           include_all: True 时返回全部（含 no-unique-selector），默认只返锚点
+          include_hidden: True 时也返回不可见元素（默认过滤掉）
           url: 可选，先导航到该 URL 再探索（一次性，省去先调 dom_navigate）
-        过滤后 0 命中时附 hint（当前页可能没这类元素/是静态页），便于决定下一步。
+        返回 status: ok | no_match（过滤后 0 命中，附 hint 说明原因）。
         """
         try:
             async with DomClient() as client:
@@ -695,6 +720,8 @@ def register_dom_tools(mcp):
                 items = await client.explore()
                 total = len(items)
 
+                if not include_hidden:
+                    items = [it for it in items if it.get("visible", True)]
                 if not include_all:
                     items = [it for it in items if it.get("selector")]
                 if tag:
@@ -710,6 +737,7 @@ def register_dom_tools(mcp):
                     items = items[-tail:]
 
                 out = {
+                    "status": "ok" if head_total else "no_match",
                     "url": await client.eval_js("location.href"),
                     "title": await client.get_title(),
                     "total_elements": total,

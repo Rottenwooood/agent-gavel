@@ -177,6 +177,12 @@ async def main():
                     "wait_s": 6})
                 check("12 navigate 断言轮询", r.get("status") == "pass",
                       f"{ms}ms status={r.get('status')} d={r.get('features',{}).get('d')}")
+
+                # 13 dom_navigate 同主域重定向 -> pass（区域重定向/跟踪参数不误报）
+                r, ms = await call(s, "dom_navigate", {"url": BASE + "/redirect"})
+                check("13 navigate 同主域重定向", r.get("status") == "pass"
+                      and r.get("reached_target") is True,
+                      f"{ms}ms status={r.get('status')} reached={r.get('reached_target')}")
     finally:
         httpd.shutdown()
 
