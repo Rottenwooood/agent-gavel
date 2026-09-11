@@ -37,7 +37,16 @@ def make_docx():
 
 
 def start_http():
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=FIXDIR)
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.startswith("/redirect"):
+                self.send_response(302)
+                self.send_header("Location", "/read_text_nav.html")
+                self.end_headers()
+                return
+            super().do_GET()
+
+    handler = functools.partial(Handler, directory=FIXDIR)
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), handler)
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
@@ -143,6 +152,22 @@ async def main():
                 check("9 dom_step 拒绝 navigate", r.get("status") == "error"
                       and r.get("reason") == "use_dom_navigate",
                       f"{ms}ms reason={r.get('reason')}")
+
+                # 10 click target=_blank -> 新标签检测/切换
+                await call(s, "dom_navigate", {"url": FIX})
+                r, ms = await call(s, "dom_step", {
+                    "action": "click", "selectors": {"target": "#blank"},
+                    "wait_navigation": True, "strict": True})
+                nt = r.get("new_tab") or {}
+                url = r.get("verification", {}).get("url") or ""
+                check("10 click 新标签检测", bool(nt) or "page2" in url,
+                      f"{ms}ms new_tab={nt} url={url}")
+
+                # 11 dom_resolve 跳转链（本地 302）
+                r, ms = await call(s, "dom_resolve", {"url": BASE + "/redirect"})
+                check("11 dom_resolve 跳转链", r.get("status") == "ok"
+                      and "read_text_nav" in (r.get("final_url") or ""),
+                      f"{ms}ms final={r.get('final_url')}")
     finally:
         httpd.shutdown()
 

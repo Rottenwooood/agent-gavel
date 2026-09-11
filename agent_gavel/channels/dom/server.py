@@ -90,8 +90,8 @@ def _download(url, timeout=30.0):
 def _extract_document(data, ctype):
     """按类型抽取文档文本。返回 (text|None, kind)。
 
-    PDF 用 pypdf；.docx 用 python-docx；两者都先看 magic bytes（content-type
-    常不准）。.doc 老二进制格式不支持。
+    PDF 用 pypdf；.docx 用 python-docx；.doc（老 OLE 格式）尝试 antiword/catdoc
+    （需系统装了才有效）。都先看 magic bytes（content-type 常不准）。
     """
     import io
     ct = (ctype or "").lower()
@@ -113,7 +113,37 @@ def _extract_document(data, ctype):
             return "\n".join(parts), "docx"
         except Exception as e:
             return None, f"docx-error:{str(e)[:120]}"
+    if data[:4] == b"\xd0\xcf\x11\xe0" or "msword" in ct:
+        return _extract_legacy_doc(data)
     return None, ct or "unknown"
+
+
+def _extract_legacy_doc(data):
+    """老 .doc（OLE 复合文档）：尝试 antiword / catdoc 转换。"""
+    import os as _os
+    import shutil as _shutil
+    import subprocess as _sp
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".doc", delete=False) as f:
+        f.write(data)
+        path = f.name
+    try:
+        for tool in ("antiword", "catdoc"):
+            exe = _shutil.which(tool)
+            if not exe:
+                continue
+            try:
+                r = _sp.run([exe, path], capture_output=True, timeout=30)
+                if r.returncode == 0 and r.stdout.strip():
+                    return r.stdout.decode("utf-8", "ignore"), "doc"
+            except Exception:
+                continue
+        return None, "doc-no-converter"
+    finally:
+        try:
+            _os.remove(path)
+        except Exception:
+            pass
 
 
 def register_dom_tools(mcp):
@@ -338,7 +368,11 @@ def register_dom_tools(mcp):
                                    f"——目标可能是下载/非 HTML（content_type={ctype}）。"
                                    "文件类用 dom_document 读内容")
                 else:
-                    out["status"] = "pass"
+                    # 导航发生了但落到别的 URL（重定向/中转页/验证码墙）——不是明确 pass
+                    out["status"] = "warning"
+                    out["reason"] = "redirected_off_target"
+                    out["hint"] = (f"未到达请求的 URL，落到了 {final_url}"
+                                   "（重定向 / 中转页 / 验证码墙？）")
                 if debug:
                     _write_log("dom_navigate", {"site": site, "url": target}, out)
                 return out
@@ -435,10 +469,12 @@ def register_dom_tools(mcp):
                 "(() => {"
                 f"  const root = {root};"
                 "  if (!root) return {found:false, links:[]};"
-                "  const out = Array.from(root.querySelectorAll('a[href]'))"
-                "    .map(a => ({text:(a.innerText||a.textContent||'').trim().slice(0,200),"
-                "                href:a.href}))"
-                "    .filter(x => x.text || x.href);"
+                "  const seen = new Set(); const out = [];"
+                "  for (const a of root.querySelectorAll('a[href]')) {"
+                "    const href = a.href; if (seen.has(href)) continue; seen.add(href);"
+                "    const text = (a.innerText||a.textContent||'').trim().slice(0,200);"
+                "    out.push({text, href});"
+                "  }"
                 "  return {found:true, links: out};"
                 "})()"
             )
@@ -477,7 +513,7 @@ def register_dom_tools(mcp):
                         "cost": {"elapsed_ms": int((time.monotonic() - t0) * 1000)},
                     }
                 text = r.get("text") or ""
-                return {
+                out = {
                     "status": "ok",
                     "mode": mode,
                     "text": text[:max_chars],
@@ -488,6 +524,30 @@ def register_dom_tools(mcp):
                     "title": await client.get_title(),
                     "cost": {"elapsed_ms": int((time.monotonic() - t0) * 1000)},
                 }
+                # 正文极短：内容可能在 iframe 内嵌文档或附件里——主动发现并提示
+                if len(text.strip()) < 50:
+                    try:
+                        extra = await client.eval_js(
+                            "(() => {"
+                            " const f=[...document.querySelectorAll('iframe')]"
+                            "   .map(x=>x.src).filter(Boolean).slice(0,5);"
+                            " const a=[...document.querySelectorAll('a[href]')]"
+                            "   .filter(x=>/\\.(pdf|docx?|xlsx?)([?#]|$)/i.test(x.href))"
+                            "   .map(x=>({text:(x.innerText||'').trim().slice(0,60),href:x.href}))"
+                            "   .slice(0,10);"
+                            " return {iframes:f, attachments:a};"
+                            "})()")
+                        if isinstance(extra, dict) and (extra.get("iframes")
+                                                        or extra.get("attachments")):
+                            if extra.get("iframes"):
+                                out["iframes"] = extra["iframes"]
+                            if extra.get("attachments"):
+                                out["attachments"] = extra["attachments"]
+                            out["hint"] = ("正文很短——内容可能在 iframe 内嵌文档或附件里。"
+                                           "用 dom_document(url=iframe 的 src 或附件链接) 读")
+                    except Exception:
+                        pass
+                return out
         except Exception as e:
             return _dom_error(e)
 
@@ -521,8 +581,13 @@ def register_dom_tools(mcp):
                 out["status"] = "unsupported"
                 out["extracted"] = False
                 out["kind"] = kind
-                out["hint"] = (f"content_type={ctype}——暂不支持抽取（.doc 老格式/其它）。"
-                               "HTML 用 dom_text 读；其它文件下载后用办公软件打开")
+                if kind == "doc-no-converter":
+                    out["hint"] = ("老 .doc 需系统装 antiword 或 catdoc 才能抽取"
+                                   "（如 `apt install antiword` / `apt install catdoc`）；"
+                                   "否则下载后用办公软件打开")
+                else:
+                    out["hint"] = (f"content_type={ctype}——暂不支持抽取。"
+                                   "HTML 用 dom_text 读；其它文件下载后用办公软件打开")
                 return out
             out["status"] = "ok"
             out["extracted"] = True
@@ -531,6 +596,46 @@ def register_dom_tools(mcp):
             out["length"] = len(text)
             out["truncated"] = len(text) > max_chars
             return out
+        except Exception as e:
+            return _dom_error(e)
+
+    @mcp.tool()
+    async def dom_resolve(url: str):
+        """解析跳转链到真实 URL（baidu.com/link、搜狗/360 等重定向链）。
+
+        只读：HTTP 跟随重定向，返回 final_url / redirect_chain。对 302 型有效；
+        对纯 JS 跳转（需真执行脚本）拿不到，会返回 no_redirect + hint 让你改用
+        dom_navigate 打开看最终 url。
+        """
+        if not url or not str(url).startswith(("http://", "https://")):
+            return {"status": "error", "reason": "no_http_url",
+                    "error": "需要 http(s) URL"}
+
+        def _follow():
+            chain = []
+
+            class _NoRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, req, fp, code, msg, headers, newurl):
+                    chain.append(newurl)
+                    return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+            opener = urllib.request.build_opener(_NoRedirect)
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            try:
+                with opener.open(req, timeout=15) as r:
+                    return r.geturl(), chain
+            except Exception:
+                return None, chain
+
+        try:
+            final, chain = await asyncio.to_thread(_follow)
+            if final and final != url:
+                return {"status": "ok", "requested_url": url,
+                        "final_url": final, "redirect_chain": chain}
+            return {"status": "no_redirect", "requested_url": url,
+                    "final_url": final or url,
+                    "hint": "未发生 HTTP 重定向——可能是 JS 跳转（需真导航），"
+                            "用 dom_navigate 打开看最终 url"}
         except Exception as e:
             return _dom_error(e)
 

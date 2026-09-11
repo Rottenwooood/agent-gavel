@@ -187,6 +187,23 @@ class DomClient:
                 return t["webSocketDebuggerUrl"]
         return pages[0]["webSocketDebuggerUrl"] if pages else None
 
+    async def list_pages(self):
+        """列出当前所有 page target（id/url/title/ws）——用于检测新标签页。"""
+        def _get():
+            with urllib.request.urlopen(f"{self._debug_url}/json/list", timeout=3) as r:
+                return json.loads(r.read())
+        targets = await asyncio.to_thread(_get)
+        return [t for t in targets if t.get("type") == "page"]
+
+    async def switch_to(self, ws_url):
+        """切换 CDP 连接到另一个 page target（如点击新开的标签页）。"""
+        if self._ws:
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
+        self._ws = await websockets.connect(ws_url, max_size=20 * 1024 * 1024)
+
     async def cmd(self, method, params=None, timeout=10.0):
         self._mid += 1
         mid = self._mid

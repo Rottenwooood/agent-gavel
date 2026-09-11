@@ -258,19 +258,39 @@ def _diff_verdict(before, after):
     }
 
 
-async def _settle_navigation(client, url_before, wait_navigation, wait_s):
-    """动作后等可能的页面跳转，跳转完成返回 True。
+async def _settle_navigation(client, url_before, wait_navigation, wait_s,
+                             pages_before=None):
+    """动作后等可能的跳转，并检测/切换到新标签页。
 
-    URL 已变 → 等页面加载完成再返回；wait_navigation=True 时轮询等更久（慢导航）。
-    wait_navigation 默认 None：只做一次即时判断，不额外等待——不拖慢普通点击。
+    返回 {"new_tab": {url,title}|None, "changed": bool}。
+    - 出现新标签页（id 不在 pages_before）→ 切换过去并等加载
+    - 当前页 URL 变化 → 等加载
+    - wait_navigation=True 且无变化 → 轮询等（慢导航）
     """
+    new_tab = None
+    if pages_before is not None:
+        try:
+            after = await client.list_pages()
+            fresh = [t for t in after if t.get("id") not in pages_before]
+            if fresh:
+                t = fresh[-1]
+                try:
+                    await client.switch_to(t["webSocketDebuggerUrl"])
+                    await client.wait_page_load()
+                except Exception:
+                    pass
+                new_tab = {"url": t.get("url"), "title": t.get("title")}
+        except Exception:
+            pass
     try:
         cur = await client.eval_js("location.href")
     except Exception:
-        return False
+        cur = None
     if cur and url_before and cur != url_before:
         await client.wait_page_load()
-        return True
+        return {"new_tab": new_tab, "changed": True}
+    if new_tab:
+        return {"new_tab": new_tab, "changed": True}
     if wait_navigation is True:
         deadline = time.monotonic() + min(max(wait_s, 0.5), 5.0)
         while time.monotonic() < deadline:
@@ -278,11 +298,11 @@ async def _settle_navigation(client, url_before, wait_navigation, wait_s):
             try:
                 cur = await client.eval_js("location.href")
             except Exception:
-                return False
+                return {"new_tab": None, "changed": False}
             if cur and url_before and cur != url_before:
                 await client.wait_page_load()
-                return True
-    return False
+                return {"new_tab": None, "changed": True}
+    return {"new_tab": None, "changed": False}
 
 
 async def _attempt(client, *, action, selectors, page_features, expected_feature,
@@ -293,13 +313,18 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
     动作做了但断言没过。返回 result 含 status/verification/evidence。
     """
     sel = selectors or {}
-    # 导航检测：记录动作前 URL（click/press_key/press_enter 可能触发跳转）。
+    # 导航检测：记录动作前 URL + 标签页集合（click/press_key/press_enter 可能跳转/开新标签）。
     url_before = None
+    pages_before = None
     if action in ("click", "press_key", "press_enter") and wait_navigation is not False:
         try:
             url_before = await client.eval_js("location.href")
         except Exception:
             url_before = None
+        try:
+            pages_before = {t["id"] for t in await client.list_pages()}
+        except Exception:
+            pages_before = None
     # diff 兜底：动作前抓 scoped 快照（仅对会产生 DOM/导航效果、且命中目标动作）。
     before = None
     diff_target = sel.get("target") or sel.get("input")
@@ -389,9 +414,11 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
         return {"status": "fail", "reason": "action_failed",
                 "action_error": r, "action": {"name": action}}, False
 
-    # 导航检测：动作可能触发跳转——等跳转完成，再验证/读 url（否则读到旧 url）
+    # 导航检测：动作可能触发跳转/开新标签——等跳转完成，再验证/读 url
+    nav_info = None
     if url_before is not None:
-        await _settle_navigation(client, url_before, wait_navigation, wait_s)
+        nav_info = await _settle_navigation(client, url_before, wait_navigation,
+                                            wait_s, pages_before)
 
     # ---- 验证特征 ----
     async def _poll_verify(remaining_s, *, before=None, diff_target=None,
@@ -521,6 +548,8 @@ async def _attempt(client, *, action, selectors, page_features, expected_feature
         "evidence": evidence,
         "cost": {"elapsed_ms": int((time.monotonic() - start) * 1000)},
     }
+    if nav_info and nav_info.get("new_tab"):
+        res["new_tab"] = nav_info["new_tab"]
     if status == "ambiguous":
         res["reason"] = ("assertion_mismatch_but_change"
                          if expected_feature else "no_observable_change")
