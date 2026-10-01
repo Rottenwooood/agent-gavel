@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Delayed</title></head>
+<body>
+  <div id="status">loading</div>
+  <script>
+    setTimeout(function () {
+      document.getElementById('status').textContent = 'ready';
+    }, 500);
+  </script>
+</body>
+</html>

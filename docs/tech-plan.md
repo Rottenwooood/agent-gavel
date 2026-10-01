@@ -784,6 +784,14 @@ coordinate_move  coordinate_click  coordinate_drag  coordinate_scroll
 **依赖关系**：M1 ← M2 ← M3 ← M4 ← M5；M6 依赖 M2+M3 稳定。每期结束跑全量 pytest +
 旧脚本回归（`tests/*.py`）。
 
+**实施进度**：
+- M1 ✅ 已实现：`runtime/{errors,metrics,events,queue,policies,artifacts,browser_process,
+  sessions,contexts,pages,browser_runtime}.py` + `backends/playwright_backend.py` +
+  `tools/browser_tools.py`（22 个生命周期工具）+ `main.py` 接入。
+  验收 `tests/test_runtime.py` 15 passed（含冷启动/热调用/崩溃恢复门槛、同页串行、
+  跨页并行、超时/取消、session 独占、1000 次无泄漏）。
+- M2–M6 待实现。
+
 ---
 
 ## 10. 与现有 CDP 代码的共存策略

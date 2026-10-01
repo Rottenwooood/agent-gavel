@@ -19,11 +19,26 @@ dependencies = [
     "psutil>=6.0",
     "pypdf>=5.0",
     "python-docx>=1.1",
+    "playwright>=1.50",
 ]
 
 # agent-gavel 是 MCP server（stdio 模式），opencode 等客户端通过
 # `uvx agent-gavel` 拉起。桌面(AT-SPI)通道依赖 computer-use-linux
 # (npm 全局安装)，不是 Python 依赖——纯 DOM 用法无需安装它。
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# 环境里可能装了 ROS 的 pytest 插件（launch_testing/ament_*），它们会因缺依赖
+# 在 pytest 启动时炸掉。显式禁用这些非本项目插件；pytest-asyncio 仍正常自动加载。
+addopts = """-p no:launch_testing -p no:launch_ros -p no:ament_lint
+ -p no:ament_flake8 -p no:ament_pep257 -p no:ament_copyright -p no:ament_xmllint"""
 
 [project.scripts]
 agent-gavel = "agent_gavel.main:main"

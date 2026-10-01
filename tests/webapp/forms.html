@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Forms</title></head>
+<body>
+  <form id="f" onsubmit="event.preventDefault(); document.getElementById('submitted').textContent='yes';">
+    <label for="name">Name</label>
+    <input id="name" name="name" type="text" placeholder="your name">
+    <select id="color" name="color">
+      <option value="r">Red</option>
+      <option value="g">Green</option>
+    </select>
+    <input id="agree" name="agree" type="checkbox">
+    <input id="radio-a" name="pick" type="radio" value="a">
+    <input id="radio-b" name="pick" type="radio" value="b">
+    <textarea id="notes" name="notes"></textarea>
+    <input id="upload" name="file" type="file">
+    <button id="submit" type="submit">Submit</button>
+  </form>
+  <p id="submitted"></p>
+</body>
+</html>

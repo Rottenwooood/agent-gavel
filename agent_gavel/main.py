@@ -9,10 +9,12 @@ from mcp.server.mcpserver import MCPServer
 
 from .channels.desktop.server import register_desktop_tools
 from .channels.dom.server import register_dom_tools
+from .tools import register_runtime_tools
 
 mcp = MCPServer("agent-gavel")
 register_dom_tools(mcp)
 register_desktop_tools(mcp)
+register_runtime_tools(mcp)
 
 # 记录启动时父进程 pid，供 Windows 看门狗使用。
 _PARENT_PID = os.getppid()
@@ -47,12 +49,22 @@ def _shutdown(signum, frame):  # noqa: ARG001
     os._exit(0)
 
 
+async def _shutdown_runtime():
+    """尽力关闭新 runtime 的浏览器进程（跨事件循环失败也无妨）。"""
+    try:
+        from .runtime import shutdown_runtime
+        await shutdown_runtime()
+    except Exception:
+        pass
+
+
 def _cleanup_sync():
     try:
         loop = asyncio.new_event_loop()
         loop.run_until_complete(asyncio.gather(
             close_resident(),
             asyncio.to_thread(_stop_owned_chrome),
+            _shutdown_runtime(),
         ))
         loop.close()
     except Exception:

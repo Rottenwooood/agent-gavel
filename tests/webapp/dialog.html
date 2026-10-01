@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Dialog</title></head>
+<body>
+  <button id="alert-btn" onclick="alert('hi')">alert</button>
+  <button id="confirm-btn" onclick="document.getElementById('res').textContent = confirm('ok?') ? 'yes':'no'">confirm</button>
+  <button id="prompt-btn" onclick="document.getElementById('res').textContent = prompt('name?') || ''">prompt</button>
+  <p id="res"></p>
+</body>
+</html>
