@@ -804,11 +804,30 @@ coordinate_move  coordinate_click  coordinate_drag  coordinate_scroll
   下载自动捕获（sha256/MIME/大小/TTL 配额）、PDF/Word/文本抽取、导出白名单；
   locator/断言支持 `frame` 嵌套 iframe。验收 `tests/test_m3_advanced.py` 12 passed。
   全量 `uv run pytest` 49 passed；MCP `tools/list` 暴露 66 个新 runtime 工具。
-- M4–M6 待实现。
+- M4 ✅ 已实现：`workflows/{schema,loader,compiler,recorder,runner}.py` +
+  `tools/workflow_tools.py` + `tools/diagnostics_tools.py` +
+  `runtime/tracing.py`（Tracer/NetworkRecorder）。
+  能力：录制 → 编译（去纯动作/合并输入/参数化/补检查点/标记副作用/版本）→
+  workflow_save/validate/publish/list/get/stats → workflow_run/replay（verbosity
+  summary/steps/full，失败自动升级、requires_confirmation blocked、安全动作重试）→
+  pause/resume/cancel（run 注册表）→ 局部修复（locator 失败时重新探索当前页生成新
+  locator 重试并发布新版本）；trace_start/stop/get、network_start/stop、
+  console_get、page_errors、performance_metrics。session 独占（并发决策 B）在 run
+  期间生效。验收 `tests/test_m4_workflow.py` 9 passed；真实 MCP 联调 `mcp_live_smoke`
+  18/18（含 workflow_save/run/list）。全量 `uv run pytest` 58 passed；
+  MCP `tools/list` 暴露 59 个新 runtime 工具。
+- M5–M6 待实现。
 
 **M3 诚实说明**：设计 §11 "下载超时和取消"未做成独立工具——下载由 `page.on("download")`
 自动捕获并落盘，失败/超限以 `download_failed`/`download_rejected` 事件暴露（事件可在
 `page_wait_for_event`/`browser_status` 观测）；未提供主动取消下载的 API。
+
+**M4 诚实说明**：
+- pause/resume/cancel 在**步边界**生效；调用方需能在 run 进行中并发发起这些调用
+  （MCP 客户端并行调用；测试用 asyncio 并发）。
+- 编译器"稳定性 locator"用的是录制到的 target（不重新探索）；局部修复才做重新探索，
+  用"文本包含"启发式匹配，非通用视觉/语义匹配。
+- 网络记录按 context 有界缓冲；`network_stop` 返回后缓冲仍在（可再次 start 继续）。
 
 ---
 

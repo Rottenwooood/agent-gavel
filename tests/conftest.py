@@ -4,12 +4,19 @@
 """
 
 import os
+import tempfile
 
 import pytest
 import pytest_asyncio
 
 # 测试默认无头；显式设置用 setdefault，不覆盖本地调试的 export
 os.environ.setdefault("AGENT_GAVEL_HEADLESS", "1")
+
+# 隔离工作流模板目录，避免测试写进真实 ~/.config/agent-gavel/workflows/。
+# 注意：不要改 XDG_CONFIG_HOME——Chrome 会读它，指向空目录会导致后续外网导航
+# net::ERR_NETWORK_CHANGED/超时（已实测）。
+os.environ["AGENT_GAVEL_WORKFLOWS_DIR"] = tempfile.mkdtemp(
+    prefix="agent-gavel-test-workflows-")
 
 from agent_gavel.runtime import reset_runtime, shutdown_runtime  # noqa: E402
 from webapp_server import start_server  # noqa: E402

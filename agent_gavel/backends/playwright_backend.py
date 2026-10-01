@@ -568,6 +568,9 @@ class PlaywrightBackend:
         if checks is None:
             return []
         if isinstance(checks, dict):
+            # 单个 check（含 op）→ 当成一条；否则按 {名字: spec} 映射
+            if "op" in checks:
+                return [checks]
             out = []
             for name, spec in checks.items():
                 if not isinstance(spec, dict):

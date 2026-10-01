@@ -45,9 +45,12 @@ async def call(session, name, args=None):
 
 
 async def main():
+    import tempfile
     params = StdioServerParameters(
         command=sys.executable, args=["-m", "agent_gavel.main"],
-        env={**os.environ, "AGENT_GAVEL_HEADLESS": "1"},
+        env={**os.environ, "AGENT_GAVEL_HEADLESS": "1",
+             "AGENT_GAVEL_WORKFLOWS_DIR":
+                 tempfile.mkdtemp(prefix="ag-live-workflows-")},
         cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     )
     async with stdio_client(params) as (r, w):
@@ -92,6 +95,31 @@ async def main():
 
             txt = await call(s, "page_text", {"page_id": pid, "mode": "text"})
             check("page_text 非空", bool((txt.get("text") or "").strip()))
+
+            # 诊断 + 工作流（M4，真实 MCP）
+            pm = await call(s, "performance_metrics")
+            check("performance_metrics", pm.get("status") == "ok"
+                  and bool(pm.get("metrics")))
+            bad = await call(s, "workflow_validate",
+                             {"template": {"template_id": "x", "steps": []}})
+            check("workflow_validate 拒绝非法模板", bad.get("valid") is False)
+            saved = await call(s, "workflow_save", {"template": {
+                "template_id": "live_example", "site": "example.com",
+                "desc": "live",
+                "steps": [{"id": "s1", "action": {"type": "navigate",
+                                                  "url": "https://example.com"},
+                           "checkpoint": {"type": "url_contains",
+                                          "value": "example.com"}}]}})
+            check("workflow_save", saved.get("status") == "ok",
+                  f"version={saved.get('version')}")
+            wrun = await call(s, "workflow_run",
+                              {"name_or_id": "live_example"})
+            check("workflow_run 单调用重放", wrun.get("status") == "pass",
+                  f"checkpoints={wrun.get('checkpoints_passed')}")
+            wl = await call(s, "workflow_list")
+            check("workflow_list", any(
+                w.get("template_id") == "live_example"
+                for w in wl.get("items", [])))
 
             # 2. 真实站点交互 + 断言：Wikipedia 搜索
             await call(s, "session_close", {"session_id": sc.get("session_id")})

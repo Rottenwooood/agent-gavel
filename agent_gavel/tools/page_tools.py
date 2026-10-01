@@ -20,11 +20,15 @@ def register_page_tools(mcp):
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
         before = await be.page_signature(handle.page) if assertions else None
+        url_before = handle.page.url
         res = await handle.actor.submit(
             "navigate",
             lambda: be.goto(handle, url, wait_until=wait_until,
                             timeout_s=timeout_s),
             timeout_s=timeout_s + 5)
+        if rt.recorder is not None and rt.recorder.active:
+            rt.recorder.record(handle, {"type": "navigate", "url": url},
+                               url_before=url_before, url_after=handle.page.url)
         out = {"status": "ok", **ids(handle), **res}
         if assertions:
             ev = await be.evaluate_checks(handle.page, assertions,

@@ -6,11 +6,14 @@ def register_runtime_tools(mcp):
     from .artifact_tools import register_artifact_tools
     from .assertion_tools import register_assertion_tools
     from .browser_tools import register_browser_tools
+    from .diagnostics_tools import register_diagnostics_tools
     from .page_tools import register_page_tools
+    from .workflow_tools import register_workflow_tools
 
     register_browser_tools(mcp)
     register_page_tools(mcp)
     register_action_tools(mcp)
     register_assertion_tools(mcp)
     register_artifact_tools(mcp)
-    # M4+ 追加：workflow_tools
+    register_workflow_tools(mcp)
+    register_diagnostics_tools(mcp)

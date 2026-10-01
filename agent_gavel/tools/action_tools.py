@@ -4,7 +4,7 @@
 """
 
 from ..runtime.errors import GavelError
-from .common import backend, guard, ids, run_with_optional_assert
+from .common import backend, guard, ids, rec, run_with_optional_assert
 
 
 def _rt_and_handle(page_id):
@@ -29,7 +29,8 @@ def register_action_tools(mcp):
             lambda: be.act(handle.page, target, "click", button=button,
                            count=count, force=force,
                            wait_navigation=wait_navigation, timeout_s=timeout_s),
-            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
+            record=rec("click", target, button=button))
 
     @mcp.tool()
     @guard
@@ -43,7 +44,8 @@ def register_action_tools(mcp):
             rt, handle, "fill",
             lambda: be.act(handle.page, target, "fill", value=value,
                            timeout_s=timeout_s),
-            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
+            record=rec("fill", target, value=value))
 
     @mcp.tool()
     @guard
@@ -58,7 +60,8 @@ def register_action_tools(mcp):
             rt, handle, "type",
             lambda: be.act(handle.page, target, "type", value=text,
                            delay_ms=delay_ms, timeout_s=timeout_s),
-            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
+            record=rec("type", target, text=text))
 
     @mcp.tool()
     @guard
@@ -74,7 +77,8 @@ def register_action_tools(mcp):
             lambda: be.act(handle.page, target, "press", keys=keys,
                            timeout_s=timeout_s,
                            wait_navigation=wait_navigation),
-            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
+            record=rec("press", target, keys=keys))
 
     @mcp.tool()
     @guard
@@ -87,7 +91,8 @@ def register_action_tools(mcp):
         return await run_with_optional_assert(
             rt, handle, "hover",
             lambda: be.act(handle.page, target, "hover", timeout_s=timeout_s),
-            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
+            record=rec("hover", target))
 
     @mcp.tool()
     @guard
@@ -100,7 +105,8 @@ def register_action_tools(mcp):
         return await run_with_optional_assert(
             rt, handle, "focus",
             lambda: be.act(handle.page, target, "focus", timeout_s=timeout_s),
-            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
+            record=rec("focus", target))
 
     @mcp.tool()
     @guard
@@ -113,7 +119,8 @@ def register_action_tools(mcp):
         return await run_with_optional_assert(
             rt, handle, "clear",
             lambda: be.act(handle.page, target, "clear", timeout_s=timeout_s),
-            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
+            record=rec("clear", target))
 
     @mcp.tool()
     @guard
@@ -132,7 +139,8 @@ def register_action_tools(mcp):
                                         amount=amount, timeout_s=timeout_s)
         return await run_with_optional_assert(
             rt, handle, "scroll", fn, assertions=assertions, wait_s=wait_s,
-            timeout_s=timeout_s)
+            timeout_s=timeout_s,
+            record=rec("scroll", target, direction=direction, amount=amount))
 
     @mcp.tool()
     @guard
@@ -145,7 +153,8 @@ def register_action_tools(mcp):
         return await run_with_optional_assert(
             rt, handle, "check",
             lambda: be.act(handle.page, target, "check", timeout_s=timeout_s),
-            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
+            record=rec("check", target))
 
     @mcp.tool()
     @guard
@@ -158,7 +167,8 @@ def register_action_tools(mcp):
         return await run_with_optional_assert(
             rt, handle, "uncheck",
             lambda: be.act(handle.page, target, "uncheck", timeout_s=timeout_s),
-            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
+            record=rec("uncheck", target))
 
     @mcp.tool()
     @guard
@@ -173,7 +183,8 @@ def register_action_tools(mcp):
             rt, handle, "select",
             lambda: be.act(handle.page, target, "select", value=value,
                            select_by=select_by, timeout_s=timeout_s),
-            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
+            record=rec("select", target, value=value, select_by=select_by))
 
     @mcp.tool()
     @guard
@@ -187,7 +198,8 @@ def register_action_tools(mcp):
             rt, handle, "drag",
             lambda: be.act(handle.page, target, "drag",
                            destination=destination, timeout_s=timeout_s),
-            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
+            record=rec("drag", target, destination=destination))
 
     @mcp.tool()
     @guard
@@ -206,7 +218,8 @@ def register_action_tools(mcp):
             rt, handle, "upload",
             lambda: be.act(handle.page, target, "upload", files=payload,
                            timeout_s=timeout_s),
-            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
+            record=rec("upload", target, files=payload))
 
     @mcp.tool()
     @guard

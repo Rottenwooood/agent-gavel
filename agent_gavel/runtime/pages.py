@@ -70,6 +70,7 @@ class PageHandle:
         p.on("framenavigated", self._on_navigated)
         p.on("download", self._on_download)
         p.on("dialog", self._on_dialog)
+        p.on("request", self._on_request)
         p.on("response", self._on_response)
         p.on("requestfailed", self._on_requestfailed)
 
@@ -110,14 +111,26 @@ class PageHandle:
             if self.pending_dialog is dialog:
                 self.pending_dialog = None
 
+    def _on_request(self, request):
+        try:
+            self.runtime.network.record(self.context_id, {
+                "type": "request", "method": request.method, "url": request.url,
+                "resource_type": request.resource_type})
+        except Exception:
+            pass
+
     def _on_response(self, response):
         try:
+            import time as _t
             self.responses.append({"url": response.url, "status": response.status,
                                    "method": response.request.method,
-                                   "ts": __import__("time").time()})
+                                   "ts": _t.time()})
             if len(self.responses) > self._max_responses:
                 self.responses = self.responses[-self._max_responses:]
             self._emit("response", url=response.url, status=response.status)
+            self.runtime.network.record(self.context_id, {
+                "type": "response", "status": response.status,
+                "method": response.request.method, "url": response.url})
         except Exception:
             pass
 
@@ -125,6 +138,9 @@ class PageHandle:
         try:
             self._emit("request_failed", url=request.url,
                        error=str(request.failure))
+            self.runtime.network.record(self.context_id, {
+                "type": "request_failed", "url": request.url,
+                "method": request.method, "error": str(request.failure)})
         except Exception:
             pass
 

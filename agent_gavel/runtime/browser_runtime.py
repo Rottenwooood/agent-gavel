@@ -7,6 +7,7 @@
 import asyncio
 from collections import defaultdict
 
+from ..workflows.recorder import Recorder
 from .artifacts import ArtifactStore
 from .browser_process import BrowserProcessManager
 from .contexts import ContextManager
@@ -15,6 +16,7 @@ from .metrics import MetricsRecorder
 from .pages import PageManager
 from .policies import PolicyManager
 from .sessions import Session, SessionManager
+from .tracing import NetworkRecorder, Tracer
 
 
 class BrowserRuntime:
@@ -24,10 +26,14 @@ class BrowserRuntime:
         self.metrics = MetricsRecorder()
         self.policies = PolicyManager()
         self.artifacts = ArtifactStore()
+        self.tracer = Tracer()
+        self.network = NetworkRecorder()
+        self.recorder = Recorder()
 
         self.sessions = {}
         self.contexts = {}
         self.pages = {}
+        self.runs = {}
         self._counters = defaultdict(int)
 
         self.session_mgr = SessionManager(self)
@@ -61,6 +67,10 @@ class BrowserRuntime:
     def schedule(self, coro):
         return asyncio.ensure_future(coro)
 
+    def page_id_for(self, pw_page):
+        h = self.page_mgr._by_key.get(id(pw_page))
+        return h.page_id if h else None
+
     # ---- 状态 ----
     def status(self):
         return {
@@ -76,6 +86,9 @@ class BrowserRuntime:
             "events": self.events.stats(),
             "metrics": self.metrics.snapshot(),
             "domain_restricted": self.policies.domain_restricted,
+            "runs": {rid: {"status": r.status, "template_id": r.template_id}
+                     for rid, r in self.runs.items()},
+            "recording": self.recorder.active,
         }
 
     # ---- 生命周期 ----
