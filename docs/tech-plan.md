@@ -785,12 +785,16 @@ coordinate_move  coordinate_click  coordinate_drag  coordinate_scroll
 旧脚本回归（`tests/*.py`）。
 
 **实施进度**：
-- M1 ✅ 已实现：`runtime/{errors,metrics,events,queue,policies,artifacts,browser_process,
-  sessions,contexts,pages,browser_runtime}.py` + `backends/playwright_backend.py` +
+- M1 ✅ 已实现：`runtime/*` + `backends/playwright_backend.py` +
   `tools/browser_tools.py`（22 个生命周期工具）+ `main.py` 接入。
-  验收 `tests/test_runtime.py` 15 passed（含冷启动/热调用/崩溃恢复门槛、同页串行、
+  验收 `tests/test_runtime.py` 15 passed（冷启动/热调用/崩溃恢复门槛、同页串行、
   跨页并行、超时/取消、session 独占、1000 次无泄漏）。
-- M2–M6 待实现。
+- M2 ✅ 已实现：`tools/{page_tools,action_tools,assertion_tools,common}.py` +
+  后端 locator/动作/断言/探索/截图/PDF。验收 `tests/test_basic_dom.py` 15 passed
+  （导航/读取/探索锚点/填表/点击/中文/Control+A 真实语义/三态/等待/延迟 poll/
+  截图 artifact/PDF/严格 locator 多重命中）。
+  全量 `uv run pytest` 30 passed。
+- M3–M6 待实现。
 
 ---
 

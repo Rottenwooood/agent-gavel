@@ -42,3 +42,35 @@ async def runtime():
         yield rt
     finally:
         await shutdown_runtime()
+
+
+class FakeMCP:
+    """收集 @mcp.tool() 注册的函数，供直接调用工具层。"""
+
+    def __init__(self):
+        self.tools = {}
+
+    def tool(self, *a, **k):
+        def deco(fn):
+            self.tools[fn.__name__] = fn
+            return fn
+        return deco
+
+
+@pytest.fixture
+def gavel_tools(runtime):
+    """注册全部 runtime 工具，返回 {name: callable}。"""
+    from agent_gavel.tools import register_runtime_tools
+    m = FakeMCP()
+    register_runtime_tools(m)
+    return m.tools
+
+
+@pytest_asyncio.fixture
+async def page(gavel_tools, webapp_server):
+    """建 session + 打开 basic.html，返回 (tools, page_id, base_url)。"""
+    r = await gavel_tools["session_create"]()
+    pid = r["page_id"]
+    await gavel_tools["page_navigate"](page_id=pid,
+                                       url=f"{webapp_server}/basic.html")
+    return gavel_tools, pid, webapp_server
