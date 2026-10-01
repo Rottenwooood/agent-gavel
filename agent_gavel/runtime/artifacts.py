@@ -151,18 +151,92 @@ class ArtifactStore:
         return {"artifact_id": artifact_id, "exported_to": dest,
                 "size_bytes": info.get("size_bytes")}
 
+    def delete(self, artifact_id: str) -> dict:
+        idx = self._load()
+        if artifact_id not in idx:
+            raise GavelError("artifact_not_found", f"未知 artifact：{artifact_id}")
+        self._remove(artifact_id, idx)
+        self._save()
+        return {"artifact_id": artifact_id, "deleted": True}
+
+    # ---- 下载捕获（page.on("download") 调用）----
+    async def capture_download(self, download, *, session_id=None, page_id=None,
+                               policies=None, events=None):
+        aid = None
+        try:
+            failure = await download.failure()
+            if failure:
+                if events:
+                    events.emit({"event": "download_failed", "session_id": session_id,
+                                 "page_id": page_id, "error": failure,
+                                 "suggested_filename": download.suggested_filename})
+                return None
+            src = await download.path()
+            size = os.path.getsize(src)
+            if policies is not None:
+                try:
+                    policies.check_download_size(size)
+                except GavelError as e:
+                    if events:
+                        events.emit({"event": "download_rejected",
+                                     "session_id": session_id, "page_id": page_id,
+                                     "error": e.message, "size_bytes": size})
+                    return None
+            aid = self._next_id()
+            dest = os.path.join(self.root, aid)
+            await download.save_as(dest)
+            filename = download.suggested_filename or aid
+            info = {
+                "artifact_id": aid,
+                "kind": "download",
+                "suggested_filename": filename,
+                "mime_type": _guess_mime(dest, filename),
+                "size_bytes": size,
+                "sha256": _sha256(dest),
+                "source_url": download.url,
+                "session_id": session_id,
+                "page_id": page_id,
+                "path": dest,
+                "created_at": _now(),
+            }
+            self._load()[aid] = info
+            self._save()
+            if events:
+                events.emit({"event": "download_completed", "session_id": session_id,
+                             "page_id": page_id, "artifact_id": aid,
+                             "suggested_filename": filename,
+                             "size_bytes": size, "sha256": info["sha256"]})
+            return dict(info)
+        except Exception as e:  # noqa: BLE001
+            if events:
+                events.emit({"event": "download_failed", "session_id": session_id,
+                             "page_id": page_id, "error": str(e)})
+            return None
+
+    # ---- 文本抽取 ----
+    def read_text(self, artifact_id: str) -> dict:
+        info = self.get(artifact_id)
+        with open(info["path"], "rb") as f:
+            data = f.read()
+        text, kind = extract_text(data, info.get("mime_type"))
+        if text is None:
+            return {"artifact_id": artifact_id, "extracted": False,
+                    "kind": kind, "hint": "该类型不支持文本抽取"}
+        return {"artifact_id": artifact_id, "extracted": True, "kind": kind,
+                "text": text, "chars": len(text)}
+
     # ---- 清理 ----
     def cleanup(self, *, ttl_days=None, max_bytes=None) -> dict:
         idx = self._load()
         removed = []
         now = _now()
-        if ttl_days:
+        if ttl_days is not None:
             cutoff = now - ttl_days * 86400
             for aid, info in list(idx.items()):
                 if info.get("created_at", now) < cutoff:
                     self._remove(aid, idx)
                     removed.append(aid)
-        if max_bytes:
+        if max_bytes is not None:
             items = sorted(idx.items(), key=lambda kv: kv[1].get("created_at", 0))
             total = sum(i.get("size_bytes", 0) for _, i in items)
             for aid, info in items:
@@ -182,3 +256,115 @@ class ArtifactStore:
                 os.remove(info["path"])
             except OSError:
                 pass
+
+
+# ---------------- 模块级工具：哈希 / MIME / 文本抽取 ----------------
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _guess_mime(path, filename=None):
+    name = (filename or path or "").lower()
+    ext = os.path.splitext(name)[1]
+    table = {".pdf": "application/pdf",
+             ".docx": "application/vnd.openxmlformats-officedocument."
+                      "wordprocessingml.document",
+             ".doc": "application/msword",
+             ".xlsx": "application/vnd.openxmlformats-officedocument."
+                      "spreadsheetml.sheet",
+             ".xls": "application/vnd.ms-excel",
+             ".csv": "text/csv", ".txt": "text/plain",
+             ".json": "application/json", ".xml": "application/xml",
+             ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+             ".gif": "image/gif", ".zip": "application/zip"}
+    if ext in table:
+        return table[ext]
+    try:
+        with open(path, "rb") as f:
+            head = f.read(8)
+        if head[:4] == b"%PDF":
+            return "application/pdf"
+        if head[:2] == b"PK":
+            return "application/zip"
+        if head[:4] == b"\xd0\xcf\x11\xe0":
+            return "application/msword"
+    except Exception:
+        pass
+    return "application/octet-stream"
+
+
+def extract_text(data: bytes, content_type=None):
+    """按类型抽取文本，返回 (text|None, kind)。"""
+    import io
+    ct = (content_type or "").lower()
+    if data[:4] == b"%PDF" or "pdf" in ct:
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(data))
+            return "\n".join((p.extract_text() or "") for p in reader.pages), "pdf"
+        except Exception as e:  # noqa: BLE001
+            return None, f"pdf-error:{str(e)[:120]}"
+    if data[:2] == b"PK" or "wordprocessingml" in ct or "officedocument" in ct:
+        try:
+            from docx import Document
+            d = Document(io.BytesIO(data))
+            parts = [p.text for p in d.paragraphs]
+            for t in d.tables:
+                for row in t.rows:
+                    parts.append("\t".join(c.text for c in row.cells))
+            return "\n".join(parts), "docx"
+        except Exception as e:  # noqa: BLE001
+            return None, f"docx-error:{str(e)[:120]}"
+    if data[:4] == b"\xd0\xcf\x11\xe0" or "msword" in ct:
+        return _extract_legacy_doc(data)
+    if ct.startswith("text/") or data[:1] in (b"{", b"[", b"<") or b"\n" in data[:200]:
+        try:
+            return data.decode("utf-8", errors="replace"), "text"
+        except Exception:
+            pass
+    return None, ct or "unknown"
+
+
+def _extract_legacy_doc(data):
+    """老 .doc（OLE）：soffice → antiword → catdoc。"""
+    import subprocess
+    with tempfile.NamedTemporaryFile(suffix=".doc", delete=False) as f:
+        f.write(data)
+        path = f.name
+    try:
+        soffice = shutil.which("soffice") or shutil.which("libreoffice")
+        if soffice:
+            outdir = tempfile.mkdtemp()
+            profile = tempfile.mkdtemp()
+            try:
+                subprocess.run([soffice, "--headless",
+                                f"-env:UserInstallation=file://{profile}",
+                                "--convert-to", "txt:Text", "--outdir", outdir, path],
+                               capture_output=True, timeout=60)
+                out = os.path.join(outdir, os.path.splitext(os.path.basename(path))[0] + ".txt")
+                if os.path.isfile(out):
+                    with open(out, encoding="utf-8", errors="replace") as fh:
+                        return fh.read(), "doc"
+            except Exception:
+                pass
+        for tool in ("antiword", "catdoc"):
+            exe = shutil.which(tool)
+            if not exe:
+                continue
+            try:
+                r = subprocess.run([exe, path], capture_output=True, timeout=30)
+                if r.returncode == 0 and r.stdout:
+                    return r.stdout.decode("utf-8", errors="replace"), "doc"
+            except Exception:
+                pass
+        return None, "doc-unsupported"
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass

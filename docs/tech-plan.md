@@ -793,11 +793,22 @@ coordinate_move  coordinate_click  coordinate_drag  coordinate_scroll
   后端 locator/动作/断言/探索/截图/PDF。验收 `tests/test_basic_dom.py` 15 passed
   （导航/读取/探索锚点/填表/点击/中文/Control+A 真实语义/三态/等待/延迟 poll/
   截图 artifact/PDF/严格 locator 多重命中）。
-- 测试体系 ✅ 三层落地：功能回归 `test_runtime/test_basic_dom/test_advanced_runtime`、
-  性能门槛 `test_perf.py`（真实测量并断言 §12）、真实联调 `mcp_live_smoke.py`；
-  独立基准 `bench_runtime.py` 输出 p50/p95/p99 + 并发 + 泄漏 + RSS 到 logs/*.json。
-  全量 `uv run pytest` 37 passed。
-- M3–M6 待实现（M3 的下载/上传/popup/iframe/dialog/storage state 用例随其里程碑补齐）。
+- 测试体系 ✅ 三层落地：功能回归 `test_runtime/test_basic_dom/test_advanced_runtime/
+  test_m3_advanced`、性能门槛 `test_perf.py`（真实测量并断言 §12）、真实联调
+  `mcp_live_smoke.py`；独立基准 `bench_runtime.py` 输出 p50/p95/p99 + 并发 + 泄漏 +
+  RSS 到 logs/*.json。
+- M3 ✅ 已实现：`locator_check/uncheck/select/drag/upload(set_files)`、
+  `page_handle_dialog`（manual/auto_accept/auto_dismiss，手动处理绕过动作队列防死锁）、
+  `page_wait_for_response/load/download/popup/event`、`download_*`、`artifact_*`、
+  `context_cookies_get/set/clear`、`context_set_headers/permissions`；artifact 增加
+  下载自动捕获（sha256/MIME/大小/TTL 配额）、PDF/Word/文本抽取、导出白名单；
+  locator/断言支持 `frame` 嵌套 iframe。验收 `tests/test_m3_advanced.py` 12 passed。
+  全量 `uv run pytest` 49 passed；MCP `tools/list` 暴露 66 个新 runtime 工具。
+- M4–M6 待实现。
+
+**M3 诚实说明**：设计 §11 "下载超时和取消"未做成独立工具——下载由 `page.on("download")`
+自动捕获并落盘，失败/超限以 `download_failed`/`download_rejected` 事件暴露（事件可在
+`page_wait_for_event`/`browser_status` 观测）；未提供主动取消下载的 API。
 
 ---
 

@@ -214,6 +214,63 @@ def register_browser_tools(mcp):
         rt = rt_get()
         return {"status": "ok", **await rt.context_mgr.close(context_id)}
 
+    @mcp.tool()
+    @_guard
+    async def context_cookies_get(context_id: str, url: str = None):
+        """读取 context 的 cookie（可选按 url 过滤）。"""
+        rt = rt_get()
+        ctx = rt.context_mgr.get(context_id)
+        cookies = await ctx.browser_context.cookies(url) if url \
+            else await ctx.browser_context.cookies()
+        return {"status": "ok", "context_id": context_id, "cookies": cookies,
+                "count": len(cookies)}
+
+    @mcp.tool()
+    @_guard
+    async def context_cookies_set(context_id: str, cookies: list = None):
+        """写入 cookie（Playwright addCookies 格式）。"""
+        rt = rt_get()
+        ctx = rt.context_mgr.get(context_id)
+        if not cookies:
+            raise GavelError("bad_args", "需要 cookies")
+        await ctx.browser_context.add_cookies(cookies)
+        return {"status": "ok", "context_id": context_id,
+                "added": len(cookies)}
+
+    @mcp.tool()
+    @_guard
+    async def context_cookies_clear(context_id: str):
+        """清空 context 的所有 cookie。"""
+        rt = rt_get()
+        ctx = rt.context_mgr.get(context_id)
+        await ctx.browser_context.clear_cookies()
+        return {"status": "ok", "context_id": context_id, "cleared": True}
+
+    @mcp.tool()
+    @_guard
+    async def context_set_headers(context_id: str, headers: dict = None):
+        """设置 context 的额外请求头（set_extra_http_headers）。"""
+        rt = rt_get()
+        ctx = rt.context_mgr.get(context_id)
+        await ctx.browser_context.set_extra_http_headers(headers or {})
+        return {"status": "ok", "context_id": context_id,
+                "headers": headers or {}}
+
+    @mcp.tool()
+    @_guard
+    async def context_set_permissions(context_id: str, permissions: list = None,
+                                      origin: str = None):
+        """授予/清空 context 权限（给出 permissions 授予，空则清空）。"""
+        rt = rt_get()
+        ctx = rt.context_mgr.get(context_id)
+        if permissions:
+            await ctx.browser_context.grant_permissions(permissions,
+                                                        origin=origin)
+        else:
+            await ctx.browser_context.clear_permissions()
+        return {"status": "ok", "context_id": context_id,
+                "permissions": permissions or []}
+
     # ---------------- page ----------------
 
     @mcp.tool()

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Drag</title></head>
+<body>
+  <div id="drag-src" draggable="true"
+       ondragstart="event.dataTransfer.setData('text/plain','payload')"
+       style="width:80px;height:40px;background:#cde">source</div>
+  <div id="drop-zone"
+       ondrop="event.preventDefault(); document.getElementById('drop-res').textContent='dropped:'+event.dataTransfer.getData('text/plain')"
+       ondragover="event.preventDefault()"
+       style="width:120px;height:60px;background:#fdd">drop here</div>
+  <p id="drop-res"></p>
+</body>
+</html>

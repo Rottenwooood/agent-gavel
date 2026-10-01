@@ -133,3 +133,103 @@ def register_action_tools(mcp):
         return await run_with_optional_assert(
             rt, handle, "scroll", fn, assertions=assertions, wait_s=wait_s,
             timeout_s=timeout_s)
+
+    @mcp.tool()
+    @guard
+    async def locator_check(page_id: str = None, target: dict = None,
+                            timeout_s: float = 30.0, assertions: dict = None,
+                            wait_s: float = 6.0):
+        """勾选 checkbox/radio。"""
+        rt, handle = _rt_and_handle(page_id)
+        be = backend()
+        return await run_with_optional_assert(
+            rt, handle, "check",
+            lambda: be.act(handle.page, target, "check", timeout_s=timeout_s),
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+
+    @mcp.tool()
+    @guard
+    async def locator_uncheck(page_id: str = None, target: dict = None,
+                              timeout_s: float = 30.0, assertions: dict = None,
+                              wait_s: float = 6.0):
+        """取消勾选 checkbox。"""
+        rt, handle = _rt_and_handle(page_id)
+        be = backend()
+        return await run_with_optional_assert(
+            rt, handle, "uncheck",
+            lambda: be.act(handle.page, target, "uncheck", timeout_s=timeout_s),
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+
+    @mcp.tool()
+    @guard
+    async def locator_select(page_id: str = None, target: dict = None,
+                             value: str = None, select_by: str = "value",
+                             timeout_s: float = 30.0, assertions: dict = None,
+                             wait_s: float = 6.0):
+        """选择 <select> 选项。select_by: value|label|index。"""
+        rt, handle = _rt_and_handle(page_id)
+        be = backend()
+        return await run_with_optional_assert(
+            rt, handle, "select",
+            lambda: be.act(handle.page, target, "select", value=value,
+                           select_by=select_by, timeout_s=timeout_s),
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+
+    @mcp.tool()
+    @guard
+    async def locator_drag(page_id: str = None, target: dict = None,
+                           destination: dict = None, timeout_s: float = 30.0,
+                           assertions: dict = None, wait_s: float = 6.0):
+        """拖拽：把 target 拖到 destination。"""
+        rt, handle = _rt_and_handle(page_id)
+        be = backend()
+        return await run_with_optional_assert(
+            rt, handle, "drag",
+            lambda: be.act(handle.page, target, "drag",
+                           destination=destination, timeout_s=timeout_s),
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+
+    @mcp.tool()
+    @guard
+    async def locator_upload(page_id: str = None, target: dict = None,
+                             files: list = None, timeout_s: float = 30.0,
+                             assertions: dict = None, wait_s: float = 6.0):
+        """给 <input type=file> 设置文件（受文件白名单约束）。"""
+        rt, handle = _rt_and_handle(page_id)
+        if not files:
+            raise GavelError("bad_args", "需要 files（路径或路径列表）")
+        for p in (files if isinstance(files, list) else [files]):
+            rt.policies.check_local_path(p, purpose="上传")
+        be = backend()
+        payload = files if isinstance(files, list) else [files]
+        return await run_with_optional_assert(
+            rt, handle, "upload",
+            lambda: be.act(handle.page, target, "upload", files=payload,
+                           timeout_s=timeout_s),
+            assertions=assertions, wait_s=wait_s, timeout_s=timeout_s)
+
+    @mcp.tool()
+    @guard
+    async def locator_set_files(page_id: str = None, target: dict = None,
+                                files: list = None, timeout_s: float = 30.0,
+                                assertions: dict = None, wait_s: float = 6.0):
+        """同 locator_upload：给文件输入框设置文件。"""
+        return await locator_upload(page_id=page_id, target=target,
+                                    files=files, timeout_s=timeout_s,
+                                    assertions=assertions, wait_s=wait_s)
+
+    @mcp.tool()
+    @guard
+    async def page_handle_dialog(page_id: str = None, action: str = "accept",
+                                 prompt_text: str = None, policy: str = None):
+        """处理页面对话框（alert/confirm/prompt）。
+
+        action: accept|dismiss；prompt_text 用于 prompt。
+        policy: manual|auto_accept|auto_dismiss —— 设置后续 dialog 的默认行为。
+        该调用**不经页面动作队列**（避免与阻塞动作死锁）。
+
+        注意：policy=manual（默认）时 dialog 会阻塞页面，须再调本工具处理。
+        """
+        rt, handle = _rt_and_handle(page_id)
+        return {"status": "ok", **ids(handle), **await backend().handle_dialog(
+            handle, action=action, prompt_text=prompt_text, policy=policy)}

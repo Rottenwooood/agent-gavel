@@ -47,9 +47,15 @@ class EventBus:
         return {"buffered": len(self._buf), "dropped": self._dropped,
                 "waiters": len(self._waiters)}
 
-    async def wait_for(self, predicate, timeout: float):
-        """等待第一个满足 predicate 的事件；超时返回 None。"""
+    async def wait_for(self, predicate, timeout: float, since: float = None):
+        """等待第一个满足 predicate 的事件；超时返回 None。
+
+        since 给定时只接受 ts >= since 的事件（避免返回调用前的旧事件）；
+        since=None 时连缓冲里的旧事件也算（用于"触发后再等"的下载/popup）。
+        """
         for e in reversed(self._buf):
+            if since is not None and e.get("ts", 0.0) < since:
+                continue
             try:
                 if predicate(e):
                     return e

@@ -19,6 +19,11 @@ class PageHandle:
         self.opener_page_id = opener_page_id
         self.status = "open"
         self.actor = PageActor(page_id, metrics=runtime.metrics)
+        self.pending_dialog = None
+        self.dialog_policy = "manual"      # manual | auto_accept | auto_dismiss
+        self.dialog_history = []
+        self.responses = []                # 最近响应摘要（诊断/等待用）
+        self._max_responses = 200
 
     @property
     def session_id(self):
@@ -63,6 +68,65 @@ class PageHandle:
         p.on("pageerror", lambda exc: self._emit("page_error", error=str(exc)))
         p.on("console", self._on_console)
         p.on("framenavigated", self._on_navigated)
+        p.on("download", self._on_download)
+        p.on("dialog", self._on_dialog)
+        p.on("response", self._on_response)
+        p.on("requestfailed", self._on_requestfailed)
+
+    def _on_download(self, download):
+        try:
+            self._emit("download_started",
+                       suggested_filename=download.suggested_filename,
+                       url=download.url)
+            self.runtime.schedule(self.runtime.artifacts.capture_download(
+                download, session_id=self.session_id, page_id=self.page_id,
+                policies=self.runtime.policies, events=self.runtime.events))
+        except Exception:
+            pass
+
+    def _on_dialog(self, dialog):
+        info = {"dialog_type": dialog.type, "message": dialog.message,
+                "default_value": dialog.default_value}
+        self.dialog_history.append(info)
+        self.pending_dialog = dialog
+        self._emit("dialog_opened", **info)
+        if self.dialog_policy == "auto_accept":
+            self.runtime.schedule(self._auto_dialog(dialog, True, None))
+        elif self.dialog_policy == "auto_dismiss":
+            self.runtime.schedule(self._auto_dialog(dialog, False, None))
+
+    async def _auto_dialog(self, dialog, accept, prompt_text):
+        try:
+            if accept:
+                if dialog.type == "prompt" and prompt_text is not None:
+                    await dialog.accept(prompt_text)
+                else:
+                    await dialog.accept()
+            else:
+                await dialog.dismiss()
+        except Exception:
+            pass
+        finally:
+            if self.pending_dialog is dialog:
+                self.pending_dialog = None
+
+    def _on_response(self, response):
+        try:
+            self.responses.append({"url": response.url, "status": response.status,
+                                   "method": response.request.method,
+                                   "ts": __import__("time").time()})
+            if len(self.responses) > self._max_responses:
+                self.responses = self.responses[-self._max_responses:]
+            self._emit("response", url=response.url, status=response.status)
+        except Exception:
+            pass
+
+    def _on_requestfailed(self, request):
+        try:
+            self._emit("request_failed", url=request.url,
+                       error=str(request.failure))
+        except Exception:
+            pass
 
     def _on_console(self, msg):
         try:
@@ -128,6 +192,14 @@ class PageManager:
             existing = self._by_key.get(key)
             if existing is not None:
                 return existing
+            if opener_page_id is None:
+                try:
+                    op = await pw_page.opener()
+                    if op is not None:
+                        oh = self._by_key.get(id(op))
+                        opener_page_id = oh.page_id if oh else None
+                except Exception:
+                    pass
             pid = self.runtime.next_id("page")
             handle = PageHandle(pid, ctx, pw_page, self.runtime,
                                 opener_page_id=opener_page_id)
@@ -139,7 +211,8 @@ class PageManager:
             self.runtime.active_page_id = pid
             handle.bind()
             await handle.actor.start()
-            handle._emit("page_created", url=handle._safe_url())
+            handle._emit("page_created", url=handle._safe_url(),
+                         opener_page_id=handle.opener_page_id)
             return handle
 
     async def open(self, ctx, url=None):

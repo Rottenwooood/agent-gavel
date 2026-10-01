@@ -11,5 +11,10 @@
   <a id="to-basic" href="basic.html#v2">self</a>
   <a id="to-multi" href="multiple_pages.html">multi</a>
   <div id="box" style="width:100px;height:50px;background:#eee">box</div>
+  <button id="fetch-slow"
+          onclick="fetch('/slow').then(r=>r.text()).then(t=>document.getElementById('fetch-out').textContent=t)">
+    fetch
+  </button>
+  <p id="fetch-out"></p>
 </body>
 </html>

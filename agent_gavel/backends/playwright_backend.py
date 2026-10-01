@@ -76,6 +76,59 @@ class PlaywrightBackend:
                                             timeout=timeout_s * 1000)
         return {"page_id": handle.page_id, "selector": selector, "state": state}
 
+    async def wait_for_response(self, handle, *, url=None, status=None,
+                                timeout_s=30.0):
+        import fnmatch
+
+        def match(resp):
+            if status is not None and resp.status != status:
+                return False
+            if url:
+                u = resp.url
+                if "*" in url or "?" in url:
+                    if not (fnmatch.fnmatch(u, url) or url in u):
+                        return False
+                elif url not in u:
+                    return False
+            return True
+
+        resp = await handle.page.wait_for_event(
+            "response", predicate=match, timeout=timeout_s * 1000)
+        return {"page_id": handle.page_id, "url": resp.url,
+                "http_status": resp.status, "method": resp.request.method}
+
+    # ================= dialog（不经 actor，避免与阻塞动作死锁）=================
+    async def handle_dialog(self, handle, *, action="accept", prompt_text=None,
+                            policy=None):
+        if policy is not None:
+            if policy not in ("manual", "auto_accept", "auto_dismiss"):
+                raise GavelError("bad_policy", f"未知 dialog policy：{policy}")
+            handle.dialog_policy = policy
+        dialog = handle.pending_dialog
+        if dialog is None:
+            if policy is not None:
+                return {"page_id": handle.page_id, "policy": policy,
+                        "dialog": None}
+            raise GavelError("no_dialog", "当前没有待处理 dialog",
+                             detail={"history": handle.dialog_history[-3:],
+                                     "hint": "dialog 可能已被 policy 自动处理"})
+        info = {"page_id": handle.page_id, "dialog_type": dialog.type,
+                "message": dialog.message}
+        if action == "accept":
+            if dialog.type == "prompt" and prompt_text is not None:
+                await dialog.accept(prompt_text)
+            else:
+                await dialog.accept()
+            info["accepted"] = True
+        elif action == "dismiss":
+            await dialog.dismiss()
+            info["accepted"] = False
+        else:
+            raise GavelError("bad_action", "action 取 accept|dismiss")
+        handle.pending_dialog = None
+        info["policy"] = handle.dialog_policy
+        return info
+
     # ================= locator 解析 =================
     @staticmethod
     def _normalize_target(target):
@@ -94,6 +147,16 @@ class PlaywrightBackend:
                              hint="by 取 role|label|placeholder|text|testid|css|xpath")
         return by, value
 
+    @staticmethod
+    def _frame_root(page, frame):
+        """target["frame"] 可为选择器或选择器列表（嵌套 iframe）。"""
+        if not frame:
+            return page
+        root = page
+        for f in (frame if isinstance(frame, list) else [frame]):
+            root = root.frame_locator(f)
+        return root
+
     async def resolve(self, page, target):
         by, value = self._normalize_target(target)
         name = target.get("name")
@@ -101,21 +164,22 @@ class PlaywrightBackend:
         strict = target.get("strict", True)
         nth = target.get("nth")
         has_text = target.get("has_text")
+        root = self._frame_root(page, target.get("frame"))
         try:
             if by == "role":
-                loc = page.get_by_role(value, name=name, exact=exact)
+                loc = root.get_by_role(value, name=name, exact=exact)
             elif by == "label":
-                loc = page.get_by_label(value, exact=exact)
+                loc = root.get_by_label(value, exact=exact)
             elif by == "placeholder":
-                loc = page.get_by_placeholder(value, exact=exact)
+                loc = root.get_by_placeholder(value, exact=exact)
             elif by == "text":
-                loc = page.get_by_text(value, exact=exact)
+                loc = root.get_by_text(value, exact=exact)
             elif by == "testid":
-                loc = page.get_by_test_id(value)
+                loc = root.get_by_test_id(value)
             elif by == "css":
-                loc = page.locator(value)
+                loc = root.locator(value)
             elif by == "xpath":
-                loc = page.locator("xpath=" + value)
+                loc = root.locator("xpath=" + value)
             else:
                 raise GavelError("bad_target", f"未知 by：{by}")
         except GavelError:
@@ -179,6 +243,24 @@ class PlaywrightBackend:
             await loc.fill("", timeout=ms)
         elif action == "scroll":
             await loc.scroll_into_view_if_needed(timeout=ms)
+        elif action == "check":
+            await loc.check(timeout=ms)
+        elif action == "uncheck":
+            await loc.uncheck(timeout=ms)
+        elif action == "select":
+            val = kw.get("value")
+            by = kw.get("select_by", "value")
+            if by == "label":
+                await loc.select_option(label=val, timeout=ms)
+            elif by == "index":
+                await loc.select_option(index=int(val), timeout=ms)
+            else:
+                await loc.select_option(value=val, timeout=ms)
+        elif action == "upload":
+            await loc.set_input_files(kw.get("files"), timeout=ms)
+        elif action == "drag":
+            dest_loc = await self.resolve(page, kw.get("destination"))
+            await loc.drag_to(dest_loc, timeout=ms)
         else:
             raise GavelError("bad_action", f"未知动作：{action}")
         result = {"action": action, "action_completed": True,
@@ -391,8 +473,9 @@ class PlaywrightBackend:
         read = check.get("read")
         sel = check.get("selector")
         op = check.get("op")
+        root = self._frame_root(page, check.get("frame"))
         if op in ("exists", "not_exists"):
-            return await page.locator(sel).count() if sel else 0
+            return await root.locator(sel).count() if sel else 0
         if read is None:
             if check.get("expr") is not None:
                 read = "expr"
@@ -415,8 +498,8 @@ class PlaywrightBackend:
         if read == "expr":
             return await page.evaluate(check["expr"])
         if read == "count":
-            return await page.locator(sel).count()
-        loc = page.locator(sel).first
+            return await root.locator(sel).count()
+        loc = root.locator(sel).first
         if read == "value":
             return await loc.input_value()
         if read == "attr":
