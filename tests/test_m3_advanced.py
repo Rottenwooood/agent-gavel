@@ -180,6 +180,10 @@ async def test_wait_for_response(sess):
 
 async def test_context_cookies_headers_permissions(sess):
     tools, _sid, cid, _pid, base = sess
+    # url 无路径会自动补 "/"（Playwright 拒绝无 path 的 url）
+    assert (await tools["context_cookies_set"](
+        context_id=cid,
+        cookies=[{"name": "nopath", "value": "1", "url": base}]))["status"] == "ok"
     await tools["context_cookies_set"](
         context_id=cid, cookies=[{"name": "k", "value": "v", "url": base}])
     ck = await tools["context_cookies_get"](context_id=cid, url=base)
@@ -230,6 +234,24 @@ async def test_session_state_context_and_reset(gavel_tools, webapp_server,
     assert rs["status"] == "ok"
     assert rs["session_id"] != sid
     assert rs["context_ids"]
+
+
+async def test_persistent_profile_login_persists(gavel_tools, webapp_server,
+                                                 tmp_path):
+    T, base = gavel_tools, webapp_server
+    udd = str(tmp_path / "profile")
+    r = await T["session_create"](mode="persistent", user_data_dir=udd)
+    await T["page_navigate"](page_id=r["page_id"], url=f"{base}/basic.html")
+    await T["page_read"](page_id=r["page_id"],
+                         page_features={"s": "localStorage.setItem('login','yes')"})
+    await T["session_close"](session_id=r["session_id"])
+
+    r2 = await T["session_create"](mode="persistent", user_data_dir=udd)
+    await T["page_navigate"](page_id=r2["page_id"], url=f"{base}/basic.html")
+    rd = await T["page_read"](page_id=r2["page_id"],
+                              page_features={"v": "localStorage.getItem('login')"})
+    assert rd["features"]["v"] == "yes"   # 关会话重开，登录态仍在
+    await T["session_close"](session_id=r2["session_id"])
 
 
 def test_docx_text_extraction():

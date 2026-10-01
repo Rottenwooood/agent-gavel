@@ -228,12 +228,25 @@ def register_browser_tools(mcp):
     @mcp.tool()
     @_guard
     async def context_cookies_set(context_id: str, cookies: list = None):
-        """写入 cookie（Playwright addCookies 格式）。"""
+        """写入 cookie（Playwright addCookies 格式）。
+
+        cookie 需有 url 或 domain+path；url 缺路径会自动补 "/"
+        （Playwright 拒绝无 path 的 url，如 "https://example.com"）。
+        """
+        from urllib.parse import urlparse
+
+        def _norm(c):
+            d = dict(c)
+            u = d.get("url")
+            if u and not urlparse(u).path:
+                d["url"] = u.rstrip("/") + "/"
+            return d
+
         rt = rt_get()
         ctx = rt.context_mgr.get(context_id)
         if not cookies:
             raise GavelError("bad_args", "需要 cookies")
-        await ctx.browser_context.add_cookies(cookies)
+        await ctx.browser_context.add_cookies([_norm(c) for c in cookies])
         return {"status": "ok", "context_id": context_id,
                 "added": len(cookies)}
 
