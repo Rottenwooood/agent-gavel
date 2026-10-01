@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>推免政策列表</title></head>
+<body>
+  <h1>推免政策列表</h1>
+  <ul id="list"><li>政策条目 A（第1页）</li></ul>
+  <span id="pageno">1</span>
+  <button id="next">下一页</button>
+  <script>
+    const data = {
+      1: ['政策条目 A（第1页）'],
+      2: ['政策条目 B（第2页）', '政策条目 C（第2页）'],
+      3: ['政策条目 D（第3页）']
+    };
+    let p = 1;
+    document.getElementById('next').onclick = () => {
+      if (p < 3) p++;
+      document.getElementById('pageno').textContent = p;
+      document.getElementById('list').innerHTML =
+        data[p].map(x => '<li>' + x + '</li>').join('');
+    };
+  </script>
+</body>
+</html>

@@ -3,10 +3,7 @@
 测试默认无头（AGENT_GAVEL_HEADLESS），CI 友好；本地调试可自行 export 覆盖。
 """
 
-import functools
-import http.server
 import os
-import threading
 
 import pytest
 import pytest_asyncio
@@ -15,22 +12,15 @@ import pytest_asyncio
 os.environ.setdefault("AGENT_GAVEL_HEADLESS", "1")
 
 from agent_gavel.runtime import reset_runtime, shutdown_runtime  # noqa: E402
-
-WEBAPP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webapp")
+from webapp_server import start_server  # noqa: E402
 
 
 @pytest.fixture(scope="session")
 def webapp_server():
     """线程内起 http.server 服务 tests/webapp/，返回 base_url。"""
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler,
-                                directory=WEBAPP_DIR)
-    handler.log_message = lambda *a, **k: None
-    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    port = httpd.server_address[1]
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-    t.start()
+    httpd, base = start_server()
     try:
-        yield f"http://127.0.0.1:{port}"
+        yield base
     finally:
         httpd.shutdown()
 

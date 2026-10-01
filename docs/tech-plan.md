@@ -793,8 +793,11 @@ coordinate_move  coordinate_click  coordinate_drag  coordinate_scroll
   后端 locator/动作/断言/探索/截图/PDF。验收 `tests/test_basic_dom.py` 15 passed
   （导航/读取/探索锚点/填表/点击/中文/Control+A 真实语义/三态/等待/延迟 poll/
   截图 artifact/PDF/严格 locator 多重命中）。
-  全量 `uv run pytest` 30 passed。
-- M3–M6 待实现。
+- 测试体系 ✅ 三层落地：功能回归 `test_runtime/test_basic_dom/test_advanced_runtime`、
+  性能门槛 `test_perf.py`（真实测量并断言 §12）、真实联调 `mcp_live_smoke.py`；
+  独立基准 `bench_runtime.py` 输出 p50/p95/p99 + 并发 + 泄漏 + RSS 到 logs/*.json。
+  全量 `uv run pytest` 37 passed。
+- M3–M6 待实现（M3 的下载/上传/popup/iframe/dialog/storage state 用例随其里程碑补齐）。
 
 ---
 
@@ -823,25 +826,34 @@ coordinate_move  coordinate_click  coordinate_drag  coordinate_scroll
 
 ```
 tests/
-  conftest.py            # pytest fixtures: 静态站点 http server、runtime、browser
-  webapp/                # 本地综合测试站点（讨论稿 §15）
-    basic.html           # 标题/文本/链接/输入/按钮
-    forms.html           # 各类表单、select、checkbox、radio、file
-    delayed.html         # 异步延迟出现内容（测 wait/poll/event）
-    popup.html           # target=_blank / window.open
-    download.html        # 触发下载（文本/PDF/csv）
-    upload.html          # 文件上传
-    iframe.html          # 嵌套 iframe
-    dialog.html          # alert/confirm/prompt
-    multiple_pages.html  # 多页跳转
-    redirect.html        # 302 / meta refresh / JS 跳转
-    websocket.html       # 异步推送
-  test_runtime.py
-  test_basic_dom.py
-  test_advanced.py
-  test_workflow.py
+  conftest.py              # fixtures: 静态站点、runtime、gavel_tools、page
+  webapp_server.py         # 本地站点服务 + 特殊端点 /slow /hang /redirect302
+  webapp/                  # 本地综合测试站点（讨论稿 §15）
+    basic.html             # 标题/文本/链接/输入/按钮
+    forms.html             # 表单/select/checkbox/radio/file
+    delayed.html           # 异步延迟内容（测 wait/poll）
+    multiple_pages.html    # 多页跳转
+    popup.html             # target=_blank / window.open
+    download.html          # 触发下载
+    iframe.html            # 嵌套 iframe
+    dialog.html            # alert/confirm/prompt
+    redirect.html          # meta refresh
+    websocket.html         # 异步推送
+    files/hello.txt        # 下载目标
+  benchlib.py              # 性能基准库（延迟分布/并发/泄漏/RSS）
+  bench_runtime.py         # 独立基准报告：uv run python tests/bench_runtime.py
+  test_runtime.py          # M1：资源模型/并发/生命周期/泄漏
+  test_basic_dom.py        # M2：导航/读取/探索/动作/断言/三态/截图/PDF
+  test_advanced_runtime.py # 多 context 隔离/重定向/导航超时/多 session 并行/崩溃恢复
+  test_perf.py             # 性能门槛（跑 benchlib 并断言 §12）
+  mcp_live_smoke.py        # 真实 MCP 协议联调（非单元测试，联网）
 ```
 旧脚本（`browser_manager_smoke.py` 等）保留，作为旧通道回归。
+
+**测试体系分三层**：
+1. **功能回归**（`test_*.py`，pytest）：断言行为的正确性。
+2. **性能门槛**（`test_perf.py`）：真实测量延迟分布/并发/泄漏，不达标即失败。
+3. **真实联调**（`mcp_live_smoke.py`）：以 MCP 客户端身份拉起 server，对真实网站跑流程。
 
 ### 11.2 fixtures
 
@@ -859,7 +871,39 @@ Ctrl+A/Shift+Tab 组合键、storage state 导入导出、trace 生成、进程�
 
 ### 11.4 性能门槛（CI 断言）
 
-见 §12；超标即失败（可标记 xfail 以适配慢 CI）。
+`test_perf.py` 调用 `benchlib.run_suite` 真实测量并断言 §12 门槛（见 §12）；
+超标即失败。测量维度：
+
+| 维度 | 指标 | 门槛 |
+|---|---|---|
+| 启动 | 冷启动 | < 1500ms |
+| 连接 | 热调用 | < 20ms |
+| 读取 | read_title / eval p95 | < 50ms |
+| 动作 | click / fill p95 | < 100ms |
+| 并发 | 跨页并行相对串行加速比 | > 1.5x |
+| 恢复 | 浏览器崩溃恢复 | < 5000ms |
+| 泄漏 | 1000 次后 page/context 计数 | 不增长 |
+| 内存 | 1000 次后进程 RSS 增长 | < 150MB |
+
+### 11.5 独立基准报告
+
+`uv run python tests/bench_runtime.py [n]` 跑一轮完整基准，打印操作延迟
+p50/p95/p99 表 + 并发 + 泄漏 + RSS，并把 JSON 写入 `logs/bench-<ts>.json`，
+供跨提交对比。实测样例（Linux 无头、本机、n=20）：
+
+```
+cold_start≈353ms  hot≈1.1ms  crash_recovery≈106ms
+read_title p50≈0.6ms p95≈0.7ms；eval p50≈0.5ms；fill p50≈2.9ms；
+click p50≈33ms（Playwright actionability）；navigate_local p50≈11ms
+cross_page parallel 300ms vs serial 601ms（speedup x2.0）
+leak: pages 4->4, contexts 2->2, rss +0.0MB
+```
+
+### 11.6 真实联调
+
+`uv run python tests/mcp_live_smoke.py`：以 MCP 客户端身份 stdio 拉起源码 server，
+走 initialize/tools/list/tools/call，对 example.com + Wikipedia 跑真实流程
+（实测 13/13）。百度会撞反爬安全验证（captcha），属真实世界边界。
 
 ---
 
