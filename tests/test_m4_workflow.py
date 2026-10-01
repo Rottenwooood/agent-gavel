@@ -66,6 +66,9 @@ async def test_repair_republishes(gavel_tools, webapp_server):
     assert res["status"] == "pass", res
     assert res.get("republished"), res
     assert res["republished"]["version"] == 2
+    # 修复后重发不能把刚记录的 stats 冲掉
+    st = (await T["workflow_stats"]())["stats"]["testsite_repair"]
+    assert st["success_count"] == 1 and st["last_status"] == "pass", st
     rd = await T["page_read"](page_id=pid, page_features={
         "o": "document.querySelector('#out').innerText"})
     assert rd["features"]["o"] == "clicked"  # 修复后确实点了

@@ -102,11 +102,10 @@ def save(template):
             prev = None
     if prev:
         template["version"] = int(prev.get("version", 1)) + 1
-        prev_stats = prev.get("stats") or {}
-        template.setdefault("stats", {})
-        for k in ("success_count", "fail_count", "last_status", "last_at"):
-            if k in prev_stats and k not in (template.get("stats") or {}):
-                template["stats"][k] = prev_stats[k]
+        # stats 由运行时管理：覆盖保存时以已存在的 stats 为准，
+        # 避免"修复后重发"把 record_run 刚写的统计冲回旧值。
+        if prev.get("stats"):
+            template["stats"] = prev["stats"]
     else:
         template.setdefault("version", 1)
         template.setdefault("stats", {"success_count": 0, "fail_count": 0,
