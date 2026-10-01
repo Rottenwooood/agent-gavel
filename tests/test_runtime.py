@@ -176,6 +176,15 @@ async def test_no_leak_1000_ops(runtime):
     assert len(runtime.pages) == 2
 
 
+async def test_ephemeral_sessions_share_default_browser(runtime, gavel_tools):
+    """ephemeral 共享默认浏览器进程，但 context 相互隔离。"""
+    a = await gavel_tools["session_create"]()
+    b = await gavel_tools["session_create"]()
+    assert a["process_id"] == b["process_id"]
+    assert a["context_id"] != b["context_id"]
+    assert a["page_id"] != b["page_id"]
+
+
 async def test_cold_start_threshold(runtime):
     """方案 §12：冷启动 < 1.5s。"""
     t0 = time.perf_counter()

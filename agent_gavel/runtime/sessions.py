@@ -100,8 +100,10 @@ class SessionManager:
             await self.runtime.context_mgr.adopt(
                 session, handle.persistent_context)
         else:
+            # 只有显式给了 launch 级参数（proxy/channel/headless）才独占进程，
+            # 否则复用共享默认浏览器（headless=None 不应触发独占）。
             needs_dedicated = bool(opts.get("proxy") or opts.get("channel")
-                                   or "headless" in config)
+                                   or config.get("headless") is not None)
             if needs_dedicated:
                 handle = await self.runtime.processes.launch(**opts)
             else:
