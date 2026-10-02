@@ -49,7 +49,9 @@ async def run_with_optional_assert(rt, handle, action_type, fn, *,
                                    record=None):
     """执行动作，若给断言则做三态判定（含 before 签名 diff 判 ambiguous）。"""
     be = backend()
-    before = await be.page_signature(handle.page) if assertions else None
+    target = (record or {}).get("target")
+    before = await be.page_signature(handle.page, target=target) \
+        if assertions else None
     url_before = handle.page.url
     execution = await handle.actor.submit(action_type, fn,
                                           timeout_s=timeout_s + 5)
@@ -59,7 +61,10 @@ async def run_with_optional_assert(rt, handle, action_type, fn, *,
                            url_after=handle.page.url)
     if assertions:
         ev = await be.evaluate_checks(handle.page, assertions,
-                                      before_sig=before, wait_s=wait_s)
+                                      before_sig=before, wait_s=wait_s,
+                                      target=target)
         out["status"] = ev["status"]
         out["assertions"] = ev["assertions"]
+        if ev.get("diff") is not None:
+            out["diff"] = ev["diff"]
     return out

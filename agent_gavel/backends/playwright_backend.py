@@ -4,6 +4,7 @@
 覆盖：生命周期/导航（M1）+ locator 解析/动作/断言/探索/读取（M2）。
 """
 
+import difflib
 import re
 import struct
 import time
@@ -11,6 +12,46 @@ import time
 from ..runtime.errors import GavelError
 
 _TARGET_KEYS = ("role", "label", "placeholder", "text", "testid", "css", "xpath")
+
+# 作用域结构签名（地址/标题头 + 逐节点 tag#id.class[属性]+值/叶子文本）
+_SIG_BODY = r"""
+  function __sig(root){
+    const MAX=6000;
+    const bodyScope=(root===document.body);
+    const out=[];
+    const norm=x=>{const s=(x==null?'':String(x)).replace(/\s+/g,' ').trim();return s;};
+    out.push('URL='+location.href);
+    out.push('TITLE='+norm(document.title));
+    let count=0;
+    const w=document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT);
+    let e;
+    while((e=w.nextNode())){
+      if(++count>MAX)break;
+      const tag=e.tagName.toLowerCase();
+      let line=tag+(e.id?'#'+e.id:'');
+      if(e.classList&&e.classList.length){
+        const cls=Array.from(e.classList).filter(c=>!/^(sc-|jss|css-)/.test(c)).sort().join('.');
+        if(cls)line+='.'+cls;
+      }
+      for(const a of ['name','type','role','aria-expanded','aria-hidden','placeholder','alt']){
+        const av=e.getAttribute(a); if(av)line+='['+a+'='+norm(av).slice(0,60)+']';
+      }
+      if(e.tagName==='INPUT'||e.tagName==='TEXTAREA'){line+='='+norm(e.value).slice(0,200);}
+      else if(e.tagName==='SELECT'){const so=e.selectedOptions&&e.selectedOptions[0];line+='='+norm(so?so.text:'');}
+      if(!e.children.length){const tx=norm(e.textContent||e.getAttribute('placeholder')||'');if(tx)line+='::'+tx.slice(0,120);}
+      out.push(line);
+    }
+    return {lines:out, bodyScope:bodyScope, scope:(root===document.body?'body':(root.tagName+(root.id?'#'+root.id:'')))};
+  }
+"""
+_SIG_PAGE_JS = "() => {" + _SIG_BODY + " return __sig(document.body); }"
+_SIG_SCOPE_JS = ("el => {" + _SIG_BODY +
+                 " let root=null; let n=el;"
+                 " while(n&&n!==document.body&&n.parentElement){"
+                 "   if(/^(FORM|MAIN|SECTION|ARTICLE|DIV|UL|OL|TABLE|NAV)$/.test(n.tagName)){root=n;break;}"
+                 "   n=n.parentElement; }"
+                 " if(!root) root=el.parentElement||el;"
+                 " return __sig(root); }")
 
 
 def png_size(data):
@@ -460,14 +501,60 @@ class PlaywrightBackend:
         return {"data": data, "url": handle.page.url}
 
     # ================= 断言 =================
-    async def page_signature(self, page):
+    async def page_signature(self, page, target=None):
+        """动作前后快照：作用域内逐节点结构签名（tag#id.class+属性+值+叶子文本），
+        含地址/标题两行头。给了 target 就取"目标最近的容器"作用域（更细、
+        噪音更少），否则整页 body。返回 dict，供 diff_summary 比较。"""
+        if target:
+            try:
+                loc = (await self.resolve(page, target)).first
+                return await loc.evaluate(_SIG_SCOPE_JS)
+            except Exception:
+                pass
         try:
-            return await page.evaluate(
-                "() => ({url:location.href, title:document.title, "
-                "n:document.querySelectorAll('*').length, "
-                "t:(document.body?document.body.innerText.length:0)})")
+            return await page.evaluate(_SIG_PAGE_JS)
         except Exception:
             return None
+
+    @staticmethod
+    def diff_summary(before, after):
+        """对比前后结构签名，给出可读证据 + 是否"有意义地变化"。
+
+        判定（沿用旧通道语义）：
+          - 地址/标题头变化 → 一定是导航级变化；
+          - 局部作用域（小而纯净）→ 任意 1 处增删即有意义；
+          - 整页作用域（噪音多）→ 需 >=4 处增删，或变化占比 >=2%。
+        """
+        bl = before.get("lines") if isinstance(before, dict) else None
+        al = after.get("lines") if isinstance(after, dict) else None
+        if not bl or not al:
+            same = before == after
+            return {"changed": not same, "meaningful": not same}
+        sm = difflib.SequenceMatcher(None, bl, al)
+        added = removed = 0
+        s_add, s_rem = [], []
+        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+            if tag in ("insert", "replace"):
+                added += (j2 - j1)
+                s_add += al[j1:j2]
+            if tag in ("delete", "replace"):
+                removed += (i2 - i1)
+                s_rem += bl[i1:i2]
+        header_changed = bl[:2] != al[:2]
+        body = bool(before.get("bodyScope")) or bool(after.get("bodyScope"))
+        n_changed = added + removed
+        if header_changed:
+            meaningful = True
+        elif body:
+            total = max(len(bl), len(al))
+            meaningful = n_changed >= 4 or (total > 0
+                                            and n_changed / total >= 0.02)
+        else:
+            meaningful = n_changed >= 1
+        return {"changed": n_changed > 0, "meaningful": meaningful,
+                "added": added, "removed": removed,
+                "scope": before.get("scope") or after.get("scope"),
+                "samples_added": s_add[:6], "samples_removed": s_rem[:6]}
 
     async def _actual(self, page, check):
         read = check.get("read")
@@ -543,10 +630,29 @@ class PlaywrightBackend:
         raise GavelError("bad_op", f"未知断言 op：{op}")
 
     async def evaluate_checks(self, page, checks, before_sig=None,
-                              wait_s=0.0, interval=0.1):
-        """轮询评估 checks，返回三态 + 明细。"""
+                              wait_s=0.0, interval=0.1, target=None):
+        """评估 checks，返回三态（通过/不通过/拿不准）+ 明细。
+
+        B3 事件优先：先让浏览器侧等待条件成立（成立即刻返回），不支持或
+        到点则退回 Python 轮询；到点仍未通过时，用局部 diff 判"拿不准"，
+        并把 diff 证据一并返回（只在拿不准时返回）。
+        """
         checks = self._normalize_checks(checks)
+        if not checks:
+            return {"status": "pass", "assertions": []}
+
         deadline = time.monotonic() + max(0.0, wait_s)
+        event_supported = not (target and target.get("frame"))
+        if wait_s and wait_s > 0 and event_supported:
+            pred = self._event_predicate(checks)
+            if pred is not None:
+                remaining = max(0.05, deadline - time.monotonic())
+                try:
+                    await page.wait_for_function(
+                        pred, timeout=int(remaining * 1000))
+                except Exception:
+                    pass  # 到点/表达式异常 → 落回轮询与三态判定
+
         last = None
         while True:
             last = await self._run_checks(page, checks)
@@ -555,13 +661,104 @@ class PlaywrightBackend:
             await _sleep(interval)
         all_pass = all(r["passed"] for r in last)
         if all_pass:
-            status = "pass"
-        elif before_sig is not None:
-            after = await self.page_signature(page)
-            status = "ambiguous" if after != before_sig else "fail"
-        else:
-            status = "fail"
-        return {"status": status, "assertions": last}
+            return {"status": "pass", "assertions": last}
+        if before_sig is None:
+            return {"status": "fail", "assertions": last}
+        after = await self.page_signature(page, target=target)
+        diff = self.diff_summary(before_sig, after)
+        if diff.get("meaningful"):
+            return {"status": "ambiguous", "assertions": last, "diff": diff}
+        return {"status": "fail", "assertions": last}
+
+    def _event_predicate(self, checks):
+        """把可页面内表达的一组 check 合成浏览器侧等待谓词；含 iframe/不支持
+        的类型返回 None（调用方退回轮询）。"""
+        import json as _json
+
+        def q(sel):
+            return _json.dumps(sel or "")
+
+        parts = []
+        for c in checks:
+            if c.get("frame"):
+                return None
+            op = c.get("op", "eq")
+            sel = c.get("selector")
+            read = c.get("read")
+            if op in ("exists", "not_exists", "count_eq", "count_gte",
+                      "count_gt"):
+                if not sel:
+                    return None
+                read = "count"
+            if read is None:
+                if c.get("expr") is not None:
+                    read = "expr"
+                elif c.get("url"):
+                    read = "url"
+                elif c.get("title"):
+                    read = "title"
+                elif c.get("attr"):
+                    read = "attr"
+                elif sel:
+                    read = "text"
+                else:
+                    return None
+            if read == "url":
+                a = "location.href"
+            elif read == "title":
+                a = "document.title"
+            elif read == "expr":
+                if c.get("expr") is None:
+                    return None
+                a = "(" + c["expr"] + ")"
+            elif read == "count":
+                a = f"document.querySelectorAll({q(sel)}).length"
+            elif read == "value":
+                a = f"(__q({q(sel)})?__q({q(sel)}).value:null)"
+            elif read == "attr":
+                a = (f"(__q({q(sel)})?__q({q(sel)}).getAttribute("
+                     f"{_json.dumps(c.get('attr') or '')}):null)")
+            elif read == "html":
+                a = f"(__q({q(sel)})?__q({q(sel)}).innerHTML:null)"
+            else:
+                a = (f"((__q({q(sel)})&&(__q({q(sel)}).innerText"
+                     f"||__q({q(sel)}).textContent))||'').trim()")
+            cmp = self._cmp_js(op, a, _json.dumps(c.get("value")))
+            if cmp is None:
+                return None
+            parts.append(cmp)
+        if not parts:
+            return None
+        body = " && ".join(f"({p})" for p in parts)
+        return ("() => { const __q=s=>s?document.querySelector(s):null; "
+                f"return ({body}); }}")
+
+    @staticmethod
+    def _cmp_js(op, a, e):
+        if op == "exists":
+            return f"(({a})||0) > 0"
+        if op == "not_exists":
+            return f"(({a})||0) === 0"
+        if op == "eq":
+            return f"({a}) === {e}"
+        if op == "neq":
+            return f"({a}) !== {e}"
+        if op == "contains":
+            return f"String({a}).indexOf(String({e})) !== -1"
+        if op == "not_contains":
+            return f"String({a}).indexOf(String({e})) === -1"
+        if op == "regex":
+            return f"new RegExp(String({e})).test(String({a}))"
+        if op in ("gt", "lt", "gte", "lte"):
+            sym = {"gt": ">", "lt": "<", "gte": ">=", "lte": "<="}[op]
+            return f"({a}) {sym} {e}"
+        if op == "count_eq":
+            return f"({a}) === {e}"
+        if op == "count_gte":
+            return f"({a}) >= {e}"
+        if op == "count_gt":
+            return f"({a}) > {e}"
+        return None
 
     @staticmethod
     def _normalize_checks(checks):
