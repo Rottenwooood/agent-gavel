@@ -28,7 +28,8 @@ def register_page_tools(mcp):
             timeout_s=timeout_s + 5)
         if rt.recorder is not None and rt.recorder.active:
             rt.recorder.record(handle, {"type": "navigate", "url": url},
-                               url_before=url_before, url_after=handle.page.url)
+                               url_before=url_before, url_after=handle.page.url,
+                               checkpoint=assertions or None)
         out = {"status": "ok", **ids(handle), **res}
         if assertions:
             ev = await be.evaluate_checks(handle.page, assertions,

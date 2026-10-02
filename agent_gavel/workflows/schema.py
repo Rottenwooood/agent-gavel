@@ -18,15 +18,24 @@ ACTION_TYPES = {
 _TARGET_ACTIONS = {"click", "fill", "type", "press", "check", "uncheck",
                    "select", "hover", "focus", "clear", "scroll", "upload",
                    "drag"}
+# 语义上可重复执行而不产生新副作用的动作（重试/修复默认只对这些放行）。
+# 注意：click/press/type/drag 不在此列——它们可能提交/追加，默认不可自动重试。
+_INHERENTLY_IDEMPOTENT = {"navigate", "fill", "select", "check", "uncheck",
+                          "hover", "focus", "clear", "scroll", "upload"}
 _SIDE_EFFECT_HINTS = ("提交", "保存", "删除", "支付", "付款", "购买", "下单",
                       "确认", "submit", "save", "delete", "pay", "buy",
                       "purchase", "confirm", "send")
 
 _VAR_RE = re.compile(r"\$([A-Z][A-Z0-9_]*)")
+_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
 
 
 def substitute(obj, params):
-    """把 $VAR 占位符替换成 params 实际值（递归）。"""
+    """把 $VAR 占位符替换成 params 实际值（递归）。
+
+    用变量名整体匹配，避免前缀冲突：$QUERY 不会误替换进 $QUERY_ID；
+    params 里没有的变量保持原样（不静默清空）。
+    """
     params = params or {}
 
     def rec(x):
@@ -35,10 +44,8 @@ def substitute(obj, params):
         if isinstance(x, list):
             return [rec(v) for v in x]
         if isinstance(x, str):
-            out = x
-            for k, v in params.items():
-                out = out.replace(f"${k}", str(v))
-            return out
+            return _VAR_RE.sub(
+                lambda m: str(params.get(m.group(1), m.group(0))), x)
         return x
 
     return rec(obj)
@@ -132,8 +139,12 @@ def validate(template):
         return None, ["template 必须是对象"], []
     t = copy.deepcopy(template)
     t["schema_version"] = SCHEMA_VERSION
-    if not t.get("template_id"):
+    tid = t.get("template_id")
+    if not tid:
         errors.append("缺少 template_id")
+    elif not _ID_RE.match(str(tid)):
+        errors.append("template_id 只允许小写字母/数字/下划线"
+                      f"（收到 {tid!r}）")
     steps = t.get("steps")
     if not isinstance(steps, list) or not steps:
         errors.append("steps 必须是非空数组")
@@ -151,24 +162,33 @@ def validate(template):
         if atype not in ACTION_TYPES:
             errors.append(f"steps[{i}] 未知 action.type：{atype}")
             continue
+        # 归一：type/fill 用 text 传值的一律落到 value（避免"没输入却报成功"）
+        if atype in ("type", "fill") and "value" not in act \
+                and act.get("text") is not None:
+            act["value"] = act["text"]
         if atype in _TARGET_ACTIONS and not act.get("target"):
             errors.append(f"steps[{i}] action={atype} 缺少 target")
         if atype == "navigate" and not act.get("url"):
             errors.append(f"steps[{i}] navigate 缺少 url")
-        if atype == "fill" and "value" not in act:
-            errors.append(f"steps[{i}] fill 缺少 value")
+        if atype in ("fill", "type") and "value" not in act:
+            errors.append(f"steps[{i}] {atype} 缺少 value")
         step = {
             "id": st.get("id") or f"step{i + 1}",
             "action": act,
         }
         if st.get("checkpoint"):
             step["checkpoint"] = st["checkpoint"]
-        # 可重试性：侧效应默认不可自动重试
+        # 可重试性：默认按"动作类型是否天然幂等"判断，而不是"没命中副作用关键词
+        # 就当安全"。click/press/type/drag 默认不可自动重试；命中副作用关键词的
+        # 还需确认。显式声明的值优先，并记录 retry_explicit 供执行器区分。
         side = _looks_side_effect(act)
-        step["idempotent"] = bool(st.get("idempotent", not side))
-        step["safe_to_retry"] = bool(st.get("safe_to_retry", not side))
+        explicit = ("idempotent" in st) or ("safe_to_retry" in st)
+        inherent = (atype in _INHERENTLY_IDEMPOTENT) and not side
+        step["idempotent"] = bool(st.get("idempotent", inherent))
+        step["safe_to_retry"] = bool(st.get("safe_to_retry", inherent))
         step["requires_confirmation"] = bool(
             st.get("requires_confirmation", side))
+        step["retry_explicit"] = explicit
         if side:
             warnings.append(f"steps[{i}]（{step['id']}）疑似副作用动作，"
                             f"标记为需确认/不可自动重试")

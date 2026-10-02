@@ -58,7 +58,8 @@ async def run_with_optional_assert(rt, handle, action_type, fn, *,
     out = {"status": "ok", **ids(handle), "execution": execution}
     if rt.recorder is not None and rt.recorder.active and record is not None:
         rt.recorder.record(handle, record, url_before=url_before,
-                           url_after=handle.page.url)
+                           url_after=handle.page.url,
+                           checkpoint=assertions or None)
     if assertions:
         ev = await be.evaluate_checks(handle.page, assertions,
                                       before_sig=before, wait_s=wait_s,

@@ -27,6 +27,21 @@ USER_DIR = (os.environ.get("AGENT_GAVEL_WORKFLOWS_DIR")
             or os.path.join(_config_root(), "agent-gavel", "workflows"))
 
 
+_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
+
+
+def _is_safe_id(name) -> bool:
+    """template_id 只允许小写字母/数字/下划线，防止拼进路径时穿越。"""
+    return isinstance(name, str) and bool(_ID_RE.match(name))
+
+
+def _require_safe_id(name):
+    if not _is_safe_id(name):
+        raise GavelError("bad_template_id", f"非法 template_id：{name!r}",
+                         hint="只允许小写字母/数字/下划线，如 bing_search")
+    return name
+
+
 def slugify(name):
     return re.sub(r"[^a-z0-9]+", "_", (name or "").lower()).strip("_")
 
@@ -92,7 +107,7 @@ def migrate_old(old):
 def save(template):
     """保存模板到用户层；同 id 则 version+1 并保留 stats。返回 info。"""
     ensure_dirs()
-    tid = template["template_id"]
+    tid = _require_safe_id(template["template_id"])
     path = _path_for(tid)
     prev = None
     if os.path.isfile(path):
@@ -121,11 +136,12 @@ def save(template):
 def get(name_or_id):
     """按 template_id 或 site 加载（用户层优先）。返回 (template, path)。"""
     ensure_dirs()
-    for d in _dirs():
-        p = _path_for(name_or_id, d)
-        if os.path.isfile(p):
-            return _read(p), p
-    # 按 site 匹配
+    if _is_safe_id(name_or_id):
+        for d in _dirs():
+            p = _path_for(name_or_id, d)
+            if os.path.isfile(p):
+                return _read(p), p
+    # 按 site 匹配（name_or_id 不合法时也走到这里，不拼路径）
     for d in _dirs():
         for f in sorted(os.listdir(d)):
             if f.endswith(".json") and f != "stats.json":
@@ -167,11 +183,12 @@ def publish(template_id, out_dir=None):
     t, path = get(template_id)
     t = dict(t)
     t.pop("saved_at", None)
+    tid = _require_safe_id(t.get("template_id"))
     if out_dir:
-        dest = os.path.join(out_dir, f"{t['template_id']}.json")
+        dest = os.path.join(out_dir, f"{tid}.json")
         _write(dest, t)
-        return {"template_id": t["template_id"], "path": dest}
-    return {"template_id": t["template_id"], "template": t}
+        return {"template_id": tid, "path": dest}
+    return {"template_id": tid, "template": t}
 
 
 def record_run(template_id, status):

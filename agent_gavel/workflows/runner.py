@@ -219,6 +219,13 @@ class Runner:
             exec_info = await self._dispatch(page, act)
             entry["status"] = "ok"
             entry["execution"] = exec_info
+            if atype == "expect":
+                # expect 的成败就是步骤成败（此前被统一置为 ok，导致失败仍整体 pass）
+                entry["status"] = exec_info.get("status", "ok")
+                if exec_info.get("assertions") is not None:
+                    entry["assertions"] = exec_info["assertions"]
+                if exec_info.get("diff") is not None:
+                    entry["diff"] = exec_info["diff"]
         except GavelError as e:
             entry["status"] = "error"
             entry["reason"] = e.code
@@ -232,7 +239,7 @@ class Runner:
             entry["error"] = str(e)
             return entry
         entry["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
-        if checks:
+        if checks and atype != "expect":
             ev = await be.evaluate_checks(page.page, checks,
                                           before_sig=before, wait_s=wait_s,
                                           target=act.get("target"))
@@ -241,6 +248,8 @@ class Runner:
             entry["checkpoint_passed"] = ev["status"] == "pass"
             if ev.get("diff") is not None:
                 entry["diff"] = ev["diff"]
+        elif atype == "expect":
+            entry["checkpoint_passed"] = entry["status"] == "pass"
         return entry
 
     async def _dispatch(self, page, act):
@@ -267,10 +276,11 @@ class Runner:
         if atype == "expect":
             ev = await be.evaluate_checks(page.page, act.get("checks") or act,
                                           wait_s=act.get("wait_s", 6.0))
-            return {"action": "expect", "status": ev["status"]}
+            return {"action": "expect", "status": ev["status"],
+                    "assertions": ev.get("assertions"), "diff": ev.get("diff")}
         if atype == "screenshot":
             res = await page.actor.submit(
-                "screenshot", lambda: be.screenshot(page,
+                "screenshot", lambda: be.screenshot(page.page,
                                                     full_page=bool(act.get("full_page"))))
             info = rt.artifacts.save_bytes(res["data"], filename=f"{page.page_id}.png",
                                            kind="screenshot", mime_type="image/png",
@@ -290,23 +300,43 @@ class Runner:
                   "files", "destination", "full_page"):
             if k in act:
                 kw[k] = act[k]
+        # type 用 text 传值的兼容（schema 已归一，这里再兜一层）
+        if atype == "type" and "value" not in kw and act.get("text") is not None:
+            kw["value"] = act["text"]
         return await page.actor.submit(
             atype, lambda: be.act(page.page, act.get("target"), atype,
                                   timeout_s=act.get("timeout_s", 30), **kw))
+
+    @staticmethod
+    def _retry_allowed(step, res):
+        """该步骤失败后是否允许自动重试/修定位。
+
+        - 需确认的步骤：不允许。
+        - 显式"可重试且幂等"：允许。
+        - 其余（如 click/press 默认非幂等）：仅当**动作根本未执行**（定位失败
+          locator_not_found）时允许——没点到就不会有副作用；若显式声明过
+          safe_to_retry/idempotent（哪怕是 False），尊重声明，不给这个例外。
+        """
+        if step.get("requires_confirmation"):
+            return False
+        if step.get("safe_to_retry") and step.get("idempotent"):
+            return True
+        if res.get("reason") == "locator_not_found" \
+                and not step.get("retry_explicit"):
+            return True
+        return False
 
     # ---- B1 安全重试 ----
     async def _try_safe_retry(self, page, step, res, ctx):
         """安全且幂等的步骤，瞬时/不确定失败时原样重试一次。
 
-        只重试"可重试且幂等且非需确认"的步骤；副作用动作绝不重试。
-        策略由模板的 failure_policy.retry 控制：none 禁用，safe_only（默认）
-        只对安全步骤生效。
+        只重试通过 `_retry_allowed` 判定的步骤；副作用动作绝不重试。
+        策略由模板的 failure_policy.retry 控制：none 禁用，safe_only（默认）。
         """
         act = step["action"]
         if act.get("type") not in _TARGET_ACTIONS_SAFE:
             return None
-        if step.get("requires_confirmation") or not step.get("safe_to_retry", True) \
-                or not step.get("idempotent", True):
+        if not self._retry_allowed(step, res):
             return None
         policy = (ctx.get("template", {}).get("failure_policy") or {}).get("retry")
         if policy == "none":
@@ -330,8 +360,7 @@ class Runner:
         if act.get("type") not in _TARGET_ACTIONS_SAFE:
             return None
         # 副作用安全：需确认 / 不可重试 / 非幂等的步骤，失败后绝不重新点击
-        if step.get("requires_confirmation") or not step.get("safe_to_retry", True) \
-                or not step.get("idempotent", True):
+        if not self._retry_allowed(step, res):
             return None
         if not (res.get("repairable") or res.get("status") in ("fail", "ambiguous")):
             return None
