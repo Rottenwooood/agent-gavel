@@ -149,6 +149,35 @@ uv run python tests/mcp_live_smoke.py # 真实 MCP 协议联调
 > "回传字节"是 token 的代理指标，不是真实 token 数。淘宝/京东等强风控站点
 > 对自动化有拦截，不在承诺范围内。
 
+## 支持范围与限制
+
+- **平台**：Linux、Windows（网页通道已适配）；macOS 未验证。Python 3.13+。
+- **API 只有一套**：新 runtime。旧的 `dom_*` / AT-SPI 工具已归档到 `legacy/`，
+  不注册、不运行，**也不与新版共用浏览器**。
+- **浏览器**：Playwright 自管，默认系统 Chrome；缺 Chrome 时才回退自带 chromium。
+- **网络**：真实站点需可达；无头/服务器环境若受限，用 `session_create` 的 `proxy`
+  参数显式配置（浏览器不自动读 `*_proxy` 环境变量）。
+- **已实现的恢复**：安全幂等动作瞬时失败重试一次、定位失败的换锚点修复、
+  工作流暂停/恢复/取消、失败返回结构化 `reason`/`hint`。
+- **尚未实现**：验证码自动识别、`captcha_detected → 人工完成后 resume` 的成品闭环、
+  视觉/坐标后端（M6）、跨站模板市场。
+- **不在承诺范围**：强风控站点（淘宝/京东等）会拦截自动化；不提供绕过验证码能力。
+
+## 从旧版迁移
+
+旧 `dom_*` 工具被新 runtime 取代，主要对应关系：
+
+| 旧 | 新 |
+|---|---|
+| `dom_navigate` | `page_navigate` |
+| `dom_explore` | `page_explore` |
+| `dom_step`（动作+断言） | `locator_*`（可带 `assertions`） |
+| `dom_read` / `dom_text` | `page_read` / `page_text` |
+| `dom_save_template` / `dom_run_template` | `workflow_save` / `workflow_run` |
+| `act_and_verify`（桌面） | 已归档，不提供 |
+
+旧模板（schema v1）由 `loader` 只读兼容迁移；建议在新 runtime 重跑并另存为新模板。
+
 ## 状态与路线
 
 - 已完成：Playwright runtime、资源模型、基础/高级浏览器能力、工作流、诊断、

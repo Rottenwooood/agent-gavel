@@ -479,10 +479,18 @@ class PlaywrightBackend:
     async def screenshot(self, page, *, full_page=False, selector=None,
                          timeout_s=20.0):
         ms = timeout_s * 1000
-        if selector:
-            data = await page.locator(selector).first.screenshot(timeout=ms)
-        else:
-            data = await page.screenshot(full_page=full_page, timeout=ms)
+
+        async def _cap():
+            if selector:
+                return await page.locator(selector).first.screenshot(timeout=ms)
+            return await page.screenshot(full_page=full_page, timeout=ms)
+
+        try:
+            data = await _cap()
+        except Exception:
+            # 截图是只读操作，偶发渲染时序失败重试一次
+            await _sleep(0.2)
+            data = await _cap()
         w, h = png_size(data)
         try:
             dpr = await page.evaluate("window.devicePixelRatio")

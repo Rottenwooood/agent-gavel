@@ -123,6 +123,37 @@ async def test_task_missing_element_is_explained(gavel_tools, webapp_server):
     assert bad.get("hint")  # 模型能读懂下一步怎么做
 
 
+async def test_task_repair_after_page_changed(gavel_tools, webapp_server):
+    """页面改版（按钮 id 变化）→ 模板定位失败 → 局部修复换锚点 → 通过并发布新版。"""
+    T, base = gavel_tools, webapp_server
+    r = await T["session_create"]()
+    tmpl = {"template_id": "portal_shop_repair", "site": "portal", "desc": "repair",
+            "failure_policy": {"retry": "safe_only",
+                               "repair": "explore_local_step"},
+            "steps": [
+                {"id": "nav", "action": {
+                    "type": "navigate", "url": f"{base}/portal/shop_v2.html"},
+                 "checkpoint": {"type": "title_contains", "value": "Shop"}},
+                {"id": "fill", "action": {
+                    "type": "fill", "target": {"by": "css", "value": "#q"},
+                    "value": "widget"}},
+                {"id": "search", "action": {
+                    "type": "click", "target": {"by": "css", "value": "#search"}},
+                 "checkpoint": {"type": "text_contains", "selector": "#count",
+                                "value": "1 results"}}]}
+    await T["workflow_save"](template=tmpl)
+    res = await T["workflow_run"](name_or_id="portal_shop_repair",
+                                  session_id=r["session_id"], verbosity="steps")
+    assert res["status"] == "pass", res
+    assert any(s.get("repaired") for s in res["steps"]), res
+    assert res.get("republished"), res  # 修复后发布新版本
+    # 已完成的步骤不重复；修复后重跑应无需再修
+    res2 = await T["workflow_run"](name_or_id="portal_shop_repair",
+                                   session_id=r["session_id"], verbosity="steps")
+    assert res2["status"] == "pass", res2
+    assert not any(s.get("repaired") for s in res2["steps"]), res2
+
+
 async def test_task_replay_cheaper_than_explore(gavel_tools, webapp_server):
     """重放闭环：同一任务，探索跑 vs 模板一次重放，往返次数与回传量显著下降。"""
     base = webapp_server

@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install Python 3.13
+        run: uv python install 3.13
+      - name: Sync deps
+        run: uv sync
+      - name: Install Chromium (+ system deps)
+        run: uv run playwright install --with-deps chromium
+      - name: Functional + security + real-task tests
+        run: uv run pytest -q
+        env:
+          AGENT_GAVEL_HEADLESS: "1"
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build wheel + sdist
+        run: uv build
+      - name: Wheel must not contain legacy
+        run: |
+          python - <<'PY'
+          import glob, zipfile, sys
+          whl = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(whl).namelist()
+          bad = [n for n in names if "legacy" in n.split("/")[:2]]
+          assert not bad, f"legacy packaged: {bad[:5]}"
+          assert any(n.endswith("agent_gavel/main.py") for n in names), "main missing"
+          print(f"wheel OK: {len(names)} files, no legacy")
+          PY
+      - name: Clean install from wheel
+        run: |
+          uv venv /tmp/agvenv
+          uv pip install --python /tmp/agvenv/bin/python dist/*.whl
+          /tmp/agvenv/bin/python -c "import agent_gavel.main, agent_gavel.tools; print('clean install import OK')"
+
+  live-smoke:
+    # 真实 MCP 协议 + 真实网站的联调；外部网络波动不应阻断合并，故 allow-fail。
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv python install 3.13 && uv sync
+      - run: uv run playwright install --with-deps chromium
+      - name: Live MCP smoke
+        run: uv run python tests/mcp_live_smoke.py
+        env:
+          AGENT_GAVEL_HEADLESS: "1"

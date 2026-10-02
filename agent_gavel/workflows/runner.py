@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import re
 import time
 
 from ..runtime.errors import GavelError
@@ -351,6 +352,54 @@ class Runner:
         out["retry_of"] = res.get("status")
         return out
 
+    @staticmethod
+    def _repair_needles(target, step):
+        """从目标里抽可匹配的线索：语义名（name/text/label）、目标值原文、
+        css/xpath 值里的标识 token。用于换锚点时在原页面里找回同一元素。"""
+        needles = []
+        for k in ("name", "text", "label"):
+            v = target.get(k)
+            if v:
+                needles.append(str(v))
+        val = target.get("value")
+        by = target.get("by")
+        if val:
+            needles.append(str(val))  # 原文（css "#search" 可命中 "#search-btn"）
+            for tok in re.findall(r"[A-Za-z0-9\u4e00-\u9fff]{3,}", str(val)):
+                needles.append(tok)
+        out = []
+        for n in needles:
+            n = str(n).strip()
+            if n and n.lower() not in [x.lower() for x in out]:
+                out.append(n)
+        return out
+
+    @staticmethod
+    def _repair_score(el, needles):
+        """候选元素与线索的匹配分：文本全等 > 文本包含 > id/name/aria > 锚点 >
+        placeholder。避免"输入框 placeholder 含关键词"抢过真正的按钮。"""
+        text = (el.get("text") or "").strip().lower()
+        ident = " ".join(str(el.get(f) or "") for f in
+                         ("id", "name", "aria", "role")).lower()
+        ph = (el.get("placeholder") or "").lower()
+        anc = str((el.get("anchor") or {}).get("value", "")).lower()
+        score = 0
+        for n in needles:
+            nl = n.lower()
+            if not nl:
+                continue
+            if text == nl:
+                score += 100
+            elif nl in text:
+                score += 40
+            if nl in ident:
+                score += 30
+            if nl in anc:
+                score += 25
+            if nl in ph:
+                score += 5
+        return score
+
     # ---- 局部修复 ----
     async def _try_repair(self, page, step, res, template):
         policy = (template.get("failure_policy") or {}).get("repair")
@@ -364,20 +413,26 @@ class Runner:
             return None
         if not (res.get("repairable") or res.get("status") in ("fail", "ambiguous")):
             return None
+        # 非幂等动作（如 click）修复会真的再点一次——必须有检查点兜底，
+        # 否则可能点到错误元素产生副作用，宁可放弃修复。
+        if not step.get("idempotent") and not step.get("checkpoint"):
+            return None
         be = self.backend
-        name = None
         target = act.get("target") or {}
-        name = target.get("value") or target.get("name") or step.get("id")
+        needles = self._repair_needles(target, step)
+        if not needles:
+            return None
         try:
             found = await be.explore(page.page)
         except Exception:
             return None
-        match = None
+        match, best = None, 0
         for el in found.get("items", []):
-            hay = f"{el.get('text','')} {el.get('aria','')} {el.get('placeholder','')}"
-            if name and str(name) in hay and el.get("anchor"):
-                match = el
-                break
+            if not el.get("anchor"):
+                continue
+            score = self._repair_score(el, needles)
+            if score > best:
+                match, best = el, score
         if not match:
             return None
         # 用新锚点重试一次（anchor{k} → target{by:...}）

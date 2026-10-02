@@ -184,6 +184,34 @@ async def task_replay(gavel, base):
     print(f"  [{'PASS' if ok else 'FAIL'}] 本地:重放 vs 探索  {detail}")
 
 
+async def task_repair(gavel, base):
+    """页面改版（按钮 id 变）→ 模板定位失败 → 局部修复换锚点 → 通过并发布新版。"""
+    c = Caller(gavel)
+    t0 = time.perf_counter()
+    r = await c("session_create")
+    await gavel["workflow_save"](template={
+        "template_id": "bench_repair", "site": "portal", "desc": "repair",
+        "failure_policy": {"retry": "safe_only", "repair": "explore_local_step"},
+        "steps": [
+            {"id": "nav", "action": {"type": "navigate",
+                                     "url": f"{base}/portal/shop_v2.html"},
+             "checkpoint": {"type": "title_contains", "value": "Shop"}},
+            {"id": "fill", "action": {"type": "fill",
+                                      "target": {"by": "css", "value": "#q"},
+                                      "value": "widget"}},
+            {"id": "search", "action": {"type": "click",
+                                        "target": {"by": "css", "value": "#search"}},
+             "checkpoint": {"type": "text_contains", "selector": "#count",
+                            "value": "1 results"}}]})
+    res = await c("workflow_run", name_or_id="bench_repair",
+                  session_id=r["session_id"], verbosity="steps")
+    repaired = any(s.get("repaired") for s in res.get("steps", []))
+    ok = res["status"] == "pass" and repaired and bool(res.get("republished"))
+    record("本地:页面改版→局部修复→复用", ok,
+           f"repaired={repaired} version={res.get('republished',{}).get('version')}",
+           c, t0)
+
+
 async def task_real_example(gavel):
     c = Caller(gavel)
     t0 = time.perf_counter()
@@ -236,6 +264,7 @@ async def main():
         await task_invoice(gavel, base, None)
         await task_shop(gavel, base)
         await task_replay(gavel, base)
+        await task_repair(gavel, base)
         if not OFFLINE:
             await task_real_example(gavel)
             await task_real_wikipedia(gavel)

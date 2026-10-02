@@ -57,7 +57,9 @@ async def test_repair_republishes(gavel_tools, webapp_server):
     _sid, _cid, pid = await _session_on(T, base)
     tmpl = {"template_id": "testsite_repair", "site": "testsite", "desc": "repair",
             "steps": [{"id": "go", "action": {
-                "type": "click", "target": {"by": "css", "value": "Go"}}}],
+                "type": "click", "target": {"by": "css", "value": "Go"}},
+                "checkpoint": {"type": "text_eq", "selector": "#out",
+                               "value": "clicked"}}],
             "failure_policy": {"retry": "safe_only",
                                "repair": "explore_local_step"}}
     await T["workflow_save"](template=tmpl)
