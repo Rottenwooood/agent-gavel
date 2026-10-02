@@ -132,6 +132,28 @@ def test_substitute_no_prefix_conflict():
     assert S.substitute("$MISSING", {"QUERY": "hello"}) == "$MISSING"
 
 
+# ---------------- 模板元数据（面向社区分享） ----------------
+
+def test_template_metadata_fields():
+    nav = {"id": "a", "action": {"type": "navigate", "url": "https://e.com"}}
+    norm, errs, _ = S.validate({
+        "template_id": "ts_meta", "site": "x", "desc": "", "steps": [nav],
+        "task": "下载报表", "login_required": True, "author": "me",
+        "license": "MIT", "runtime": ">=0.3", "status": "verified",
+        "verified_at": "2026-10-02", "known_limits": "需登录"})
+    assert not errs, errs
+    assert norm["task"] == "下载报表" and norm["login_required"] is True
+    assert norm["status"] == "verified" and norm["author"] == "me"
+    # 默认 draft
+    n2, e2, _ = S.validate({"template_id": "ts_meta2", "site": "x", "desc": "",
+                            "steps": [nav]})
+    assert not e2 and n2["status"] == "draft" and n2["login_required"] is False
+    # 非法状态被拒
+    _n3, e3, _ = S.validate({"template_id": "ts_meta3", "site": "x", "desc": "",
+                             "status": "bogus", "steps": [nav]})
+    assert e3
+
+
 # ---------------- #7 幂等性按动作类型判定 ----------------
 
 def test_idempotency_defaults_by_action_type():

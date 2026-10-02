@@ -97,6 +97,14 @@ def compile(recorded_steps, *, template_id, site="", desc="",
         "outputs": [],
         "failure_policy": {"retry": "safe_only",
                            "repair": "explore_local_step"},
+        "task": desc,
+        "login_required": False,
+        "author": "",
+        "license": "",
+        "runtime": "",
+        "verified_at": None,
+        "known_limits": "",
+        "status": "draft",
     }
     normalized, errors, warnings = _schema.validate(draft)
     return normalized or draft, errors, warnings

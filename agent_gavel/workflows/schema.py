@@ -10,6 +10,9 @@ from ..runtime.errors import GavelError
 
 SCHEMA_VERSION = 2
 
+# 模板状态机（社区分享用）
+TEMPLATE_STATUSES = {"draft", "verified", "broken", "deprecated"}
+
 ACTION_TYPES = {
     "navigate", "click", "fill", "type", "press", "check", "uncheck", "select",
     "hover", "focus", "clear", "scroll", "upload", "drag",
@@ -205,6 +208,19 @@ def validate(template):
     t.setdefault("stats", {"success_count": 0, "fail_count": 0,
                            "last_status": None, "last_at": None})
     t.setdefault("version", 1)
+    # 模板元数据（面向分享/社区）：目标、登录前提、作者/许可、兼容范围、
+    # 验证时间、已知限制、状态机。
+    t.setdefault("task", "")
+    t.setdefault("login_required", False)
+    t.setdefault("author", "")
+    t.setdefault("license", "")
+    t.setdefault("runtime", "")
+    t.setdefault("verified_at", None)
+    t.setdefault("known_limits", "")
+    t.setdefault("status", "draft")
+    if t["status"] not in TEMPLATE_STATUSES:
+        errors.append(f"status 非法：{t['status']!r}，取 "
+                      f"{sorted(TEMPLATE_STATUSES)}")
     if errors:
         return None, errors, warnings
     return t, [], warnings

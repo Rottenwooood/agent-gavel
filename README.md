@@ -46,12 +46,21 @@ agent-gavel     ：动作 + 声明期望 → 执行 → 程序断言 → pass/fa
 
 ## 安装
 
-前置：Python 3.13+、一个 Chrome/Chromium、[uv](https://docs.astral.sh/uv/)（或 pip）。
+当前版本 **v0.3.0**（变更见 [CHANGELOG](CHANGELOG.md)）。前置：Python 3.13+、
+一个 Chrome/Chromium、[uv](https://docs.astral.sh/uv/)（或 pip）。
 
 ```bash
 git clone https://github.com/Rottenwooood/agent-gavel ~/agent-gavel
 cd ~/agent-gavel
 uv sync
+```
+
+也可从构建产物安装（不依赖仓库目录）：
+
+```bash
+uv build                                   # 产出 dist/*.whl
+pip install dist/agent_gavel-0.3.0-py3-none-any.whl
+# 或发布后：uvx agent-gavel
 ```
 
 浏览器由 Playwright 自管，默认用系统 Chrome；未装 Chrome 时会回退到 Playwright 自带内核
@@ -126,28 +135,41 @@ docker run -i --rm -e AGENT_GAVEL_HEADLESS=1 agent-gavel
 镜像默认开启发布加固（`AGENT_GAVEL_DOMAIN_GUARD=1`）：**默认拒绝所有域名**，
 必须显式 `-e AGENT_GAVEL_ALLOW_DOMAINS=example.com,...` 才放行。
 
-## 测试与基准
+## 测试与基准（三层）
 
 ```bash
-uv run pytest -q                 # 功能 + 安全 + 真实任务回归（本地站点）
-uv run python tests/bench_tasks.py    # 真实任务基准（含真实网站，可 AGENT_GAVEL_BENCH_OFFLINE=1 跳过）
-uv run python tests/bench_runtime.py  # 单操作/生命周期性能基准 p50/p95/p99
-uv run python tests/mcp_live_smoke.py # 真实 MCP 协议联调
+uv run pytest -q                       # 功能 + 安全 + 工作流契约 + 本地真实任务
+uv run python tests/bench_runtime.py   # ① 原子操作 + 生命周期：冷启动/热调用/崩溃恢复、p50/p95/p99、并发、泄漏
+uv run python tests/bench_tasks.py     # ② 固定流程/模板：本地站点多步业务 + 重放 vs 探索
+uv run python tests/bench_real.py      # ③ 真实网站任务（重头戏，需外网/代理）
+uv run python tests/mcp_live_smoke.py  # 真实 MCP 协议联调
 ```
 
-**真实任务基准**（本机实测，含真实网站）：
+**① 原子/生命周期**（`bench_runtime.py`，本机）：冷启动 ~380ms、热调用 ~1.6ms、
+崩溃恢复 ~120ms；click p95 ~34ms、fill p95 ~5ms；跨页并发 ~2x；1000 次操作无泄漏。
 
-| 任务 | 结果 | 调用次数 | 耗时 |
+**② 本地固定流程**（`bench_tasks.py`）：
+
+| 任务 | 结果 | 调用 | 耗时 |
 |---|---|---|---|
-| 登录后台→选最新发票→下载→校验内容 | pass | 10 | ~0.9s |
-| 搜索→打开结果→读价格并判区间 | pass | 6 | ~0.3s |
-| 同一任务：模板重放 vs 探索 | pass | 探索 5 次 → 重放 1 次 | 回传 1681B → 192B |
-| 真实 example.com 导航+读正文 | pass | 3 | ~1.8s |
-| 真实 wikipedia 搜索→结果页 | pass | 6 | ~6.6s |
+| 登录后台→程序挑最新发票→下载→校验内容→去重 | pass | 10 | ~0.9s |
+| 搜索→打开→读价格并判区间 | pass | 6 | ~0.3s |
+| 同任务：模板重放 vs 探索 | pass | 5 → **1** | 1681B → **192B** |
+| 页面改版→局部修复→发布 v2→复用 | pass | — | repaired=True |
 
-> 诚实说明：真实站点受网络/风控影响；上表 wikipedia 走本机代理。
-> "回传字节"是 token 的代理指标，不是真实 token 数。淘宝/京东等强风控站点
-> 对自动化有拦截，不在承诺范围内。
+**③ 真实网站任务**（`bench_real.py`，真实站点、抽取业务数据并程序断言）：
+
+| 真实任务 | 结果 | 调用 | 校验内容 |
+|---|---|---|---|
+| Hacker News 首页榜单抽取 | pass | 3 | 前 10 标题互异、分数为整数 |
+| Wikipedia 搜索→词条→首段 | pass | 6 | 标题匹配、首段含关键词 |
+| Books to Scrape 分类取书 | pass | 4 | 书名非空、价格是 0–100 的数值 |
+| Quotes to Scrape 标签取名言 | pass | 3 | 名言长度、作者非空 |
+| 真实任务：探索 vs 模板重放（Wikipedia） | pass | 5 → **1** | 1375B → **197B** |
+
+> 诚实说明：真实站点受网络/风控影响（本机需代理，benchmark 自动读 `http(s)_proxy`）。
+> "回传字节"是 token 的代理指标，不是真实 token 数。淘宝/京东等强风控站点对自动化有
+> 拦截，不在承诺范围内。
 
 ## 支持范围与限制
 
