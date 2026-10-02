@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Widget Shop</title></head>
+<body>
+  <h1 id="shop-title">Widget Shop</h1>
+  <input id="q" name="q" type="text" placeholder="search products">
+  <button id="search" type="button">Search</button>
+  <ul id="results"></ul>
+  <p id="count"></p>
+  <script>
+  var products = [
+    {id: 'widget', name: 'Widget', price: 42.00, href: 'product_widget.html'},
+    {id: 'gadget', name: 'Gadget', price: 120.00, href: 'product_gadget.html'},
+    {id: 'bolt',   name: 'Bolt',   price: 5.00,   href: 'product_bolt.html'}
+  ];
+  function render() {
+    var q = document.getElementById('q').value.toLowerCase();
+    var out = document.getElementById('results');
+    out.innerHTML = '';
+    var hits = products.filter(function (p) {
+      return p.name.toLowerCase().indexOf(q) !== -1;
+    });
+    hits.forEach(function (p) {
+      var li = document.createElement('li');
+      li.className = 'result';
+      li.innerHTML = '<a class="result-link" href="' + p.href + '">' + p.name +
+                     '</a> <span class="price">' + p.price.toFixed(2) + '</span>';
+      out.appendChild(li);
+    });
+    document.getElementById('count').textContent = hits.length + ' results';
+  }
+  document.getElementById('search').addEventListener('click', render);
+  </script>
+</body>
+</html>

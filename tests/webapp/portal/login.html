@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Supplier Portal - Login</title></head>
+<body>
+  <h1 id="portal-title">Supplier Portal</h1>
+  <form id="login" onsubmit="return doLogin(event)">
+    <label for="user">User</label>
+    <input id="user" name="user" type="text" placeholder="username">
+    <label for="pass">Password</label>
+    <input id="pass" name="pass" type="password" placeholder="password">
+    <button id="login-btn" type="submit">Sign in</button>
+  </form>
+  <p id="err"></p>
+  <script>
+  function doLogin(e) {
+    e.preventDefault();
+    var u = document.getElementById('user').value;
+    var p = document.getElementById('pass').value;
+    if (u === 'acme' && p === 's3cret') { location.href = 'invoices.html'; }
+    else { document.getElementById('err').textContent = 'invalid credentials'; }
+    return false;
+  }
+  </script>
+</body>
+</html>
