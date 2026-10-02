@@ -2,6 +2,14 @@
 
 T2 拆分：DOM 网页操作相关工具全部集中于此，通过 register_dom_tools(mcp)
 注入同一个 mcp server。server.py 保留桌面(AT-SPI)工具。
+
+**LEGACY / 独立浏览器（重要）**：本模块的 `dom_*` 工具走裸 CDP，操作的是
+`browser_manager.py` 拉起的**独立调试 Chrome**，与新 Playwright runtime
+（`tools/*` + `runtime/*`，工具名 `page_*` / `locator_*` / `browser_*` 等）
+**不是同一套浏览器**：不共享 session / context / page / 登录态。
+`browser_close` 只关新 runtime，`dom_*` 的 Chrome 要用 `chrome(stop)`。
+两者并行是 docs/tech-plan.md §10 的过渡策略，最终（M5）以新 runtime 为唯一
+浏览器拥有者；在那之前别假设它们互通。
 """
 
 import asyncio

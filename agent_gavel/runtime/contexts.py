@@ -4,6 +4,8 @@
 自动登记一只 about:blank 页面作为 active page，使"省略 page_id"立刻可用。
 """
 
+from urllib.parse import urlparse
+
 from .errors import GavelError
 
 _CONTEXT_KEYS = ("locale", "timezone_id", "viewport", "extra_http_headers",
@@ -68,6 +70,10 @@ class ContextManager:
         ctx = Context(cid, session, browser_context)
         self.runtime.contexts[cid] = ctx
         session.context_ids.append(cid)
+        # 域名白名单：拦截 popup / target=_blank / window.open / 重定向的
+        # 顶层导航，防止新页面落到未允许域名（仅限制开启时安装）
+        if self.runtime.policies.domain_restricted:
+            await self._install_domain_guard(ctx)
         # popup / target=_blank 自动登记
         browser_context.on("page", self._on_new_page(ctx))
         # 初始页面
@@ -77,6 +83,37 @@ class ContextManager:
         else:
             await self.runtime.page_mgr.open(ctx)
         return ctx
+
+    async def _install_domain_guard(self, ctx):
+        """在 context 层拦截顶层导航到非白名单域名的请求。"""
+        rt = self.runtime
+
+        async def _guard(route, request):
+            try:
+                if request.is_navigation_request():
+                    frame = request.frame
+                    if frame is not None and frame == frame.page.main_frame \
+                            and not rt.policies.is_domain_allowed(request.url):
+                        rt.events.emit({
+                            "event": "policy_blocked",
+                            "session_id": ctx.session.session_id,
+                            "context_id": ctx.context_id,
+                            "url": request.url,
+                            "host": (urlparse(request.url).hostname or "").lower(),
+                        })
+                        await route.abort()
+                        return
+            except Exception:
+                pass
+            try:
+                await route.continue_()
+            except Exception:
+                pass
+
+        try:
+            await ctx.browser_context.route("**/*", _guard)
+        except Exception:
+            pass
 
     def _on_new_page(self, ctx):
         def handler(pw_page):

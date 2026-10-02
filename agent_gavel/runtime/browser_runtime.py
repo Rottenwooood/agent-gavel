@@ -136,8 +136,16 @@ async def shutdown_runtime():
         _RUNTIME = None
 
 
-def reset_runtime() -> BrowserRuntime:
-    """仅供测试：丢弃旧单例，返回一个新的（不负责关旧浏览器）。"""
+async def reset_runtime() -> BrowserRuntime:
+    """仅供测试：先关闭旧单例（含其浏览器进程），再返回一个新实例。
+
+    生产代码请勿调用；关闭旧实例避免反复 reset 留下孤儿 Chrome 进程。
+    """
     global _RUNTIME
+    if _RUNTIME is not None:
+        try:
+            await _RUNTIME.shutdown()
+        except Exception:
+            pass
     _RUNTIME = BrowserRuntime()
     return _RUNTIME

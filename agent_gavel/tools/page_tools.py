@@ -162,7 +162,8 @@ def register_page_tools(mcp):
         if save_to:
             exp = rt.artifacts.export(info["artifact_id"], save_to,
                                       policies=rt.policies)
-            out["exported_to"] = exp["exported_to"]
+            out["exported"] = True
+            out["exported_filename"] = exp["filename"]
         return out
 
     @mcp.tool()
@@ -184,5 +185,6 @@ def register_page_tools(mcp):
         if save_to:
             exp = rt.artifacts.export(info["artifact_id"], save_to,
                                       policies=rt.policies)
-            out["exported_to"] = exp["exported_to"]
+            out["exported"] = True
+            out["exported_filename"] = exp["filename"]
         return out

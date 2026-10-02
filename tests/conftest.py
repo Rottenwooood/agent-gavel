@@ -34,7 +34,7 @@ def webapp_server():
 
 @pytest_asyncio.fixture
 async def runtime():
-    rt = reset_runtime()
+    rt = await reset_runtime()
     try:
         yield rt
     finally:

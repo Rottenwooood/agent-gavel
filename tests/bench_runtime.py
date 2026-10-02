@@ -20,7 +20,7 @@ from agent_gavel.runtime import reset_runtime, shutdown_runtime  # noqa: E402
 
 async def main(n=30):
     httpd, base = start_server()
-    rt = reset_runtime()
+    rt = await reset_runtime()
     try:
         report = await run_suite(rt, base, n=n)
     finally:

@@ -37,12 +37,18 @@ def register_artifact_tools(mcp):
     @mcp.tool()
     @guard
     async def artifact_export(artifact_id: str, dest_dir: str,
-                              filename: str = None):
-        """把产物导出到本地目录（受文件白名单约束）。"""
+                              filename: str = None,
+                              path_visibility: str = "hidden"):
+        """把产物导出到本地目录（受文件白名单约束）。
+
+        path_visibility=hidden（默认）不回传绝对路径；user_visible 才含
+        exported_to（供明确需要路径的调用方）。
+        """
         from ..runtime import get_runtime
         rt = get_runtime()
         res = rt.artifacts.export(artifact_id, dest_dir, filename,
-                                  policies=rt.policies)
+                                  policies=rt.policies,
+                                  path_visibility=path_visibility)
         return {"status": "ok", **res}
 
     @mcp.tool()
@@ -83,14 +89,16 @@ def register_artifact_tools(mcp):
     @mcp.tool()
     @guard
     async def download_save(artifact_id: str, dest_dir: str,
-                            filename: str = None):
-        """把下载保存到本地目录（受文件白名单约束）。"""
+                            filename: str = None,
+                            path_visibility: str = "hidden"):
+        """把下载保存到本地目录（受文件白名单约束，默认不回传绝对路径）。"""
         from ..runtime import get_runtime
         rt = get_runtime()
         info = rt.artifacts.get(artifact_id)
         res = rt.artifacts.export(artifact_id, dest_dir,
                                   filename or info.get("suggested_filename"),
-                                  policies=rt.policies)
+                                  policies=rt.policies,
+                                  path_visibility=path_visibility)
         return {"status": "ok", **res}
 
     @mcp.tool()

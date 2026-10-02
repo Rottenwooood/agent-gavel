@@ -134,22 +134,50 @@ class ArtifactStore:
             out.append(dict(info))
         return sorted(out, key=lambda x: x.get("created_at", 0))
 
+    @staticmethod
+    def _safe_filename(name):
+        """只保留纯文件名：剥掉目录分隔 / 盘符 / 空字节，拒绝 . 与 ..。
+
+        防路径穿越：filename=../escaped.txt 会退化成 escaped.txt（写在
+        dest_dir 内），filename 为绝对路径同理只取末段。
+        """
+        raw = str(name or "").replace("\\", "/").replace("\x00", "")
+        base = raw.rsplit("/", 1)[-1].strip()
+        if os.path.splitdrive(base)[0]:
+            raise GavelError("bad_filename", f"非法文件名（含盘符）：{name}")
+        if not base or base in (".", ".."):
+            raise GavelError("bad_filename", f"非法文件名：{name!r}")
+        return base
+
     def export(self, artifact_id: str, dest_dir: str, filename=None,
-               *, policies=None) -> dict:
+               *, policies=None, path_visibility: str = "hidden") -> dict:
         info = self.get(artifact_id)
+        if not dest_dir:
+            raise GavelError("bad_args", "需要 dest_dir")
         if policies is not None:
             policies.check_local_path(dest_dir, purpose="导出")
         os.makedirs(dest_dir, exist_ok=True)
-        name = filename or info.get("suggested_filename") or artifact_id
+        name = self._safe_filename(
+            filename or info.get("suggested_filename") or artifact_id)
         dest = os.path.join(dest_dir, name)
+        # 二次包含校验：净化后的最终路径必须仍落在 dest_dir 内
+        root = os.path.realpath(dest_dir)
+        parent = os.path.realpath(os.path.dirname(dest))
+        if not (parent == root or parent.startswith(root + os.sep)):
+            raise GavelError("policy_blocked", f"导出路径越出目标目录：{name}",
+                             detail={"dest_dir": dest_dir})
         base, ext = os.path.splitext(dest)
         i = 1
         while os.path.exists(dest):
             dest = f"{base}_{i}{ext}"
             i += 1
         shutil.copy2(info["path"], dest)
-        return {"artifact_id": artifact_id, "exported_to": dest,
-                "size_bytes": info.get("size_bytes")}
+        # 默认不回传绝对路径（对齐 artifact_get 的隐藏原则）
+        out = {"artifact_id": artifact_id, "filename": os.path.basename(dest),
+               "exported": True, "size_bytes": info.get("size_bytes")}
+        if path_visibility == "user_visible":
+            out["exported_to"] = dest
+        return out
 
     def delete(self, artifact_id: str) -> dict:
         idx = self._load()

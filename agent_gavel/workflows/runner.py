@@ -48,8 +48,26 @@ class Runner:
         rt.runs[run_id] = state
         try:
             page = await self._resolve_page(session)
-            # preconditions
+            # preconditions：不满足立即阻断，绝不在错误页面上执行步骤
             ok, pc_detail = await _schema.check_preconditions(template, page.page)
+            if not ok:
+                failed_pc = [p for p in pc_detail if not p.get("ok")]
+                res = {
+                    "status": "blocked",
+                    "run_id": run_id,
+                    "template_id": template.get("template_id"),
+                    "version": template.get("version"),
+                    "reason": "precondition_failed",
+                    "failed_preconditions": failed_pc,
+                    "preconditions": pc_detail,
+                    "steps_completed": 0,
+                    "steps_total": len(template.get("steps", [])),
+                    "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
+                }
+                state.status = "blocked"
+                state.result = res
+                self._record_run(template.get("template_id"), "blocked")
+                return res
             arts_before = {a["artifact_id"] for a in rt.artifacts.list()}
             steps = _schema.substitute(template.get("steps", []), params)
             ctx = {"template": template, "page": page, "params": params,
@@ -64,6 +82,14 @@ class Runner:
                     await rt.session_mgr.close(session.session_id)
                 except Exception:
                     pass
+
+    @staticmethod
+    def _record_run(template_id, status):
+        try:
+            from . import loader
+            loader.record_run(template_id, status)
+        except Exception:
+            pass
 
     # ---- 会话/页面 ----
     async def _resolve_session(self, session_id):
@@ -120,6 +146,14 @@ class Runner:
             if res.get("checkpoint_passed"):
                 checkpoints_passed += 1
             if res["status"] in ("fail", "ambiguous", "error"):
+                # B1 安全重试一次（仅幂等/安全/非需确认步骤；瞬时/不确定失败）
+                retried = await self._try_safe_retry(page, step, res, ctx)
+                if retried is not None:
+                    res = retried
+                    state.step_results[-1] = retried
+                    if retried.get("checkpoint_passed"):
+                        checkpoints_passed += 1
+            if res["status"] in ("fail", "ambiguous", "error"):
                 # 局部修复
                 repaired = await self._try_repair(page, step, res, template)
                 if repaired is not None:
@@ -165,11 +199,7 @@ class Runner:
         if verbosity == "full":
             result["steps"] = state.step_results
         state.result = result
-        try:
-            from . import loader
-            loader.record_run(template.get("template_id"), status)
-        except Exception:
-            pass
+        self._record_run(template.get("template_id"), status)
         return result
 
     # ---- 单步 ----
@@ -181,7 +211,8 @@ class Runner:
         checks = _schema.checkpoint_to_checks(step.get("checkpoint"))
         if isinstance(checks, dict) and "checkpoint" in checks:
             checks = checks["checkpoint"]
-        before = await be.page_signature(page.page) if checks else None
+        before = await be.page_signature(page.page, target=act.get("target")) \
+            if checks else None
         started = time.perf_counter()
         entry = {"step_id": step["id"], "action_type": atype}
         try:
@@ -203,10 +234,13 @@ class Runner:
         entry["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
         if checks:
             ev = await be.evaluate_checks(page.page, checks,
-                                          before_sig=before, wait_s=wait_s)
+                                          before_sig=before, wait_s=wait_s,
+                                          target=act.get("target"))
             entry["status"] = ev["status"]
             entry["assertions"] = ev["assertions"]
             entry["checkpoint_passed"] = ev["status"] == "pass"
+            if ev.get("diff") is not None:
+                entry["diff"] = ev["diff"]
         return entry
 
     async def _dispatch(self, page, act):
@@ -260,6 +294,33 @@ class Runner:
             atype, lambda: be.act(page.page, act.get("target"), atype,
                                   timeout_s=act.get("timeout_s", 30), **kw))
 
+    # ---- B1 安全重试 ----
+    async def _try_safe_retry(self, page, step, res, ctx):
+        """安全且幂等的步骤，瞬时/不确定失败时原样重试一次。
+
+        只重试"可重试且幂等且非需确认"的步骤；副作用动作绝不重试。
+        策略由模板的 failure_policy.retry 控制：none 禁用，safe_only（默认）
+        只对安全步骤生效。
+        """
+        act = step["action"]
+        if act.get("type") not in _TARGET_ACTIONS_SAFE:
+            return None
+        if step.get("requires_confirmation") or not step.get("safe_to_retry", True) \
+                or not step.get("idempotent", True):
+            return None
+        policy = (ctx.get("template", {}).get("failure_policy") or {}).get("retry")
+        if policy == "none":
+            return None
+        out = await self._run_one(page, step, ctx)
+        if out.get("status") in ("pass", "ok"):
+            out["retried"] = True
+            out["retry_of"] = res.get("status")
+            return out
+        out["retried"] = True
+        out["retry_failed"] = True
+        out["retry_of"] = res.get("status")
+        return out
+
     # ---- 局部修复 ----
     async def _try_repair(self, page, step, res, template):
         policy = (template.get("failure_policy") or {}).get("repair")
@@ -267,6 +328,10 @@ class Runner:
             return None
         act = step["action"]
         if act.get("type") not in _TARGET_ACTIONS_SAFE:
+            return None
+        # 副作用安全：需确认 / 不可重试 / 非幂等的步骤，失败后绝不重新点击
+        if step.get("requires_confirmation") or not step.get("safe_to_retry", True) \
+                or not step.get("idempotent", True):
             return None
         if not (res.get("repairable") or res.get("status") in ("fail", "ambiguous")):
             return None
