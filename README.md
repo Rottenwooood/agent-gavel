@@ -2,211 +2,313 @@
 
 # agent-gavel
 
-**AI 操作浏览器，动作发出后由程序断言判成败，省掉一次"把页面喂回模型判断"的往返。**
+**让 AI 探索一次网页流程，之后用可验证的 workflow 重放。**
 
-![License](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-3.13-brightgreen)
+面向 AI agent 的本地浏览器运行时与 MCP server
+
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.13%2B-brightgreen)](pyproject.toml)
 
 </div>
 
-## 这是什么
+## 它是什么
 
-agent-gavel 是一个给 AI 用的 MCP server：AI 声明一个动作 + "做完后页面应该长什么样"，
-它执行、等待、**由程序断言**，一次调用返回结果。成败不再由模型回头"看"页面判断。
+agent-gavel 给 AI agent 提供完整的浏览器操作能力：多 session、多 context、多标签页、网页交互、文件上传下载、新窗口、嵌入页面和网页对话框处理，以及程序化断言。
 
+它有两种使用方式：
+
+- **即时操作**：AI 现场探索页面，执行动作，并在同一次调用中验证结果。
+- **Workflow 重放**：把探索过的流程录制、参数化并保存。之后一次 `workflow_run` 完成整条流程，减少重复探索、MCP 往返和上下文消耗。
+
+```text
+第一次：探索 → 操作 → 断言 → 录制 workflow
+以后：  workflow_run(params) → 浏览器执行 → 检查点验证 → 结果摘要
+页面变化：从失败步骤重新探索 → 局部修复 → 发布新版本
 ```
-普通浏览器 agent：动作 → 整页快照喂回模型 → 模型判断 → 下一步   （慢、费 token、会看漏）
-agent-gavel     ：动作 + 声明期望 → 执行 → 程序断言 → pass/fail/ambiguous + 证据
-```
 
-结果**三态**：
+agent-gavel 负责浏览器运行、动作执行、结果验证和产物管理；任务目标和页面内容的理解仍由 AI agent 负责。
 
-- `pass`：断言满足。
-- `fail`：断言未满足，且页面没变化（动作没生效）——明确失败。
-- `ambiguous`：拿不准——断言没过但页面确实变了（断言写窄/指错元素），或没有断言但检测到变化。
-  此时会返回**页面变化的 diff 证据**，交回模型仲裁；没有变化时不返回 diff。
+### 为什么要有断言
 
-底层用 **Playwright** 驱动真实浏览器（默认系统 Chrome），每页一个串行队列、跨页并行。
+浏览器动作本身通常很快，但“动作到底有没有完成”经常需要模型再次查看页面才能判断。agent-gavel 把期望结果交给程序检查：动作完成后直接读取 URL、标题、文本、输入值、数量或业务字段，返回明确结果和证据。
 
-## 能力
+这带来三层收益：
 
-- **资源模型**：`session`（隔离面，可 ephemeral / persistent / clone）→ `context`（cookie/
-  语言/设备隔离）→ `page`（标签页/popup），稳定 id，省略 id 用当前活动对象。
-- **动作**：导航、点击、填值、逐键输入（含中文）、按键、勾选、下拉、拖拽、上传、悬停、
-  滚动、iframe 内操作；默认严格定位（0 命中或多命中都报结构化错误，不瞎猜）。
-- **断言**：URL/标题/文本/值/属性/元素存在性/计数/JS 表达式，支持比较与正则；
-  动作可带断言一次调用闭环。
-- **工作流**：录制 → 编译成模板（参数化 `$VAR`、标记副作用、补检查点）→ 一次调用重放；
-  失败时可选**一次安全重试**（仅幂等/安全步骤）和**一次换锚点局部修复**；
-  暂停 / 恢复 / 取消；模板按网站组织、带失效检测。
-- **产物**：下载自动捕获（sha256/大小/MIME）、截图、PDF、trace；按 id 引用，
-  **不向模型暴露绝对路径**，导出需落盘白名单。
-- **诊断**：trace / 网络 / console / 页面错误 / 性能指标。
-- **安全**：域名白名单、落盘白名单、下载大小上限、副作用步骤需确认、
-  导出防路径穿越。
+1. **更快、更可靠地确认结果**：模型不必为每个动作重新接收整页信息，也不靠肉眼猜测点击是否生效。
+2. **减少视觉回传、重试和模型思考**：简单表单、搜索、筛选和下载流程可以在一次工具调用中完成动作与验证；只有证据不足时才把问题交回模型。
+3. **成为 workflow 复用的基石**：模板把动作和检查点一起保存。后续重放时，程序在浏览器内部执行整条流程，只向模型返回摘要、失败步骤和产物。
 
 ## 安装
 
-当前版本 **v0.3.0**（变更见 [CHANGELOG](CHANGELOG.md)）。前置：Python 3.13+、
-一个 Chrome/Chromium、[uv](https://docs.astral.sh/uv/)（或 pip）。
+### 开发环境
+
+适合修改源码、运行测试和贡献模板。需要 Python 3.13+、Chrome/Chromium 和 uv：
 
 ```bash
-git clone https://github.com/Rottenwooood/agent-gavel ~/agent-gavel
-cd ~/agent-gavel
+git clone https://github.com/Rottenwooood/agent-gavel.git
+cd agent-gavel
 uv sync
 ```
 
-也可从构建产物安装（不依赖仓库目录）：
+系统已有 Chrome/Chromium 时可以直接使用。没有可用浏览器时安装 Playwright Chromium：
 
 ```bash
-uv build                                   # 产出 dist/*.whl
-pip install dist/agent_gavel-0.3.0-py3-none-any.whl
-# 或发布后：uvx agent-gavel
+uv run playwright install chromium
 ```
 
-浏览器由 Playwright 自管，默认用系统 Chrome；未装 Chrome 时会回退到 Playwright 自带内核
-（首次可 `uv run playwright install chromium`）。
+启动源码版 MCP server：
+
+```bash
+./run-mcp.sh
+```
+
+### 通过 PyPI 安装
+
+适合直接使用已发布版本。全局安装：
+
+```bash
+uv tool install agent-gavel
+```
+
+或者安装到当前 Python 环境：
+
+```bash
+pip install agent-gavel
+```
+
+安装完成后，`agent-gavel` 命令会启动 stdio MCP server，供 MCP 客户端拉起。
 
 ## 接入 MCP 客户端
 
-`run-mcp.sh` 是启动器（内部 `uv run python -m agent_gavel.main`）。以 opencode 为例，
-编辑 `~/.config/opencode/opencode.json`：
+MCP 客户端通过 stdio 拉起 agent-gavel。使用 PyPI 版本时：
 
 ```json
 {
   "mcp": {
     "agent-gavel": {
       "type": "local",
-      "command": ["/home/<你>/agent-gavel/run-mcp.sh"],
+      "command": ["agent-gavel"],
       "enabled": true
     }
   }
 }
 ```
 
-重启客户端后，工具列表里会出现 `agent-gavel_session_* / page_* / locator_* / workflow_*`
-等。无图形会话（CI/服务器）设 `AGENT_GAVEL_HEADLESS=1`。
+使用源码版本时，把 `command` 换成仓库中的 `run-mcp.sh` 绝对路径：
 
-## 快速上手（典型会话）
-
-对陌生网站做一件事，并沉淀成可复用模板：
-
-```
-1. session_create                     # 建隔离会话，拿到 page_id
-2. page_navigate(url=...)             # 开到目标站
-3. page_explore                       # 列出可交互元素 + 稳定锚点
-4. locator_fill(target=..., value=...)   # 填
-5. locator_press(target=..., keys="Enter",
-                  assertions={"u":{"read":"url","op":"contains","value":"结果"}})
-                                       # 提交并断言跳转
-6. workflow_record_start → ... → workflow_record_stop   # 录成模板
-7. workflow_run(name_or_id=..., params={...})           # 以后一次调用重放
+```json
+{
+  "mcp": {
+    "agent-gavel": {
+      "type": "local",
+      "command": ["/绝对路径/agent-gavel/run-mcp.sh"],
+      "enabled": true
+    }
+  }
+}
 ```
 
-## 工作流模板
+无图形会话、服务器或 CI 环境可以给 MCP server 配置：
 
-- 存 `~/.config/agent-gavel/workflows/<template_id>.json`（用户层优先）；
-  随包模板为低优先回退层。
-- `workflow_save / validate / publish / list / get / stats / run / replay /
-  pause / resume / cancel`。
-- 参数用 `$VAR` 占位，敏感参数只存占位声明，真实值不落盘。
-- 失效检测：连续失败 ≥3 标 `suspected`，运行返回 warning；pass 清零。
-- 传播（当前）：本地文件 + Git PR，不做自动同步/模板市场（见 roadmap）。
-
-## 环境变量
-
-| 变量 | 作用 | 默认 |
-|---|---|---|
-| `AGENT_GAVEL_HEADLESS` | 无头模式 | 按客户端环境 |
-| `AGENT_GAVEL_ALLOW_DOMAINS` | 域名白名单（逗号分隔） | 空=不限制（开发） |
-| `AGENT_GAVEL_DOMAIN_GUARD` | 发布加固：即使白名单为空也限制（空集=全拒） | 关 |
-| `AGENT_GAVEL_ALLOW_PATHS` | 允许落盘的本地目录（逗号分隔） | 空=不限制 |
-| `AGENT_GAVEL_MAX_DOWNLOAD_BYTES` | 单文件下载上限 | 256MB |
-| `AGENT_GAVEL_ARTIFACT_TTL_DAYS` | 产物保留天数 | 7 |
-| `AGENT_GAVEL_ARTIFACT_MAX_BYTES` | 产物总量上限 | 2GB |
-| `AGENT_GAVEL_WORKFLOWS_DIR` | 模板目录覆盖（测试隔离用） | `~/.config/agent-gavel/workflows` |
-
-## Docker（MCP over stdio）
-
-```bash
-docker build -t agent-gavel .
-docker run -i --rm -e AGENT_GAVEL_HEADLESS=1 agent-gavel
+```json
+"environment": {
+  "AGENT_GAVEL_HEADLESS": "1"
+}
 ```
 
-镜像默认开启发布加固（`AGENT_GAVEL_DOMAIN_GUARD=1`）：**默认拒绝所有域名**，
-必须显式 `-e AGENT_GAVEL_ALLOW_DOMAINS=example.com,...` 才放行。
+## 配置
 
-## 测试与基准（三层）
+常用环境变量：
 
-```bash
-uv run pytest -q                       # 功能 + 安全 + 工作流契约 + 本地真实任务
-uv run python tests/bench_runtime.py   # ① 原子操作 + 生命周期：冷启动/热调用/崩溃恢复、p50/p95/p99、并发、泄漏
-uv run python tests/bench_tasks.py     # ② 固定流程/模板：本地站点多步业务 + 重放 vs 探索
-uv run python tests/bench_real.py      # ③ 真实网站任务（重头戏，需外网/代理）
-uv run python tests/mcp_live_smoke.py  # 真实 MCP 协议联调
-```
-
-**① 原子/生命周期**（`bench_runtime.py`，本机）：冷启动 ~380ms、热调用 ~1.6ms、
-崩溃恢复 ~120ms；click p95 ~34ms、fill p95 ~5ms；跨页并发 ~2x；1000 次操作无泄漏。
-
-**② 本地固定流程**（`bench_tasks.py`）：
-
-| 任务 | 结果 | 调用 | 耗时 |
-|---|---|---|---|
-| 登录后台→程序挑最新发票→下载→校验内容→去重 | pass | 10 | ~0.9s |
-| 搜索→打开→读价格并判区间 | pass | 6 | ~0.3s |
-| 同任务：模板重放 vs 探索 | pass | 5 → **1** | 1681B → **192B** |
-| 页面改版→局部修复→发布 v2→复用 | pass | — | repaired=True |
-
-**③ 真实网站任务**（`bench_real.py`，真实站点、抽取业务数据并程序断言）：
-
-| 真实任务 | 结果 | 调用 | 校验内容 |
-|---|---|---|---|
-| Hacker News 首页榜单抽取 | pass | 3 | 前 10 标题互异、分数为整数 |
-| Wikipedia 搜索→词条→首段 | pass | 6 | 标题匹配、首段含关键词 |
-| Books to Scrape 分类取书 | pass | 4 | 书名非空、价格是 0–100 的数值 |
-| Quotes to Scrape 标签取名言 | pass | 3 | 名言长度、作者非空 |
-| 真实任务：探索 vs 模板重放（Wikipedia） | pass | 5 → **1** | 1375B → **197B** |
-
-> 诚实说明：真实站点受网络/风控影响（本机需代理，benchmark 自动读 `http(s)_proxy`）。
-> "回传字节"是 token 的代理指标，不是真实 token 数。淘宝/京东等强风控站点对自动化有
-> 拦截，不在承诺范围内。
-
-## 支持范围与限制
-
-- **平台**：Linux、Windows（网页通道已适配）；macOS 未验证。Python 3.13+。
-- **API 只有一套**：新 runtime。旧的 `dom_*` / AT-SPI 工具已归档到 `legacy/`，
-  不注册、不运行，**也不与新版共用浏览器**。
-- **浏览器**：Playwright 自管，默认系统 Chrome；缺 Chrome 时才回退自带 chromium。
-- **网络**：真实站点需可达；无头/服务器环境若受限，用 `session_create` 的 `proxy`
-  参数显式配置（浏览器不自动读 `*_proxy` 环境变量）。
-- **已实现的恢复**：安全幂等动作瞬时失败重试一次、定位失败的换锚点修复、
-  工作流暂停/恢复/取消、失败返回结构化 `reason`/`hint`。
-- **尚未实现**：验证码自动识别、`captcha_detected → 人工完成后 resume` 的成品闭环、
-  视觉/坐标后端（M6）、跨站模板市场。
-- **不在承诺范围**：强风控站点（淘宝/京东等）会拦截自动化；不提供绕过验证码能力。
-
-## 从旧版迁移
-
-旧 `dom_*` 工具被新 runtime 取代，主要对应关系：
-
-| 旧 | 新 |
+| 变量 | 用途 |
 |---|---|
-| `dom_navigate` | `page_navigate` |
-| `dom_explore` | `page_explore` |
-| `dom_step`（动作+断言） | `locator_*`（可带 `assertions`） |
-| `dom_read` / `dom_text` | `page_read` / `page_text` |
-| `dom_save_template` / `dom_run_template` | `workflow_save` / `workflow_run` |
-| `act_and_verify`（桌面） | 已归档，不提供 |
+| `AGENT_GAVEL_HEADLESS` | `1` 使用无头浏览器 |
+| `AGENT_GAVEL_ALLOW_DOMAINS` | 允许访问的域名，逗号分隔 |
+| `AGENT_GAVEL_DOMAIN_GUARD` | `1` 时启用严格域名限制 |
+| `AGENT_GAVEL_ALLOW_PATHS` | 允许上传和导出的本地目录，逗号分隔 |
+| `AGENT_GAVEL_DATA_DIR` | session/profile 等运行数据目录 |
+| `AGENT_GAVEL_ARTIFACT_DIR` | 下载、截图、PDF 等产物目录 |
+| `AGENT_GAVEL_WORKFLOWS_DIR` | 用户 workflow 模板目录 |
+| `AGENT_GAVEL_MAX_DOWNLOAD_BYTES` | 单个下载大小上限 |
+| `AGENT_GAVEL_ARTIFACT_TTL_DAYS` | artifact 保留天数 |
 
-旧模板（schema v1）由 `loader` 只读兼容迁移；建议在新 runtime 重跑并另存为新模板。
+默认用户目录：
 
-## 状态与路线
+```text
+~/.config/agent-gavel/workflows/
+```
 
-- 已完成：Playwright runtime、资源模型、基础/高级浏览器能力、工作流、诊断、
-  安全加固、真实任务回归。
-- 旧实现（裸 CDP 网页通道 + AT-SPI 桌面通道）已归档到仓库根 `legacy/`，
-  **不打包、不注册、不运行**（见 `legacy/README.md`）。
-- 规划见 `docs/tech-plan.md`、`docs/roadmap.md`。
+运行数据和 artifact 默认位于系统临时目录下的 `agent-gavel/`。密码、token、cookie 和 storage state 不应提交到仓库或模板社区。
+
+## 最小使用流程
+
+工具调用时，始终优先使用返回的 `session_id`、`context_id` 和 `page_id`，多个页面并行时不要依赖“当前页面”。
+
+### 现场操作
+
+```text
+session_create()
+page_navigate(page_id, url, assertions?)
+page_explore(page_id, tag?, text_contains?, head?, tail?)
+locator_fill(page_id, target, value, assertions?)
+locator_click(page_id, target, assertions?)
+locator_press(page_id, target, keys, assertions?)
+page_read(page_id, page_features)
+```
+
+常用字段：
+
+- `target`：`{"by":"css","value":"#search"}`、`{"by":"role","value":"button","name":"提交"}` 等。
+- `assertions`：按名称给出 `read`、`selector`、`op`、`value`。
+- `page_features`：名称到 JavaScript 表达式的映射。
+
+例如：
+
+```json
+{
+  "page_id": "page_001",
+  "target": {"by": "css", "value": "#search"},
+  "value": "Playwright",
+  "assertions": {
+    "result": {
+      "selector": "#results",
+      "op": "contains",
+      "value": "Playwright"
+    }
+  }
+}
+```
+
+动作结果会带 `pass`、`fail` 或 `ambiguous`，并返回断言明细。`ambiguous` 表示页面发生了变化，但当前断言不足以确认结果。没有断言的动作仍然可以执行，但无法获得同样的结果保证。
+
+### 录制和重放
+
+```text
+workflow_record_start(page_id?)
+→ 执行一组 page_* / locator_* 操作
+workflow_record_stop(site?, desc?, template_id?, parameterize?, sensitive?)
+workflow_run(name_or_id, params?, session_id?, verbosity?, confirm?)
+```
+
+workflow 会保存参数、步骤、检查点和副作用策略。执行结果默认返回摘要；需要排查时可使用 `verbosity="steps"` 或 `verbosity="full"`。
+
+## 能力总览
+
+| 范畴 | 能力 |
+|---|---|
+| 浏览器资源 | browser、session、context、page，临时/持久/克隆 session |
+| 页面 | 导航、读取、正文、链接、探索、截图、PDF、前进后退、刷新 |
+| 交互 | click、fill、type、press、hover、scroll、check、select、drag、upload |
+| 页面结构 | 多标签页、新窗口、嵌入页面 iframe、网页 alert/confirm/prompt 对话框 |
+| 状态 | cookies、storage state、headers、permissions、proxy |
+| 验证 | URL、标题、文本、值、属性、元素存在、数量、表达式、三态结果 |
+| 文件 | 下载捕获、artifact、SHA-256、MIME、文本抽取、导出和清理 |
+| Workflow | 录制、编译、参数化、检查点、重放、暂停、恢复、取消、局部修复 |
+| 诊断 | trace、网络记录、console、页面错误、性能指标 |
+
+同一 page 的动作会串行执行；不同 page、context 和 session 可以并行执行。
+
+## Workflow 模板
+
+模板保存在用户目录中，用户层优先于随包模板。模板可以通过 `workflow_save`、`workflow_validate`、`workflow_get`、`workflow_list`、`workflow_publish` 和 `workflow_stats` 管理。
+
+模板适合保存：
+
+- 固定网站中的重复操作。
+- 带登录态的后台流程。
+- 多步骤搜索、筛选、下载和校验。
+- 有明确结果检查点的表单流程。
+
+分享模板时：
+
+- 用 `$VAR` 替代关键词、账号和其他可变输入。
+- 通过 `sensitive` 标记密码、token 等敏感参数。
+- 不提交真实 cookie、storage state、个人数据和本机路径。
+- 说明依赖的登录态、测试环境和已知失效点。
+
+当前模板分享方式是本地文件和 Git PR，暂时没有远程模板市场或自动同步服务。
+
+## 验证和安全边界
+
+Playwright 负责元素等待和动作执行，agent-gavel 负责结果验证。动作完成不等于业务成功；关键流程应配置检查点和业务断言，例如：
+
+- 页面是否到了目标 URL。
+- 结果区域是否出现。
+- 下载是否完成、文件是否符合预期。
+- 页面金额和下载文件金额是否一致。
+- 提交、删除、支付等副作用是否经过确认。
+
+安全配置可以限制：
+
+- 允许访问的域名。
+- 允许上传和导出的目录。
+- 单文件下载大小。
+- artifact 保留时间和总量。
+- workflow 中可自动重试的动作。
+
+页面文本、截图和 accessibility 信息都应视为不可信输入，不能把网页中的指令当作系统指令。
+
+## 性能和测试
+
+本地 fixture 基准用于衡量 runtime 开销，不代表所有网站的网络加载速度。当前测得：
+
+| 指标 | 本地结果 |
+|---|---:|
+| 冷启动 | 约 370ms |
+| 热调用 | 约 1.5ms |
+| click p95 | 约 34ms |
+| fill p95 | 约 5.5ms |
+| page_explore p95 | 约 13ms |
+| 跨 page 并行相对串行 | 约 2 倍 |
+
+任务级 benchmark 还会比较探索和模板重放的调用次数与返回数据量。当前本地固定流程的一次结果是：探索 5 次工具调用、回传 1681B；模板重放 1 次调用、回传 192B，约减少 80% 的回传数据。回传数据量只是 token 的代理指标，不等于真实模型 token；真实网站会受到网络、登录态和反爬策略影响。
+
+| 流程 | 探索 | 模板重放 |
+|---|---:|---:|
+| MCP 调用次数 | 5 次 | **1 次** |
+| 回传数据量 | 1681B | **192B** |
+
+这个收益来自减少重复探索和中间页面回传，不代表浏览器跳过了真实的页面加载和等待。
+
+开发环境运行：
+
+```bash
+uv run pytest -q
+uv run python tests/bench_runtime.py
+uv run python tests/bench_tasks.py
+uv run python tests/bench_real.py
+uv run python tests/mcp_live_smoke.py
+```
+
+## 支持范围和限制
+
+- 当前主线是 Playwright runtime；旧裸 CDP 网页通道和 AT-SPI 桌面通道已归档到 `legacy/`，不注册、不打包、不运行。
+- Linux、Windows 网页通道已验证；macOS 尚未作为发布目标验证。
+- 系统 Chrome 优先；也可以安装 Playwright Chromium。
+- 不提供验证码识别、反爬绕过或强风控站点自动化。
+- Canvas、WebGL、地图和网页小游戏需要视觉/坐标后端，目前不在语义 DOM 的承诺范围内。
+- workflow 的暂停、恢复和取消主要在步骤边界生效。
+- 当前版本仍是开发预览版，涉及发送、删除、支付、下单或覆盖数据的流程必须先在测试环境验证。
+
+## 模板贡献
+
+欢迎贡献经过验证的 workflow。一个合格的模板 PR 应说明：
+
+- 站点和任务目标。
+- 参数和敏感参数。
+- 是否依赖已登录 session。
+- 使用的 locator 和检查点。
+- 多组参数的运行结果。
+- 已知失效点和外部副作用。
+
+不要提交密码、token、cookie、storage state 或真实业务数据。贡献代码和模板时使用 [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)。
+
+## 文档和路线
+
+- [CHANGELOG.md](CHANGELOG.md)：版本变更。
+- [docs/tech-plan.md](docs/tech-plan.md)：技术实现基准。
+- [docs/roadmap.md](docs/roadmap.md)：当前路线和发布准备。
+- [docs/agent-gavel-discussion.md](docs/agent-gavel-discussion.md)：完整设计讨论。
 
 ## License
 
