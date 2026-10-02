@@ -1,81 +1,68 @@
 # agent-gavel 开发路线图
 
-> 定位快照：2026-09，核心机制已验证跑通，处于"从技术验证到产品化"的起点。
+> 定位快照：2026-10，Playwright runtime（M1–M4）已完成并加固，旧通道归档，进入"发布准备"阶段。
 
 ## 一句话定位
 
-agent-gavel 是一个**验证驱动的多端操作框架**：让 AI 对桌面/浏览器执行动作后，由
+agent-gavel 是一个**验证驱动的浏览器操作框架**：让 AI 对浏览器执行动作后，由
 **程序断言**（而非再调一次模型）判定是否成功，从而把"执行→验证→反馈"压成一次调用。
-核心差异化：**预声明断言**（行业主流只有"diff 返回给模型"和"独立审计"两种，
-无人做"声明式断言 + 程序判定 + 省掉一次模型往返"）。
-
-## 已证明成立的东西（护城河）
-
-| 能力 | 状态 | 证据 |
-|------|------|------|
-| 声明式验证闭环（执行→断言→程序判定→省循环） | ✅ 成熟 | 所有工具带断言；diff/稳定等待/归一化 |
-| 探索即固化（陌生站→explore→试错→模板复用） | ✅ 验证 | subagent 零预置独立跑通必应 |
-| 网页操作（DOM / Chrome CDP） | ✅ 主通道 | 原子动作空间 + 全覆盖测试；百度/必应/豆瓣等模板 |
-| 桌面操作（AT-SPI / computer-use-linux） | ⛔ 停止开发 | 实验性；Linux 性能不佳、闭源应用 A11y 树不完整 |
-| 预声明断言（差异化） | ✅ 无人做 | 行业只有 diff-return 和独立审计 |
+核心差异化：**预声明断言 + 程序判定 + 省掉一次模型往返**。
 
 ## 当前架构
 
 ```
-agent 核心（外部：opencode / subagent）
-  └─ agent-gavel MCP server（agent_gavel.main:main）
-       ├─ agent_gavel/channels/dom/      DOM 网页通道(adapter/verify/templates/server)
-       ├─ agent_gavel/channels/desktop/  AT-SPI 桌面通道(adapter/验证框架/templates/server)
-       ├─ browser_manager.py             Chrome 进程自管
-       └─ 模板库: 用户目录(~/.config/agent-gavel/)优先 + 随包模板回退
+agent 核心（外部：opencode / 任意 MCP 客户端）
+  └─ agent_gavel.main（MCP server, stdio）
+       └─ tools/*（MCP 工具）
+            └─ runtime/*（session/context/page/队列/产物/策略/事件/指标）
+                 └─ backends/playwright_backend.py（Playwright 驱动系统 Chrome）
+                      └─ workflows/*（模板 schema/编译/录制/执行）
+
+legacy/  旧裸 CDP 网页通道 + AT-SPI 桌面通道：归档，不打包、不注册、不运行
 ```
 
-## 工具清单（MCP）
+## 已完成
 
-- `act_and_verify` / `run_operation`：AT-SPI 桌面闭环（带 debug 参数）
-- `dom_step`：通用 DOM 单步闭环（任意 action+选择器+断言，不绑站点）
-- `dom_read` / `dom_text` / `dom_document`：只读取值 / 正文提取 / 文档(PDF/Word)抽取（不判定、不重试）
-- `dom_navigate` / `dom_explore`：导航 + 锚点探索（head/tail/tag/text 裁剪）
-- `dom_save_template` / `dom_run_template` / `dom_list_templates`：流程固化与复用
+| 能力 | 状态 | 证据 |
+|---|---|---|
+| Playwright runtime（资源模型/队列/产物） | ✅ | `tests/test_runtime.py`、`test_advanced_runtime.py` |
+| 基础 + 高级浏览器能力 | ✅ | `test_basic_dom.py`、`test_m3_advanced.py` |
+| 工作流录制/编译/重放/修复/暂停恢复 | ✅ | `test_m4_workflow.py` |
+| 断言三态 + diff 证据 + 事件优先等待 | ✅ | `test_retry_diff_wait.py` |
+| 安全加固（前置条件/导出/域名/副作用） | ✅ | `test_security_fixes.py` |
+| 真实任务级回归 | ✅ | `test_real_tasks.py`（登录下载校验去重、搜索读价、失败可解释、重放更省） |
+| 真实任务基准（含真实站点） | ✅ | `bench_tasks.py`（5/5，重放 5 调用/1681B → 1 调用/192B） |
+| 旧通道归档 | ✅ | `legacy/`（不打包/不运行） |
+| 文档与打包 | ✅ | README 重写、Dockerfile、CHANGELOG、CONTRIBUTING |
 
-## 距离完整产品还缺什么（按优先级）
+## 距离"可发布"还差什么（按优先级）
 
-### 第一层：单机收尾（技术债 + 可用性，短期）
-- [x] 清理重复模板（bing.json vs bing_search.json 重复）
-- [x] 浏览器进程管理：Chrome 自管（browser_manager.py 按需自启/自愈/退出清理，
-      不再依赖手动开 CDP；doctor 报告 owner）
-- [x] 断言失败的重试 / 降级策略（dom_verify 自动降级：S1 原样重试→S2 trusted 翻转
-      →S3 重新 explore 换锚点→S4 滚动→S5 wait_mode 翻转；独立字段 `strict`
-      关闭降级暴露真实 fail，测试/调试用。实测三个场景全过）
-- [x] 通道分包对称：agent_gavel/channels/{dom,desktop} 各自自包含
-      (adapter/verify/templates/server)，共享 browser_manager，main 聚合入口
-- [x] 模板用户目录优先：保存到 ~/.config/agent-gavel/，跨安装持久，随包模板回退
+### 阻塞
+- [ ] **真实复杂站点验证**：找一个非强风控、需登录的真实后台，跑通并沉淀 2–3 个真实
+      模板；验证"第二次明显更快、更省 token"。（淘宝/京东等强风控站点不在承诺范围）
+- [ ] **失败可解释端到端**：验证码/元素消失 → 返回 `status/reason/artifact/resume_hint`
+      并可 `workflow_resume` 恢复，做成演示。
+- [ ] **独立 benchmark**：与 Playwright MCP / Stagehand / browser-use 在成功率/误判率/
+      token/延迟上对比（当前只有自测）。
 
-### 第二层：多操作域联动（不在此阶段自研 agent）
-agent-gavel 不自研 agent 循环，现阶段也不集成 agent。仅当需要跨操作域联动
-（如手机/微信/网页组合任务、共享操作域信息）时，才接入**别人实现好的大脑**
-（pi / opencode 自身 agent），agent-gavel 继续扮演"手"（操作 + 验证）。
-- [ ] 手机操作域：自研无障碍服务客户端 + 长连接（设计过，未实现）
-- [ ] 消息渠道：微信 / Telegram（操作域之一，非 agent 触发源）
-- [ ] 手表：依赖手机网关，最后做
-
-### 第三层：产品化
-- [ ] 权限 / 确认机制（工具能操作真实桌面/浏览器 = 高风险，需人审）
-- [x] 模板库管理：按**网站**为单位组织模板（site=纯网站名，文件名=site_功能，
-      一个 site 可多个模板文件，不做跨站统一模板）；失效检测——stats 记录
-      连续失败，连续失败>=3 标 suspected（运行返回 warning），pass 清零，
-      覆盖同名模板清零，dom_template_stats 查询
-- [ ] 可观测性（已有 debug 日志，缺 trace / 会话重放）
+### 非阻塞（发布后）
+- [ ] M6 视觉/坐标后端（仅截图 + 坐标，AI 在环；不引入 OCR/CV）。
+- [ ] Python/TS SDK、独立 CLI、MCP registry 接入。
+- [ ] 模板仓库 + 贡献规范落地（当前只到"本地文件 + Git PR"与 CONTRIBUTING）。
 
 ## 诚实差距
 
-- 目前是"验证过的 MCP 工具库"，**不是完整产品**——不打算自研 agent 大脑，
-  多操作域联动阶段接现成大脑（pi/opencode）
-- AT-SPI 桌面侧比 DOM 网页侧粗糙（网页才是真正跑通闭环的，主攻 DOM）
-- "声明式验证"是差异化核心，但还没专项打磨（断言语言表达能力 / 失效处理）
+- 真实站点验证不足：目前真实站点只用 example.com / wikipedia 这类简单站；强风控站点被拦。
+- benchmark 的"省 token"是回传字节代理，不是真实 token 计量。
+- 跨页并发/性能门槛是本地计时，机器负载会影响抖动。
+- 模板社区未启动（见下）——格式已冻结，但生态尚未验证。
 
-## 下一步建议
+## 关于模板社区
 
-顺序：先 T2（拆模块）→ 再 T3（断言降级重试，带 strict 关闭开关）→ 再 T4
-（模板按网站组织 + 失效检测）。这三项把 DOM 通道从"验证过的工具库"打磨成
-"可靠的操作域底座"，之后才谈多端联动接大脑。
+**结论：暂不启动，先铺路。** 理由与铺垫：
+
+- 格式刚冻结（schema v2），且失败/重试/diff 语义近期仍在动，此时开社区会让贡献者建在移动靶上。
+- 模板天然脆（反爬、DOM 漂移），在"失效检测/局部修复"未经真实规模验证前，社区会攒死模板。
+- 还没有 5 分钟安装/发布渠道（Docker/README 刚补），贡献无处落地。
+- 先做：冻结格式契约 + CI 校验提交模板（`workflow_validate`）+ 贡献指南（已写）。
+  待真实模板验证跑通、发布渠道就绪，再开模板仓库征集。

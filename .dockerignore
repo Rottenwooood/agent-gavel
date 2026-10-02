@@ -1,0 +1,13 @@
+.git
+legacy
+third_party
+logs
+dist
+tests
+docs
+__pycache__
+*.pyc
+.venv
+uv.lock
+bin
+templates

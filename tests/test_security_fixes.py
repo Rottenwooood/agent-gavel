@@ -143,6 +143,17 @@ def test_export_user_visible_optin(tmp_path):
 
 # ---------------- #5 域名白名单 ----------------
 
+def test_release_hardened_domain_guard_blocks_all_by_default(monkeypatch):
+    monkeypatch.setenv("AGENT_GAVEL_DOMAIN_GUARD", "1")
+    monkeypatch.delenv("AGENT_GAVEL_ALLOW_DOMAINS", raising=False)
+    p = PolicyManager()
+    assert p.domain_restricted is True
+    assert p.is_domain_allowed("https://example.com") is False  # 保守空集
+    p.domains = {"example.com"}
+    assert p.is_domain_allowed("https://example.com") is True
+    assert p.is_domain_allowed("https://evil.test") is False
+
+
 async def test_domain_guard_blocks_disallowed_navigation(monkeypatch,
                                                         webapp_server):
     monkeypatch.setenv("AGENT_GAVEL_ALLOW_DOMAINS", "127.0.0.1")

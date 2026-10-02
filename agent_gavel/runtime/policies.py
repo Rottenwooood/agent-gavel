@@ -39,6 +39,10 @@ def _env_int(name, default):
 class PolicyManager:
     def __init__(self):
         self.domains = _env_set("AGENT_GAVEL_ALLOW_DOMAINS")
+        # 发布/Docker 加固：即使 allowlist 为空也强制开启域名限制（空集=全拒，
+        # 必须显式配置 AGENT_GAVEL_ALLOW_DOMAINS 才放行）。开发默认关。
+        self.domain_guard = (os.environ.get("AGENT_GAVEL_DOMAIN_GUARD") or "").strip().lower() \
+            in ("1", "true", "yes", "on")
         self.allowed_paths = [p for p in
                               (os.environ.get("AGENT_GAVEL_ALLOW_PATHS") or "").split(",")
                               if p.strip()]
@@ -51,11 +55,16 @@ class PolicyManager:
 
     @property
     def domain_restricted(self) -> bool:
-        return bool(self.domains)
+        return bool(self.domains) or self.domain_guard
 
     def is_domain_allowed(self, url) -> bool:
-        """非空 allowlist 时判断 url 主机是否在允许范围；空 = 全放行。"""
-        if not self.domains or not url:
+        """判断 url 主机是否在允许范围。
+
+        - 开发默认：allowlist 为空且未加固 → 全放行。
+        - allowlist 非空 → 只放行命中项。
+        - 加固且 allowlist 为空 → 全拒（保守空集）。
+        """
+        if not self.domain_restricted or not url:
             return True
         host = (urlparse(url).hostname or "").lower()
         if not host:

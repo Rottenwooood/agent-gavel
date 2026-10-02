@@ -816,7 +816,16 @@ coordinate_move  coordinate_click  coordinate_drag  coordinate_scroll
   期间生效。验收 `tests/test_m4_workflow.py` 9 passed；真实 MCP 联调 `mcp_live_smoke`
   18/18（含 workflow_save/run/list）。全量 `uv run pytest` 58 passed；
   MCP `tools/list` 暴露 59 个新 runtime 工具。
-- M5–M6 待实现。
+- M5 ✅ 已实现（决策：不转 shim，整体归档）：旧 `channels/{dom,desktop}` 与
+  `browser_manager.py` 移入仓库根 `legacy/`，**不打包、不注册、不运行**；
+  `main.py` 只保留 `register_runtime_tools`；旧测试脚本一并移入 `legacy/tests/`。
+- 2026-10 追加（发布准备）：codex 反馈的安全/契约修复（前置条件阻断、导出防穿越且
+  不暴露绝对路径、域名白名单覆盖 popup/重定向、修复禁副作用、reset 生命周期）+
+  失败恢复决策 B（安全重试一次 / 作用域结构签名 diff 三态 / 事件优先等待）。
+  新增真实任务级测试与基准 `tests/test_real_tasks.py`、`tests/bench_tasks.py`
+  （真实任务 5/5；模板重放 vs 探索 5 调用/1681B → 1 调用/192B）。
+  全量 `uv run pytest` 78 passed。
+- M6 待实现。
 
 **M3 诚实说明**：设计 §11 "下载超时和取消"未做成独立工具——下载由 `page.on("download")`
 自动捕获并落盘，失败/超限以 `download_failed`/`download_rejected` 事件暴露（事件可在
@@ -831,14 +840,16 @@ coordinate_move  coordinate_click  coordinate_drag  coordinate_scroll
 
 ---
 
-## 10. 与现有 CDP 代码的共存策略
+## 10. 与现有 CDP 代码的共存策略（已由 M5 收敛：归档）
 
-1. **物理隔离**：新代码在 `runtime/ backends/ tools/ workflows/ diagnostics/`；旧代码在
-   `channels/dom/`、`channels/desktop/`，本阶段不改。
-2. **进程隔离**：新 runtime 用 Playwright 自管的浏览器（新 profile / 新进程）；
-   旧 `dom_*` 继续用 `browser_manager.py` 的调试 Chrome（9222）。互不抢占。
-3. **入口聚合**：`main.py` 只新增 `register_runtime_tools(mcp)` 一行；退出 handler
-   追加 `runtime.shutdown()`。旧 `close_resident` / `stop_own` 不动。
+1. **物理隔离**：新代码在 `runtime/ backends/ tools/ workflows/`；旧代码（
+   `channels/dom/`、`channels/desktop/`、`browser_manager.py`）已整体移入仓库根
+   `legacy/`，**不打包、不注册、不运行**。
+2. **入口**：`main.py` 只调用 `register_runtime_tools(mcp)`；退出只关新 runtime 的
+   浏览器。不再有第二套浏览器/第二套工具面。
+3. **为什么选归档而非 shim**：旧 `dom_*` 的降级重试/scoped diff 语义已被新实现以
+   更安全的方式覆盖（B1/B2/B3），转 shim 只会把已消除的复杂度请回来。旧代码留作
+   历史与对照，如需其逻辑应在新 runtime 重新设计并补测试。
 4. **模板目录分离**：旧模板仍在 `channels/dom/templates` + 用户 `templates/`；
    新 workflow 放用户 `workflows/`。`loader.py` 可读旧格式做迁移，但不写回旧文件。
 5. **M5 决策点**：只有当 M2–M4 的等价能力覆盖旧 `dom_*` 全部测试后，才把 `dom_*` 改为
