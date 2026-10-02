@@ -80,34 +80,14 @@ def register_browser_tools(mcp):
     @mcp.tool()
     @_guard
     async def browser_status():
-        """只读：当前进程/session/context/page 计数、事件与指标快照。
-
-        注意：本返回值描述的是**新 Playwright runtime**。旧 CDP `dom_*`
-        通道是另一套独立浏览器（见返回的 legacy_dom），两者的 session /
-        page / 登录态互不共享，别混用。
-        """
+        """只读：当前进程/session/context/page 计数、事件与指标快照。"""
         rt = rt_get()
-        out = {"status": "ok", **rt.status()}
-        try:
-            from ..browser_manager import status as _legacy_status
-            out["legacy_dom"] = {
-                "separate_browser": True,
-                "note": "旧 dom_* 通道用独立 CDP Chrome，不参与本 runtime；"
-                        "browser_close 不会关闭它",
-                **_legacy_status(),
-            }
-        except Exception:
-            pass
-        return out
+        return {"status": "ok", **rt.status()}
 
     @mcp.tool()
     @_guard
     async def browser_close():
-        """关闭**新 runtime** 的所有 Playwright 浏览器进程与资源。
-
-        不影响旧 `dom_*` 通道的独立 CDP Chrome（用 chrome(stop) 关它）。
-        runtime 仍可继续用，下次调用会重拉。
-        """
+        """关闭所有浏览器进程与资源（runtime 仍可继续用，下次调用会重拉）。"""
         rt = rt_get()
         await rt.shutdown()
         rt.mark_open()

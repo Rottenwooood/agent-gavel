@@ -1,12 +1,12 @@
 [project]
 name = "agent-gavel"
-version = "0.2.3"
-description = "验证驱动的多端操作框架：动作发出去，程序断言判成败，省掉一次模型往返"
+version = "0.3.0"
+description = "验证驱动的浏览器操作框架：动作发出去，程序断言判成败，省掉一次模型往返"
 readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "MIT" }
 authors = [{ name = "Rottenwooood" }]
-keywords = ["mcp", "dom", "atspi", "browser", "automation", "agent", "cdp", "web"]
+keywords = ["mcp", "browser", "automation", "agent", "playwright", "web", "workflow"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -15,7 +15,6 @@ classifiers = [
 ]
 dependencies = [
     "mcp[cli]>=2.1.1",
-    "websockets>=17.1",
     "psutil>=6.0",
     "pypdf>=5.0",
     "python-docx>=1.1",
@@ -23,8 +22,8 @@ dependencies = [
 ]
 
 # agent-gavel 是 MCP server（stdio 模式），opencode 等客户端通过
-# `uvx agent-gavel` 拉起。桌面(AT-SPI)通道依赖 computer-use-linux
-# (npm 全局安装)，不是 Python 依赖——纯 DOM 用法无需安装它。
+# `uvx agent-gavel` 或 run-mcp.sh 拉起。浏览器由 Playwright 自管（默认用系统
+# Chrome）。旧的 DOM/Desktop 通道已归档到仓库根 legacy/，不打包、不运行。
 
 [dependency-groups]
 dev = [
@@ -51,8 +50,8 @@ Repository = "https://github.com/Rottenwooood/agent-gavel"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# 标准包结构：agent_gavel/（含 channels/{dom,desktop} 及随包模板 JSON）。
-# packages 递归打包包内全部文件（含 .json 模板），无需 force-include。
+# 标准包结构：只打包 agent_gavel/（新 Playwright runtime 的工具/资源模型/工作流）。
+# 旧通道在仓库根 legacy/，不在 packages 内 → 不打包、不随发行分发。
 [tool.hatch.build.targets.wheel]
 packages = ["agent_gavel"]
 
@@ -61,9 +60,11 @@ include = [
     "agent_gavel/**",
     "*.sh",
     "tests/*.py",
+    "tests/webapp/**",
     "docs/*.md",
-    "third_party/**",
     "AGENTS.md",
     "README.md",
     "LICENSE",
 ]
+# 注：legacy/ 与 third_party/ 不进 sdist（legacy 仅仓库内归档；third_party 是
+# 本机优化二进制，见 third_party/README）。

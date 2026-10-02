@@ -7,13 +7,11 @@ import time
 
 from mcp.server.mcpserver import MCPServer
 
-from .channels.desktop.server import register_desktop_tools
-from .channels.dom.server import register_dom_tools
 from .tools import register_runtime_tools
 
 mcp = MCPServer("agent-gavel")
-register_dom_tools(mcp)
-register_desktop_tools(mcp)
+# 只注册新 Playwright runtime 工具。旧的 DOM(裸 CDP) / Desktop(AT-SPI) 通道已
+# 移入仓库根 legacy/ 目录，不打包、不注册、不运行（见 legacy/README.md）。
 register_runtime_tools(mcp)
 
 # 记录启动时父进程 pid，供 Windows 看门狗使用。
@@ -41,7 +39,7 @@ def _set_pdeathsig():
 
 
 def _shutdown(signum, frame):  # noqa: ARG001
-    """退出信号：先清理常驻 cul 子进程 + 自管 Chrome，再退出。"""
+    """退出信号：先清理新 runtime 的浏览器进程，再退出。"""
     try:
         threading.Thread(target=_cleanup_sync, daemon=True).start()
     except Exception:
@@ -61,26 +59,8 @@ async def _shutdown_runtime():
 def _cleanup_sync():
     try:
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(asyncio.gather(
-            close_resident(),
-            asyncio.to_thread(_stop_owned_chrome),
-            _shutdown_runtime(),
-        ))
+        loop.run_until_complete(asyncio.gather(_shutdown_runtime()))
         loop.close()
-    except Exception:
-        pass
-
-
-def close_resident():
-    """清理 desktop adapter 的常驻 computer-use-linux 进程。"""
-    from .channels.desktop.adapter import close_resident as _cr
-    return _cr()
-
-
-def _stop_owned_chrome():
-    try:
-        from .browser_manager import stop_own
-        stop_own()
     except Exception:
         pass
 
