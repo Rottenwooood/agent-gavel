@@ -138,6 +138,19 @@ def _pid_alive(pid):
         return False
 
 
+def _proc_cmdline(pid):
+    """读进程命令行并按参数切分（兼容某些环境 /proc 不是 NUL 分隔的情况）。"""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            raw = f.read()
+    except Exception:
+        return None
+    parts = [a.decode("utf-8", "replace") for a in raw.split(b"\0") if a]
+    if len(parts) <= 1:
+        parts = raw.decode("utf-8", "replace").split()
+    return parts
+
+
 class _Reused:
     def __init__(self, pid):
         self.pid = pid
@@ -162,12 +175,7 @@ def _managed_pids(udd):
     for pid in os.listdir(pdir):
         if not pid.isdigit():
             continue
-        try:
-            with open(f"/proc/{pid}/cmdline", "rb") as f:
-                parts = [a.decode("utf-8", "replace")
-                         for a in f.read().split(b"\0") if a]
-        except Exception:
-            continue
+        parts = _proc_cmdline(pid)
         if not parts or "chrome" not in os.path.basename(parts[0]).lower():
             continue
         if (f"--user-data-dir={udd}" in parts
@@ -177,20 +185,59 @@ def _managed_pids(udd):
     return pids
 
 
+def _singleton_paths(udd):
+    return [os.path.join(udd, n) for n in
+            ("SingletonLock", "SingletonCookie", "SingletonSocket")]
+
+
+def _clear_singletons(udd):
+    for p in _singleton_paths(udd):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
+def _state_path(udd):
+    return os.path.join(udd, ".agent-gavel-browser.json")
+
+
+def _read_state(udd):
+    try:
+        with open(_state_path(udd), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _write_state(udd, pid, port):
+    try:
+        with open(_state_path(udd), "w", encoding="utf-8") as f:
+            json.dump({"pid": int(pid), "port": int(port), "at": time.time()}, f)
+    except Exception:
+        pass
+
+
+def _clear_state(udd):
+    try:
+        os.remove(_state_path(udd))
+    except OSError:
+        pass
+
+
 def _reuse_existing(udd):
-    """已有 Chrome 用同一 user_data_dir 且调试口可用 → 复用（避免单实例冲突/残留窗口）。"""
+    """复用：优先读状态文件（MCP 重启后仍能重连），再退回 /proc 扫描。"""
+    st = _read_state(udd)
+    if st and st.get("pid") and st.get("port") \
+            and _pid_alive(int(st["pid"])) and _cdp_ready(int(st["port"])):
+        return int(st["pid"]), int(st["port"])
     pdir = "/proc"
     if not os.path.isdir(pdir):
         return None
     for pid in os.listdir(pdir):
         if not pid.isdigit():
             continue
-        try:
-            with open(f"/proc/{pid}/cmdline", "rb") as f:
-                parts = [a.decode("utf-8", "replace")
-                         for a in f.read().split(b"\0") if a]
-        except Exception:
-            continue
+        parts = _proc_cmdline(pid)
         if not parts or "chrome" not in os.path.basename(parts[0]).lower():
             continue
         if f"--user-data-dir={udd}" not in parts:
@@ -202,6 +249,23 @@ def _reuse_existing(udd):
                 break
         if port and str(port).isdigit() and _cdp_ready(int(port)):
             return int(pid), int(port)
+    return None
+
+
+def _reconcile(udd):
+    """启动前对账：能复用就复用；否则清掉我们遗留的 Chrome 并删除单例锁。
+
+    返回 (pid, port) 表示可复用；None 表示需要干净启动。
+    """
+    ex = _reuse_existing(udd)
+    if ex:
+        return ex
+    pids = _managed_pids(udd)
+    if pids:
+        for pid in pids:
+            _kill_tree(pid, grace_s=3.0)
+        _clear_singletons(udd)
+        time.sleep(0.3)
     return None
 
 
@@ -281,13 +345,11 @@ class BrowserProcessManager:
             raise GavelError("chrome_env", "找不到 Chrome/Chromium 可执行文件",
                              hint="安装 Chrome，或设 AGENT_GAVEL_CHROME_BIN")
         os.makedirs(udd, exist_ok=True)
-        # 已有同 profile 的 Chrome 在跑（例如上一个 server 的残留）→ 复用，避免单实例冲突
-        ex = _reuse_existing(udd)
+        # 启动前对账：能复用就复用（状态文件优先，重启后也能重连）；否则清掉遗留 + 删单例锁
+        ex = _reconcile(udd)
         if ex:
+            _write_state(udd, ex[0], ex[1])
             return _Reused(ex[0]), ex[1]
-        # 复用不了：可能是我们自己遗留的僵尸 Chrome（CDP 不响应）占着 profile → 先清掉再起
-        for pid in _managed_pids(udd):
-            _kill_tree(pid, grace_s=3.0)
         args = [binary, *_launch_args()]
         if extra_args:
             args += list(extra_args)
@@ -303,18 +365,23 @@ class BrowserProcessManager:
         else:
             kwargs["start_new_session"] = True
         proc = subprocess.Popen(args, **kwargs)
-        deadline = time.monotonic() + 25
+        deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             try:
                 with urllib.request.urlopen(
                         f"http://127.0.0.1:{port}/json/version", timeout=1) as r:
                     json.loads(r.read())
+                    _write_state(udd, proc.pid, port)
                     return proc, port
             except Exception:
                 await asyncio.sleep(0.2)
         _kill_tree(proc.pid)
-        raise GavelError("chrome_env", "自起 Chrome 的调试端口未就绪",
-                         detail={"user_data_dir": udd})
+        _clear_singletons(udd)
+        raise GavelError(
+            "chrome_env", "自起 Chrome 的调试端口未就绪",
+            detail={"user_data_dir": udd},
+            hint="资料目录可能被其它 Chrome 占用；本项目已尝试清理自己的残留进程与单例锁，"
+                 "仍失败请确认没有手动/外部 Chrome 在用同一 user_data_dir")
 
     async def _connect(self, pw, port_or_url):
         url = port_or_url if str(port_or_url).startswith("http") \
@@ -453,6 +520,36 @@ class BrowserProcessManager:
     def list(self):
         return [h.to_dict() for h in self._handles.values()]
 
+    def os_browsers(self):
+        """OS 里真实存在、用我们资料目录的 Chrome（含 MCP 重启后丢失登记的孤儿）。"""
+        udds = set()
+        for h in self._handles.values():
+            u = h.opts.get("user_data_dir")
+            if u:
+                udds.add(u)
+        try:
+            from .profiles import active_profile_dir, default_profile_dir
+            for u in (active_profile_dir(), default_profile_dir()):
+                if u:
+                    udds.add(u)
+        except Exception:
+            pass
+        registered = {h.owned_pid for h in self._handles.values() if h.owned_pid}
+        out = []
+        seen = set()
+        for u in udds:
+            for pid in _managed_pids(u):
+                out.append({"pid": pid, "user_data_dir": u,
+                            "registered": pid in registered})
+                seen.add(pid)
+            st = _read_state(u)
+            if st and st.get("pid"):
+                pid = int(st["pid"])
+                if pid not in seen and _pid_alive(pid):
+                    out.append({"pid": pid, "user_data_dir": u,
+                                "registered": pid in registered})
+        return out
+
     async def close(self, handle):
         if handle is None:
             return
@@ -469,7 +566,7 @@ class BrowserProcessManager:
                     pass
             for _ in range(80):
                 if not _pid_alive(handle.owned_pid):
-                    return
+                    break
                 await asyncio.sleep(0.1)
             try:
                 if handle.browser is not None:
@@ -477,6 +574,10 @@ class BrowserProcessManager:
             except Exception:
                 pass
             _kill_tree(handle.owned_pid, grace_s=5.0)
+            udd = handle.opts.get("user_data_dir")
+            if udd:
+                _clear_state(udd)
+                _clear_singletons(udd)
             return
         try:
             if handle.persistent_context is not None:

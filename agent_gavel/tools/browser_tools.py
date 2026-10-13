@@ -26,6 +26,23 @@ def _mode_is_attach(browser_mode, cdp_endpoint=None):
     return mode == "attach" or bool(endpoint)
 
 
+def _launch_opts_match(handle, *, headless, channel, proxy, browser_mode,
+                       cdp_endpoint):
+    """已有默认浏览器与请求参数是否一致（None 表示不限定）→ 用于 browser_launch 幂等。"""
+    if handle is None or not handle.alive:
+        return False
+    o = handle.opts or {}
+    if headless is not None and bool(o.get("headless")) != bool(headless):
+        return False
+    if proxy is not None and bool(o.get("proxy")) != bool(proxy):
+        return False
+    if channel is not None and o.get("channel") != channel:
+        return False
+    if _mode_is_attach(browser_mode, cdp_endpoint) and handle.mode != "attach":
+        return False
+    return True
+
+
 def _guard(fn):
     """把 GavelError / 未知异常转成结构化结果。"""
     @functools.wraps(fn)
@@ -86,6 +103,11 @@ def register_browser_tools(mcp):
                        (headless, channel, proxy, browser_mode, cdp_endpoint))
         if not explicit:
             handle = await rt.ensure_default_browser()
+        elif _launch_opts_match(rt.default_handle, headless=headless,
+                                channel=channel, proxy=proxy,
+                                browser_mode=browser_mode,
+                                cdp_endpoint=cdp_endpoint):
+            handle = rt.default_handle          # 幂等：已存在且参数一致，直接复用
         else:
             if rt.default_handle is not None:
                 await rt.processes.close(rt.default_handle)

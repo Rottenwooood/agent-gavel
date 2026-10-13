@@ -18,6 +18,17 @@
   Chrome → 单实例冲突、约 25s 超时、并弹出一个空窗口）；真正需要独占时（proxy/channel/
   browser_mode/endpoint）才另起，且使用**独立资料目录**。
 
+### 浏览器生命周期对账（修"孤儿 Chrome 占 profile 卡死"）
+
+- `browser_launch` 前**对账**：先查同 profile 是否已有我们的 Chrome —— 能复用就复用
+  （优先读状态文件 `<profile>/.agent-gavel-browser.json`，**MCP 重启后仍能 re-attach**；
+  再退回 /proc 扫描），否则清掉遗留进程并删除 `Singleton*` 锁再干净启动，绝不盲起第二台。
+- `browser_status` 增加 `os_browsers`：列出 OS 里真实在用我们资料目录的 Chrome（含重启后
+  丢失登记的孤儿，标 `registered:false`），不再只看内存登记表。
+- `browser_launch` **幂等**：已存在且参数一致 → 返回原句柄，不重启。
+- 关闭时会清状态文件与单例锁；启动等待从 25s 降到 12s，失败带明确 hint（profile 被占用）。
+- 修复 `/proc/<pid>/cmdline` 在某些环境非 NUL 分隔导致进程匹配失效的问题。
+
 ### 错误语义 / 等待 / 定位 / 元信息（依外部测试反馈）
 
 - `page_navigate`：HTTP≥400 返回 `http_status`/`http_error`/`warning`（`fail_on_http_error=True`

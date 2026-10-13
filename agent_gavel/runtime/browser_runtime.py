@@ -75,6 +75,7 @@ class BrowserRuntime:
     def status(self):
         return {
             "processes": self.processes.list(),
+            "os_browsers": self.processes.os_browsers(),
             "sessions": [s.to_dict() for s in self.sessions.values()],
             "counts": {
                 "sessions": len(self.sessions),
