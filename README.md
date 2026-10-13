@@ -134,6 +134,12 @@ MCP 客户端通过 stdio 拉起 agent-gavel。使用 PyPI 版本时：
 | `AGENT_GAVEL_CHROME_CHANNEL` | 指定浏览器通道；空 = 用 Playwright 自带 chromium |
 | `AGENT_GAVEL_EXTRA_ARGS` | 追加浏览器启动参数（空格分隔） |
 | `AGENT_GAVEL_DISABLE_GPU` | `1` 加回 `--disable-gpu`（软件渲染，一般不需要） |
+| `AGENT_GAVEL_BROWSER_MODE` | 浏览器来源：`managed`（默认，自启加固 Chrome）/ `playwright` |
+| `AGENT_GAVEL_CDP_ENDPOINT` | 接管一个已存在的浏览器（C2，如 `http://127.0.0.1:9222`） |
+| `AGENT_GAVEL_BROWSER_PROFILE` | C1 用的资料目录（覆盖当前副本） |
+| `AGENT_GAVEL_BROWSER_PROFILES` | 资料副本存放目录 |
+| `AGENT_GAVEL_CHROME_USER_DATA` | 复制来源：用户本机 Chrome 资料目录 |
+| `AGENT_GAVEL_CHROME_BIN` | 指定 Chrome/Chromium 可执行文件 |
 
 默认用户目录：
 
@@ -142,6 +148,39 @@ MCP 客户端通过 stdio 拉起 agent-gavel。使用 PyPI 版本时：
 ```
 
 运行数据和 artifact 默认位于系统临时目录下的 `agent-gavel/`。密码、token、cookie 和 storage state 不应提交到仓库或模板社区。
+
+## 浏览器与身份
+
+默认（**C1**）：agent-gavel 自己启动一台加固过的 Chrome（持久真实资料目录），再用 Playwright 连接它——已关闭 `navigator.webdriver`、无头 UA 去标记、有头用真实 GPU。在这之上：
+
+**容器策略**（`session_create(container=...)`）：
+
+- `default`（默认）：用资料目录的**默认容器**，继承其中的登录/cookie，改动**累积回**资料目录（可迭代）。
+- `isolated`：新建隔离容器，**继承**资料目录的 cookie，但**不写回**（并行/多账号不污染身份）。
+- `context_create` 与 `clone` 默认用 `isolated`。
+
+**资料副本**（把你本机 Chrome 的身份复制成我们自己的，可多份切换）：
+
+```text
+browser_profile_copy(tier="default")   # 从 ~/.config/google-chrome 复制一份
+browser_profile_list()                  # 列出所有副本 + 当前使用的
+browser_profile_use(name)               # 切换当前副本
+browser_profile_delete(name)            # 删除副本（不动用户原目录）
+```
+
+`tier`：`strict`（不含 cookie/站点态，隐私最好）/ `default`（含 cookie/历史/站点态，推荐）/ `full`（再加扩展代码）。始终剔除密码、自动填充、同步、设备标识与缓存。首个副本自动成为当前，默认存放在 `~/.config/agent-gavel/browser-profiles/`。可反复调用 = 从用户当前资料目录再拍一份新快照。
+
+**接管已有浏览器（C2）**：
+
+```text
+browser_launch(browser_mode="attach", cdp_endpoint="http://127.0.0.1:9222")
+```
+
+只连接、不负责关闭，返回会带 `warning`（真实账号暴露在本机调试口）。`browser_mode="playwright"` 回到 Playwright 直接启动。
+
+**生命周期**：启动前会对账——复用已有同资料目录的 Chrome（含 MCP 重启后靠状态文件 re-attach），或清理我们自己遗留的进程并删除单例锁后干净启动；`browser_launch` 幂等；`browser_status.os_browsers` 报告 OS 里真实在用我们资料目录的 Chrome。
+
+> 复制资料副本会把**真实 cookie/登录态**落到本地副本目录；不需要登录身份时用 `strict` 档。对风控敏感的站点建议**有头** + 复用持久资料。
 
 ## 最小使用流程
 
@@ -162,7 +201,11 @@ page_read(page_id, page_features)
 常用字段：
 
 - `target`：`{"by":"css","value":"#search"}`、`{"by":"role","value":"button","name":"提交"}` 等。
-- `assertions`：按名称给出 `read`、`selector`、`op`、`value`。
+- `assertions` / `checks`（两处叫法等价）三种写法：
+  - 映射：`{"u": {"read":"url","op":"contains","value":"baidu.com"}}`
+  - 扁平：`{"url_contains":"baidu.com","text_contains":"保研","count_gte":1}`
+  - 顶层 op：`{"title":"百度","op":"contains"}`
+  `read` 取 url|title|text|value|count|html|expr|attr（缺省按名字或 selector 推断，判断不出会**报错**而不是拿标题去比）；`op` 取 eq|neq|contains|not_contains|regex|exists|not_exists|gt|lt|gte|lte|count_eq|count_gte|count_gt；`value`/`expected` 等价。`assertion_schema()` 可查全套。
 - `page_features`：名称到 JavaScript 表达式的映射。
 
 例如：
@@ -205,6 +248,8 @@ workflow 会保存参数、步骤、检查点和副作用策略。执行结果�
 | 页面结构 | 多标签页、新窗口、嵌入页面 iframe、网页 alert/confirm/prompt 对话框 |
 | 状态 | cookies、storage state、headers、permissions、proxy |
 | 验证 | URL、标题、文本、值、属性、元素存在、数量、表达式、三态结果 |
+| 身份 / 容器 | 资料副本（复制/切换/清理）；默认容器（继承+累积）/ 隔离容器；C1 自启 / C2 接管 |
+| 定位 / 元信息 | 按文本定位可点元素、页面元信息、紧凑可点清单、按文本等待、空内容兜底 |
 | 文件 | 下载捕获、artifact、SHA-256、MIME、文本抽取、导出和清理 |
 | Workflow | 录制、编译、参数化、检查点、重放、暂停、恢复、取消、局部修复 |
 | 诊断 | trace、网络记录、console、页面错误、性能指标 |
