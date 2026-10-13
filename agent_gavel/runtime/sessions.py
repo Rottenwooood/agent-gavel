@@ -101,15 +101,25 @@ class SessionManager:
             await self.runtime.context_mgr.adopt(
                 session, handle.persistent_context, container="default")
         else:
-            # 只有显式给了 launch 级参数（proxy/channel/headless）才独占进程，
-            # 否则复用共享默认浏览器（headless=None 不应触发独占）。
+            # 只有"必须独立环境"的参数才另起进程；headless 不触发独占
             needs_dedicated = bool(opts.get("proxy") or opts.get("channel")
                                    or opts.get("browser_mode")
-                                   or opts.get("cdp_endpoint")
-                                   or config.get("headless") is not None)
+                                   or opts.get("cdp_endpoint"))
             if needs_dedicated:
-                handle = await self.runtime.processes.launch(**opts)
+                # 独占进程：给独立资料目录，绝不与共享 profile 抢单实例
+                udd = config.get("user_data_dir") or os.path.join(PROFILE_DIR, sid)
+                handle = await self.runtime.processes.launch(user_data_dir=udd,
+                                                             **opts)
             else:
+                # 共享默认浏览器；若显式要求了不同的 headless，则按需重启默认浏览器
+                h = opts.get("headless")
+                if h is not None:
+                    dh = self.runtime.default_handle
+                    if dh is None or bool(dh.opts.get("headless")) != bool(h):
+                        if dh is not None:
+                            await self.runtime.processes.close(dh)
+                        self.runtime._default_handle = \
+                            await self.runtime.processes.launch(headless=bool(h))
                 handle = await self.runtime.ensure_default_browser()
             session = Session(sid, mode, config, handle)
             self.runtime.sessions[sid] = session

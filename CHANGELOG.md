@@ -14,6 +14,9 @@
   + `cdp_endpoint` 可**接管**已存在浏览器（C2，返回 warning）；`playwright` 为旧路径。
 - 启动前若已有同 profile 的 Chrome 且调试口可用则**复用**，避免资料目录单实例冲突与残留窗口。
 - 关闭自起 Chrome 时改用 CDP `Browser.close` 干净退出，确保 localStorage/cookie 落盘。
+- 修复：`session_create` 传 `headless` 不再强制另起进程（此前会用**同一 profile** 起第二个
+  Chrome → 单实例冲突、约 25s 超时、并弹出一个空窗口）；真正需要独占时（proxy/channel/
+  browser_mode/endpoint）才另起，且使用**独立资料目录**。
 
 ### 错误语义 / 等待 / 定位 / 元信息（依外部测试反馈）
 
