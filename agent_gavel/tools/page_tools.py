@@ -15,8 +15,12 @@ def register_page_tools(mcp):
                             min_text_chars: int = None):
         """导航到 URL 并（可选）断言。唯一的导航入口。
 
+        assertions 格式（与 expect 一致）：{名字: {op, value, read?, selector?, attr?, expr?}}，
+        也支持扁平写法 {url_contains:"baidu.com", title_contains:"百度"}；
+        read 缺省按名字（url|title|text|value|count|html|expr|attr）或 selector。
         - HTTP≥400 会带上 `http_status`/`warning`；`fail_on_http_error=True` 时直接判失败。
         - `min_text_chars` 给定且正文更短 → 判失败（`empty_page`），避免"空壳仍 ok"。
+        - 断言结果：pass（满足）/ fail（未满足）/ ambiguous（没过但页面变了，附 diff）。
         """
         from ..runtime import get_runtime
         rt = get_runtime()
@@ -145,7 +149,8 @@ def register_page_tools(mcp):
             "page_read",
             lambda: be.retry_on_nav_race(
                 handle.page, lambda: be.read(handle.page, features)))
-        out = {"status": "ok", **ids(handle), "features": res["features"]}
+        out = {"status": "ok", **ids(handle), "untrusted": True,
+               "features": res["features"]}
         if res["errors"]:
             out["errors"] = res["errors"]
             out["status"] = "partial_error" if res["features"] else "error"
@@ -209,7 +214,7 @@ def register_page_tools(mcp):
             "page_meta",
             lambda: be.retry_on_nav_race(handle.page,
                                          lambda: be.page_meta(handle.page)))
-        return {"status": "ok", **ids(handle), **res}
+        return {"status": "ok", **ids(handle), "untrusted": True, **res}
 
     @mcp.tool()
     @guard

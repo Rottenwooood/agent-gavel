@@ -106,6 +106,12 @@ class PlaywrightBackend:
             resp = await handle.page.goto(url, wait_until=wait_until,
                                           timeout=timeout_s * 1000)
         except Exception as e:  # noqa: BLE001
+            if "Download is starting" in str(e):
+                raise GavelError(
+                    "download_started", "导航触发了下载（不是页面）",
+                    detail={"url": url}, retryable=False,
+                    hint="这是下载链接：改用 page_wait_for_download 捕获下载，"
+                         "或用 locator 点击后 page_wait_for_download") from e
             raise GavelError("navigation_failed", f"导航失败：{e}",
                              detail={"url": url}, retryable=True) from e
         final = handle.page.url
@@ -682,6 +688,8 @@ class PlaywrightBackend:
                 "scope": before.get("scope") or after.get("scope"),
                 "samples_added": s_add[:6], "samples_removed": s_rem[:6]}
 
+    _READ_KINDS = {"url", "title", "text", "value", "count", "expr", "attr", "html"}
+
     async def _actual(self, page, check):
         read = check.get("read")
         sel = check.get("selector")
@@ -689,21 +697,23 @@ class PlaywrightBackend:
         root = self._frame_root(page, check.get("frame"))
         if op in ("exists", "not_exists"):
             return await root.locator(sel).count() if sel else 0
+        # 按 name 决定读什么：{url:{...}} / {url_contains:...} 归一后 name/read=url
+        if read is None:
+            nm = check.get("name")
+            if nm in self._READ_KINDS:
+                read = nm
         if read is None:
             if check.get("expr") is not None:
                 read = "expr"
-            elif check.get("url"):
-                read = "url"
-            elif check.get("title"):
-                read = "title"
             elif check.get("attr"):
                 read = "attr"
-            elif check.get("count") is not None:
-                read = "count"
             elif sel:
                 read = "text"
-            else:
-                read = "title"
+        if read is None:
+            raise GavelError(
+                "bad_check", f"无法判断该 check 要读什么：{check}",
+                hint="用 read/name 指定 url|title|text|value|count|expr|attr|html，"
+                     "或给 selector；别写成未识别的 key")
         if read == "url":
             return page.url
         if read == "title":
@@ -712,6 +722,10 @@ class PlaywrightBackend:
             return await page.evaluate(check["expr"])
         if read == "count":
             return await root.locator(sel).count()
+        if read == "text" and not sel:
+            # text 无 selector = 整页正文
+            return await page.evaluate(
+                "() => document.body ? document.body.innerText : ''")
         loc = root.locator(sel).first
         if read == "value":
             return await loc.input_value()
@@ -817,12 +831,13 @@ class PlaywrightBackend:
                     return None
                 read = "count"
             if read is None:
+                nm = c.get("name")
+                if nm in ("url", "title", "text", "value", "count", "expr",
+                          "attr", "html"):
+                    read = nm
+            if read is None:
                 if c.get("expr") is not None:
                     read = "expr"
-                elif c.get("url"):
-                    read = "url"
-                elif c.get("title"):
-                    read = "title"
                 elif c.get("attr"):
                     read = "attr"
                 elif sel:
@@ -849,7 +864,7 @@ class PlaywrightBackend:
             else:
                 a = (f"((__q({q(sel)})&&(__q({q(sel)}).innerText"
                      f"||__q({q(sel)}).textContent))||'').trim()")
-            cmp = self._cmp_js(op, a, _json.dumps(c.get("value")))
+            cmp = self._cmp_js(op, a, _json.dumps(c.get("value", c.get("expected"))))
             if cmp is None:
                 return None
             parts.append(cmp)
@@ -886,21 +901,56 @@ class PlaywrightBackend:
             return f"({a}) > {e}"
         return None
 
-    @staticmethod
-    def _normalize_checks(checks):
+    _READ_PREFIX = {"url": "url", "title": "title", "text": "text",
+                    "value": "value", "count": "count", "html": "html",
+                    "expr": "expr", "attr": "attr", "selector": "text"}
+    _OP_SUFFIXES = ("not_contains", "count_gte", "count_gt", "count_eq",
+                    "contains", "not_exists", "exists", "neq", "eq", "regex",
+                    "gte", "lte", "gt", "lt")
+
+    @classmethod
+    def _norm_one(cls, name, spec):
+        item = {"name": name}
+        # 扁平便利写法：url_contains / text_eq / count_gte ...
+        for suf in cls._OP_SUFFIXES:
+            if name.endswith("_" + suf) and name[:-len(suf) - 1] in cls._READ_PREFIX:
+                item["read"] = cls._READ_PREFIX[name[:-len(suf) - 1]]
+                item["op"] = suf
+                break
+        if isinstance(spec, dict):
+            for k, v in spec.items():
+                if k == "expected":
+                    item.setdefault("value", v)
+                else:
+                    item.setdefault(k, v)
+            item.setdefault("op", "eq")
+        else:
+            item.setdefault("value", spec)
+            item.setdefault("op", "eq")
+        return item
+
+    @classmethod
+    def _normalize_checks(cls, checks):
         if checks is None:
             return []
         if isinstance(checks, dict):
-            # 单个 check（含 op）→ 当成一条；否则按 {名字: spec} 映射
-            if "op" in checks:
-                return [checks]
+            # 顶层 op 绑定到唯一目标键：{ title:"百度", op:"contains" }
+            if "op" in checks and "read" not in checks:
+                keys = [k for k in checks if k in cls._READ_PREFIX
+                        or k in ("selector", "expr", "attr")]
+                if len(keys) == 1 and isinstance(checks.get("op"), str):
+                    k = keys[0]
+                    item = {"name": k, "read": cls._READ_PREFIX.get(k, "text"),
+                            "op": checks["op"], "value": checks[k]}
+                    for extra in ("selector", "frame"):
+                        if checks.get(extra) is not None:
+                            item[extra] = checks[extra]
+                    return [item]
             out = []
             for name, spec in checks.items():
-                if not isinstance(spec, dict):
-                    spec = {"op": "eq", "value": spec}
-                item = {"name": name}
-                item.update(spec)
-                out.append(item)
+                if name == "op" and isinstance(spec, str):
+                    continue  # 顶层 op（未成功绑定），跳过，别当成一条 check
+                out.append(cls._norm_one(name, spec))
             return out
         return list(checks)
 
@@ -909,7 +959,7 @@ class PlaywrightBackend:
         for c in checks:
             name = c.get("name") or c.get("read") or "check"
             op = c.get("op", "eq")
-            expected = c.get("value")
+            expected = c.get("value", c.get("expected"))
             try:
                 actual = await self._actual(page, c)
                 passed = self._compare(op, actual, expected)

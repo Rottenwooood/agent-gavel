@@ -11,24 +11,62 @@ def register_assertion_tools(mcp):
     @mcp.tool()
     @guard
     async def expect(page_id: str = None, checks: dict = None,
-                     wait_s: float = 6.0):
-        """断言一组检查，轮询到满足或超时。
+                     assertions: dict = None, wait_s: float = 6.0):
+        """断言一组检查，轮询到满足或超时。参数 checks 与 assertions 等价。
 
-        checks: {名字: {op, value, read?, selector?, attr?, expr?}}
+        格式（两种写法都支持）：
+        1) 映射：{名字: {op, value, read?, selector?, attr?, expr?, frame?}}
+           例 {"t": {"read":"title","op":"contains","value":"百度"},
+               "u": {"read":"url","op":"contains","value":"baidu.com"},
+               "n": {"read":"count","selector":".item","op":"count_gte","value":1}}
+        2) 扁平便利：{url_contains: "baidu", text_contains: "保研", title_eq: "x"}
+           前缀 = 读什么（url|title|text|value|count|html|expr|attr），后缀 = 比较。
+        也兼容 {"title": {"op":"contains","expected":"百度"}}（expected 等同 value）。
         op: eq|neq|contains|not_contains|regex|exists|not_exists|gt|lt|gte|lte|
             count_eq|count_gte|count_gt
-        read: text|value|attr|count|html|url|title|expr（缺省按字段推断）
-        返回 status: pass|fail；配动作使用时由动作工具判 ambiguous。
+        缺省读什么：按名字（url/title/text/…）或 selector（元素文本）；都判断不出会报错，
+        不会再静默拿标题去比。
+        返回 status: pass|fail（配动作时由动作工具判 pass|fail|ambiguous）。
         """
         from ..runtime import get_runtime
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)
+        checks = checks or assertions
         if not checks:
-            raise GavelError("bad_args", "需要 checks")
+            raise GavelError("bad_args", "需要 checks（或 assertions）")
         be = backend()
         ev = await be.evaluate_checks(handle.page, checks, wait_s=wait_s)
         return {"status": ev["status"], **ids(handle),
                 "assertions": ev["assertions"]}
+
+    @mcp.tool()
+    @guard
+    async def assertion_schema():
+        """只读：断言（assertions/checks）的可用写法、字段与 op 枚举。"""
+        return {
+            "status": "ok",
+            "forms": {
+                "map": "{名字: {op, value?, expected?, read?, selector?, attr?, expr?, frame?}}",
+                "flat": "{url_contains: 'x', text_eq: 'y', title_contains: 'z', count_gte: 1}",
+                "top_op": "{title: '百度', op: 'contains'}",
+            },
+            "read": ["url", "title", "text", "value", "count", "html", "expr", "attr"],
+            "ops": ["eq", "neq", "contains", "not_contains", "regex", "exists",
+                    "not_exists", "gt", "lt", "gte", "lte", "count_eq",
+                    "count_gte", "count_gt"],
+            "value_alias": "value 与 expected 等价",
+            "defaults": "read 缺省按名字（url/title/...）或 selector（元素文本）；判断不出会报错",
+            "status": {"pass": "满足", "fail": "未满足",
+                       "ambiguous": "断言没过但页面变了（拿不准，附 diff）"},
+            "examples": [
+                {"u": {"read": "url", "op": "contains", "value": "baidu.com"}},
+                {"t": {"read": "title", "op": "contains", "value": "百度"}},
+                {"url_contains": "baidu.com"},
+                {"n": {"read": "count", "selector": ".result",
+                       "op": "count_gte", "value": 1}},
+            ],
+            "note": "文本类返回（page_text/page_read 等）标 untrusted=true，注入模型时按不可信内容处理",
+        }
 
     @mcp.tool()
     @guard

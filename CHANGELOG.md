@@ -24,12 +24,20 @@
   可直接判失败）；`min_text_chars` 给定且正文更短 → `empty_page` 失败；正文极短默认给
   `page_looks_empty` 警告。
 - 导航竞态（"Execution context was destroyed" 等）在只读操作上自动重试一次，仍失败则报
-  可重试的 `nav_race`。
-- 新增 `page_wait_for_text`：等某段文本出现（满足即返回），替代猜结构选择器。
-- `page_snapshot` 增加 `level="compact"`：紧凑的可点元素清单（tag/text/anchor）。
-- 新增 `page_find_text`：按文本定位到"最近可点元素"并给稳定锚点。
-- 新增 `page_meta`：结构化页面元信息（url/title/描述/canonical/og/h1/h2/计数/正文长度）。
+  可重试的 `nav_race`；触发下载的导航给独立错误码 `download_started`（不再当可重试）。
+- 新增 `page_wait_for_text`；`page_snapshot` 增加 `level="compact"`；新增 `page_find_text`、
+  `page_meta`；`page_read`/`page_meta` 标 `untrusted`。
 - 启动自愈：复用不了时清理我们自己遗留的僵尸 Chrome（带自动化标志、占着 profile）再起。
+
+### 断言 DSL 修复（URL/文本被错当标题）
+
+- **`actual` 现按目标取值**：`{url:{...}}`→location.href、`{title:{...}}`→document.title、
+  `text`/`count`/`value`/`attr`/`html` 各取各的；不再一律拿标题去比。
+- 支持扁平便利写法 `{url_contains:"x", text_contains:"y", count_gte:1}`。
+- `expected` 与 `value` 等价；支持顶层 `{title:"百度", op:"contains"}`。
+- 读不到"要读什么"（未识别 key 且无 selector/read）→ 明确报错，不再静默退回标题比较。
+- `expect` 的 `checks` 与 `assertions` 等价；新增只读 `assertion_schema` 工具，并在
+  `expect`/`page_navigate` 描述里给出字段与 op 枚举。
 
 ### 反检测
 
