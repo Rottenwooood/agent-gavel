@@ -153,6 +153,30 @@ def _cdp_ready(port):
         return False
 
 
+def _managed_pids(udd):
+    """找出用同一 user_data_dir 且带我们自动化标志的 Chrome（=我们自己遗留的）。"""
+    pids = []
+    pdir = "/proc"
+    if not os.path.isdir(pdir):
+        return pids
+    for pid in os.listdir(pdir):
+        if not pid.isdigit():
+            continue
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                parts = [a.decode("utf-8", "replace")
+                         for a in f.read().split(b"\0") if a]
+        except Exception:
+            continue
+        if not parts or "chrome" not in os.path.basename(parts[0]).lower():
+            continue
+        if (f"--user-data-dir={udd}" in parts
+                and "--disable-blink-features=AutomationControlled" in parts
+                and "--remote-allow-origins=*" in parts):
+            pids.append(int(pid))
+    return pids
+
+
 def _reuse_existing(udd):
     """已有 Chrome 用同一 user_data_dir 且调试口可用 → 复用（避免单实例冲突/残留窗口）。"""
     pdir = "/proc"
@@ -261,6 +285,9 @@ class BrowserProcessManager:
         ex = _reuse_existing(udd)
         if ex:
             return _Reused(ex[0]), ex[1]
+        # 复用不了：可能是我们自己遗留的僵尸 Chrome（CDP 不响应）占着 profile → 先清掉再起
+        for pid in _managed_pids(udd):
+            _kill_tree(pid, grace_s=3.0)
         args = [binary, *_launch_args()]
         if extra_args:
             args += list(extra_args)

@@ -10,8 +10,14 @@ def register_page_tools(mcp):
     async def page_navigate(page_id: str = None, url: str = None,
                             wait_until: str = "domcontentloaded",
                             timeout_s: float = 30.0,
-                            assertions: dict = None, wait_s: float = 6.0):
-        """导航到 URL 并（可选）断言。唯一的导航入口。"""
+                            assertions: dict = None, wait_s: float = 6.0,
+                            fail_on_http_error: bool = False,
+                            min_text_chars: int = None):
+        """导航到 URL 并（可选）断言。唯一的导航入口。
+
+        - HTTP≥400 会带上 `http_status`/`warning`；`fail_on_http_error=True` 时直接判失败。
+        - `min_text_chars` 给定且正文更短 → 判失败（`empty_page`），避免"空壳仍 ok"。
+        """
         from ..runtime import get_runtime
         rt = get_runtime()
         if not url:
@@ -31,11 +37,37 @@ def register_page_tools(mcp):
                                url_before=url_before, url_after=handle.page.url,
                                checkpoint=assertions or None)
         out = {"status": "ok", **ids(handle), **res}
+        code = res.get("status_code")
+        if isinstance(code, int) and code >= 400:
+            out["http_error"] = True
+            out["http_status"] = code
+            out["warning"] = f"http_{code}"
+            if fail_on_http_error:
+                out["status"] = "error"
+                out["reason"] = "http_error"
+        try:
+            tl = await handle.actor.submit(
+                "content_len",
+                lambda: handle.page.evaluate(
+                    "() => document.body ? document.body.innerText.length : 0"))
+        except Exception:
+            tl = None
+        if isinstance(tl, int):
+            out["text_len"] = tl
+            if min_text_chars is not None and tl < min_text_chars:
+                out["status"] = "fail"
+                out["reason"] = "empty_page"
+            elif min_text_chars is None and tl < 20:
+                prev = out.get("warning")
+                out["warning"] = f"{prev} page_looks_empty".strip() if prev \
+                    else "page_looks_empty"
         if assertions:
             ev = await be.evaluate_checks(handle.page, assertions,
                                           before_sig=before, wait_s=wait_s)
             out["status"] = ev["status"]
             out["assertions"] = ev["assertions"]
+            if ev.get("diff") is not None:
+                out["diff"] = ev["diff"]
         return out
 
     @mcp.tool()
@@ -48,7 +80,9 @@ def register_page_tools(mcp):
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
         res = await handle.actor.submit(
-            "snapshot", lambda: be.snapshot(handle.page, level=level, limit=limit))
+            "snapshot", lambda: be.retry_on_nav_race(
+                handle.page, lambda: be.snapshot(handle.page, level=level,
+                                                 limit=limit)))
         return {"status": "ok", **ids(handle), **res}
 
     @mcp.tool()
@@ -62,7 +96,9 @@ def register_page_tools(mcp):
         be = backend()
         res = await handle.actor.submit(
             "page_text",
-            lambda: be.text(handle.page, selector=selector, mode=mode))
+            lambda: be.retry_on_nav_race(
+                handle.page,
+                lambda: be.text(handle.page, selector=selector, mode=mode)))
         if mode != "links" and isinstance(res.get("text"), str) \
                 and len(res["text"]) > max_chars:
             res["text"] = res["text"][:max_chars]
@@ -105,8 +141,10 @@ def register_page_tools(mcp):
                 return {"status": "no_match", **ids(handle),
                         "selector": selector,
                         "hint": "selector 未在 5s 内出现"}
-        res = await handle.actor.submit("page_read",
-                                        lambda: be.read(handle.page, features))
+        res = await handle.actor.submit(
+            "page_read",
+            lambda: be.retry_on_nav_race(
+                handle.page, lambda: be.read(handle.page, features)))
         out = {"status": "ok", **ids(handle), "features": res["features"]}
         if res["errors"]:
             out["errors"] = res["errors"]
@@ -132,9 +170,45 @@ def register_page_tools(mcp):
         be = backend()
         res = await handle.actor.submit(
             "page_explore",
-            lambda: be.explore(handle.page, tag=tag, text_contains=text_contains,
-                               head=head, tail=tail, include_all=include_all,
-                               include_hidden=include_hidden))
+            lambda: be.retry_on_nav_race(
+                handle.page,
+                lambda: be.explore(handle.page, tag=tag,
+                                   text_contains=text_contains, head=head,
+                                   tail=tail, include_all=include_all,
+                                   include_hidden=include_hidden)))
+        return {"status": "ok", **ids(handle), **res}
+
+    @mcp.tool()
+    @guard
+    async def page_find_text(page_id: str = None, text: str = None,
+                             limit: int = 10, include_hidden: bool = False):
+        """按文本定位到"最近的可点元素"并给稳定锚点（用于点"最新排序"这类文本控件）。"""
+        from ..runtime import get_runtime
+        rt = get_runtime()
+        if not text:
+            raise GavelError("bad_args", "需要 text")
+        handle = rt.page_mgr.resolve(page_id)
+        be = backend()
+        res = await handle.actor.submit(
+            "page_find_text",
+            lambda: be.retry_on_nav_race(
+                handle.page,
+                lambda: be.find_text(handle.page, text, limit=limit,
+                                     include_hidden=include_hidden)))
+        return {"status": "ok", **ids(handle), **res}
+
+    @mcp.tool()
+    @guard
+    async def page_meta(page_id: str = None):
+        """结构化页面元信息：url/title/描述/canonical/og/h1/h2/计数/正文长度。"""
+        from ..runtime import get_runtime
+        rt = get_runtime()
+        handle = rt.page_mgr.resolve(page_id)
+        be = backend()
+        res = await handle.actor.submit(
+            "page_meta",
+            lambda: be.retry_on_nav_race(handle.page,
+                                         lambda: be.page_meta(handle.page)))
         return {"status": "ok", **ids(handle), **res}
 
     @mcp.tool()

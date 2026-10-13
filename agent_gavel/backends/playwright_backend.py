@@ -68,6 +68,37 @@ class PlaywrightBackend:
     def __init__(self, runtime=None):
         self.runtime = runtime
 
+    # ---- 导航竞态：识别 + 只读操作自动重试一次 ----
+    _NAV_RACE = ("Execution context was destroyed",
+                 "Cannot find context",
+                 "Target page, context or browser has been closed",
+                 "navigating and changing the document",
+                 "frame was detached",
+                 "context was destroyed")
+
+    @classmethod
+    def _is_nav_race(cls, e):
+        s = str(e)
+        return any(k in s for k in cls._NAV_RACE)
+
+    async def retry_on_nav_race(self, page, fn, retries=1):
+        """只读操作遇导航竞态时，等页面稳定后自动重试一次；仍失败则报可重试错误。"""
+        try:
+            return await fn()
+        except Exception as e:  # noqa: BLE001
+            if not self._is_nav_race(e):
+                raise
+            if retries <= 0:
+                raise GavelError("nav_race", f"页面导航竞态：{e}",
+                                 retryable=True,
+                                 hint="页面正在导航，稍后重试读取") from e
+            try:
+                await page.wait_for_load_state("domcontentloaded",
+                                               timeout=5000)
+            except Exception:
+                await _sleep(0.3)
+            return await self.retry_on_nav_race(page, fn, retries - 1)
+
     # ================= 导航 / 等待 =================
     async def goto(self, handle, url, *, wait_until="domcontentloaded",
                    timeout_s=30.0):
@@ -116,6 +147,15 @@ class PlaywrightBackend:
         await handle.page.wait_for_selector(selector, state=state,
                                             timeout=timeout_s * 1000)
         return {"page_id": handle.page_id, "selector": selector, "state": state}
+
+    async def wait_for_text(self, handle, text, *, state="visible",
+                            timeout_s=30.0, selector=None):
+        """等某段文本出现（浏览器侧等待，满足即返回）。selector 给了就在其内部等。"""
+        root = handle.page.locator(selector) if selector else handle.page
+        await root.get_by_text(text, exact=False).first.wait_for(
+            state=state, timeout=timeout_s * 1000)
+        return {"page_id": handle.page_id, "text": text, "state": state,
+                "url": handle.page.url}
 
     async def wait_for_response(self, handle, *, url=None, status=None,
                                 timeout_s=30.0):
@@ -358,7 +398,13 @@ class PlaywrightBackend:
             "links:document.querySelectorAll('a[href]').length,"
             "forms:document.querySelectorAll('form').length}})")
         result = {"source": "dom", "untrusted": True, **info}
-        if level in ("interactive", "full"):
+        if level == "compact":
+            items = await self.explore(page)
+            result["elements"] = [
+                {"tag": e.get("tag"), "text": (e.get("text") or "")[:60],
+                 "anchor": e.get("anchor")}
+                for e in items["items"][:limit]]
+        elif level in ("interactive", "full"):
             items = await self.explore(page, include_all=True)
             result["elements"] = items["items"][:limit]
         if level == "full":
@@ -419,6 +465,78 @@ class PlaywrightBackend:
         if tail:
             items = items[-tail:]
         return {"items": items, "total": total}
+
+    _FIND_TEXT_JS = """
+    (arg) => {
+      const t = (arg && arg.text) || '';
+      const clickSel = 'a[href], button, input, select, textarea, [role=button],' +
+        '[role=link],[role=tab],[contenteditable=true]';
+      const seen = new Set(); const out = [];
+      for (const el of document.querySelectorAll('body *')) {
+        if (!t || !el.textContent || el.textContent.indexOf(t) === -1) continue;
+        // 只取"最内层"包含该文本的元素，避免把外层容器也算进来
+        let leaf = true;
+        for (const c of el.children) {
+          if (c.textContent && c.textContent.indexOf(t) !== -1) { leaf = false; break; }
+        }
+        if (!leaf) continue;
+        let hit = el;
+        while (hit && !hit.matches(clickSel)) hit = hit.parentElement;
+        const target = hit || el;
+        if (seen.has(target)) continue;
+        seen.add(target);
+        const r = target.getBoundingClientRect();
+        const s = getComputedStyle(target);
+        out.push({
+          tag: target.tagName.toLowerCase(), id: target.id || null,
+          name: target.getAttribute('name'), type: target.getAttribute('type'),
+          placeholder: target.getAttribute('placeholder'),
+          aria: target.getAttribute('aria-label'), role: target.getAttribute('role'),
+          text: (target.innerText || target.value || '').trim().slice(0, 80),
+          visible: r.width > 0 && r.height > 0 &&
+                   s.visibility !== 'hidden' && s.display !== 'none' });
+        if (out.length >= 40) break;
+      }
+      return out;
+    }
+    """
+
+    async def find_text(self, page, text, *, limit=10, include_hidden=False):
+        """按文本定位：返回包含该文本的"最近可点元素"及其稳定锚点。"""
+        raw = await page.evaluate(self._FIND_TEXT_JS, {"text": text})
+        items = []
+        for el in raw:
+            if not include_hidden and not el.get("visible", True):
+                continue
+            anchor, candidates = await self._anchor_for(page, el, False)
+            el["anchor"] = anchor
+            el["candidates"] = candidates
+            items.append(el)
+            if limit and len(items) >= limit:
+                break
+        return {"items": items, "total": len(items)}
+
+    async def page_meta(self, page):
+        """结构化页面元信息（标题/URL/描述/canonical/标题层级/计数/正文长度）。"""
+        return await page.evaluate(
+            """() => {
+              const meta = (sel, attr) => { const e = document.querySelector(sel);
+                return e ? (e.getAttribute(attr || 'content') || e.innerText || '').trim() : null; };
+              return {
+                url: location.href, title: document.title,
+                lang: document.documentElement.lang || null,
+                description: meta('meta[name=description]'),
+                canonical: (document.querySelector('link[rel=canonical]') || {}).href || null,
+                og_title: meta('meta[property="og:title"]'),
+                h1: Array.from(document.querySelectorAll('h1')).slice(0,3)
+                      .map(e => e.innerText.trim()).filter(Boolean),
+                h2: Array.from(document.querySelectorAll('h2')).slice(0,5)
+                      .map(e => e.innerText.trim()).filter(Boolean),
+                links: document.querySelectorAll('a[href]').length,
+                images: document.querySelectorAll('img').length,
+                forms: document.querySelectorAll('form').length,
+                text_len: (document.body ? document.body.innerText.length : 0) };
+            }""")
 
     async def _anchor_for(self, page, el, include_all):
         candidates = []

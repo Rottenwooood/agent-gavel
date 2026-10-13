@@ -68,6 +68,26 @@ def register_assertion_tools(mcp):
 
     @mcp.tool()
     @guard
+    async def page_wait_for_text(page_id: str = None, text: str = None,
+                                 selector: str = None, state: str = "visible",
+                                 timeout_s: float = 30.0):
+        """等某段文本出现（满足即返回；selector 给了就在其内部等）。
+
+        优于猜结构选择器：直接等"该看到的文案"，加载快则快返回、慢则等到出现。
+        """
+        from ..runtime import get_runtime
+        rt = get_runtime()
+        handle = rt.page_mgr.resolve(page_id)
+        be = backend()
+        res = await handle.actor.submit(
+            "wait_for_text",
+            lambda: be.wait_for_text(handle, text, state=state,
+                                     timeout_s=timeout_s, selector=selector),
+            timeout_s=timeout_s + 5)
+        return {"status": "ok", **ids(handle), **res}
+
+    @mcp.tool()
+    @guard
     async def page_wait_for_load(page_id: str = None, state: str = "load",
                                  timeout_s: float = 30.0):
         """等待页面加载状态（load / domcontentloaded / networkidle）。"""

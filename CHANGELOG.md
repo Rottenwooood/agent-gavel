@@ -15,6 +15,19 @@
 - 启动前若已有同 profile 的 Chrome 且调试口可用则**复用**，避免资料目录单实例冲突与残留窗口。
 - 关闭自起 Chrome 时改用 CDP `Browser.close` 干净退出，确保 localStorage/cookie 落盘。
 
+### 错误语义 / 等待 / 定位 / 元信息（依外部测试反馈）
+
+- `page_navigate`：HTTP≥400 返回 `http_status`/`http_error`/`warning`（`fail_on_http_error=True`
+  可直接判失败）；`min_text_chars` 给定且正文更短 → `empty_page` 失败；正文极短默认给
+  `page_looks_empty` 警告。
+- 导航竞态（"Execution context was destroyed" 等）在只读操作上自动重试一次，仍失败则报
+  可重试的 `nav_race`。
+- 新增 `page_wait_for_text`：等某段文本出现（满足即返回），替代猜结构选择器。
+- `page_snapshot` 增加 `level="compact"`：紧凑的可点元素清单（tag/text/anchor）。
+- 新增 `page_find_text`：按文本定位到"最近可点元素"并给稳定锚点。
+- 新增 `page_meta`：结构化页面元信息（url/title/描述/canonical/og/h1/h2/计数/正文长度）。
+- 启动自愈：复用不了时清理我们自己遗留的僵尸 Chrome（带自动化标志、占着 profile）再起。
+
 ### 反检测
 
 - 启动参数加 `--disable-blink-features=AutomationControlled`：关闭 `navigator.webdriver`
