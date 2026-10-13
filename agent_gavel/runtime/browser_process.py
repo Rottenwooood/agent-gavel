@@ -40,10 +40,24 @@ def _default_channel():
 
 
 def _launch_args():
+    """启动参数：默认尽量少留自动化痕迹。
+
+    - --disable-blink-features=AutomationControlled：关掉 navigator.webdriver
+      （否则页面第一眼就能判"这是自动化"，实测 Playwright 默认 True）。
+    - 不再默认 --disable-gpu：它会把 WebGL 渲染器压成 SwiftShader（软件渲染），
+      在真实用户机器上是异常特征；有 GPU 时让浏览器用真实渲染器。
+      需要软件渲染的无 GPU 环境可用 AGENT_GAVEL_DISABLE_GPU=1 显式加回。
+    - AGENT_GAVEL_EXTRA_ARGS：用户追加自定义参数（空格分隔）。
+    """
+    args = ["--no-first-run", "--disable-blink-features=AutomationControlled"]
     if sys.platform.startswith("linux"):
-        return ["--no-sandbox", "--disable-dev-shm-usage",
-                "--disable-gpu", "--no-first-run"]
-    return ["--no-first-run"]
+        args += ["--no-sandbox", "--disable-dev-shm-usage"]
+    if os.environ.get("AGENT_GAVEL_DISABLE_GPU", "").strip().lower() in _HEADLESS_TRUE:
+        args.append("--disable-gpu")
+    extra = os.environ.get("AGENT_GAVEL_EXTRA_ARGS", "").strip()
+    if extra:
+        args += extra.split()
+    return args
 
 
 class BrowserHandle:
@@ -94,6 +108,17 @@ class BrowserProcessManager:
     @property
     def devices(self):
         return (self._pw.devices if self._pw is not None else {})
+
+    async def _headless_default_ua(self, browser):
+        """无头模式取一次真实 UA，并把 'HeadlessChrome' 去掉，作为默认 context UA。"""
+        try:
+            ctx = await browser.new_context()
+            page = await ctx.new_page()
+            ua = await page.evaluate("navigator.userAgent")
+            await ctx.close()
+            return ua.replace("HeadlessChrome", "Chrome")
+        except Exception:
+            return None
 
     def _next_id(self):
         self._n += 1
@@ -153,6 +178,10 @@ class BrowserProcessManager:
             browser = await self._launch_with_fallback(pw, kw)
             opts = dict(opts)
             opts["headless"] = headless
+            if headless:
+                ua = await self._headless_default_ua(browser)
+                if ua:
+                    opts["default_user_agent"] = ua
             handle = BrowserHandle(self._next_id(), browser=browser,
                                    mode="shared", opts=opts)
             self._handles[handle.process_id] = handle

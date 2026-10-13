@@ -60,6 +60,12 @@ class ContextManager:
                      storage_state=None):
         cid = context_id or self.runtime.next_id("ctx")
         kw = self._new_context_kwargs(config)
+        # 无头默认 UA 去掉 HeadlessChrome（由浏览器进程管理器提供）
+        if "user_agent" not in kw:
+            ua = (getattr(session.handle, "opts", None) or {}).get(
+                "default_user_agent")
+            if ua:
+                kw["user_agent"] = ua
         if storage_state is not None:
             kw["storage_state"] = storage_state
         bc = await session.handle.browser.new_context(**kw)

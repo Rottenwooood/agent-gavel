@@ -131,6 +131,9 @@ MCP 客户端通过 stdio 拉起 agent-gavel。使用 PyPI 版本时：
 | `AGENT_GAVEL_WORKFLOWS_DIR` | 用户 workflow 模板目录 |
 | `AGENT_GAVEL_MAX_DOWNLOAD_BYTES` | 单个下载大小上限 |
 | `AGENT_GAVEL_ARTIFACT_TTL_DAYS` | artifact 保留天数 |
+| `AGENT_GAVEL_CHROME_CHANNEL` | 指定浏览器通道；空 = 用 Playwright 自带 chromium |
+| `AGENT_GAVEL_EXTRA_ARGS` | 追加浏览器启动参数（空格分隔） |
+| `AGENT_GAVEL_DISABLE_GPU` | `1` 加回 `--disable-gpu`（软件渲染，一般不需要） |
 
 默认用户目录：
 
@@ -286,6 +289,7 @@ uv run python tests/mcp_live_smoke.py
 - Linux、Windows 网页通道已验证；macOS 尚未作为发布目标验证。
 - 系统 Chrome 优先；也可以安装 Playwright Chromium。
 - 不提供验证码识别、反爬绕过或强风控站点自动化。
+- 启动阶段已做基础反检测加固（关闭 `navigator.webdriver`、无头 UA 去 `HeadlessChrome`、有头用真实 GPU），但全新 profile、无头 WebGL、CDP 附着等仍是残留特征；对风控敏感的站点建议**有头**并复用持久 profile。调研与前后对比见 [docs/detection.md](docs/detection.md)。
 - Canvas、WebGL、地图和网页小游戏需要视觉/坐标后端，目前不在语义 DOM 的承诺范围内。
 - workflow 的暂停、恢复和取消主要在步骤边界生效。
 - 当前版本仍是开发预览版，涉及发送、删除、支付、下单或覆盖数据的流程必须先在测试环境验证。

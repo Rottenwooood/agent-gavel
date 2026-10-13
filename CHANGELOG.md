@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### 反检测
+
+- 启动参数加 `--disable-blink-features=AutomationControlled`：关闭 `navigator.webdriver`
+  （实测 Playwright 默认 True，页面第一眼即可判自动化）。
+- 不再默认 `--disable-gpu`：有头时使用真实 GPU 渲染（WebGL 从 `SwiftShader` 恢复为真实显卡）；
+  无 GPU 环境用 `AGENT_GAVEL_DISABLE_GPU=1` 显式加回。
+- 无头模式默认 UA 去掉 `HeadlessChrome`。
+- 新增 `AGENT_GAVEL_EXTRA_ARGS`（追加启动参数）、`AGENT_GAVEL_CHROME_CHANNEL`。
+- 新增回归测试 `tests/test_stealth.py`；调研与对比见 `docs/detection.md`。
+
 ## 0.3.0 — Playwright runtime 重建
 
 ### 新增（新 runtime，替换旧的裸 CDP 网页通道）
