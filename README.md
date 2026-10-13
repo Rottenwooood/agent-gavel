@@ -181,6 +181,8 @@ browser_launch(browser_mode="attach", cdp_endpoint="http://127.0.0.1:9222")
 **生命周期**：启动前会对账——复用已有同资料目录的 Chrome（含 MCP 重启后靠状态文件 re-attach），或清理我们自己遗留的进程并删除单例锁后干净启动；`browser_launch` 幂等；`browser_status.os_browsers` 报告 OS 里真实在用我们资料目录的 Chrome。
 
 > 复制资料副本会把**真实 cookie/登录态**落到本地副本目录；不需要登录身份时用 `strict` 档。对风控敏感的站点建议**有头** + 复用持久资料。
+>
+> **隐私约定**：`browser_profile_copy`、`browser_mode="attach"`、`context_cookies_get`、`session_export_state`/`import_state` 等涉及真实 cookie/登录态或写入本地文件的工具，在 MCP 描述里都标了 **⚠ 隐私敏感**；**agent 调用前应先向用户说明并取得同意**。
 
 ## 最小使用流程
 

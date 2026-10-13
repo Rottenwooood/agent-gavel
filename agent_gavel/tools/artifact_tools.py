@@ -43,6 +43,8 @@ def register_artifact_tools(mcp):
 
         path_visibility=hidden（默认）不回传绝对路径；user_visible 才含
         exported_to（供明确需要路径的调用方）。
+
+        ⚠ 会写入本地文件；导出前确认目标目录（受 AGENT_GAVEL_ALLOW_PATHS 约束）。
         """
         from ..runtime import get_runtime
         rt = get_runtime()

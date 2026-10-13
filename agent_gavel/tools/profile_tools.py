@@ -20,6 +20,12 @@ def register_profile_tools(mcp):
                                    force: bool = False):
         """从用户 Chrome 资料目录复制一份新副本。
 
+        ⚠ **隐私敏感：调用前必须先向用户说明并取得明确同意。** 该操作会把用户真实
+        Chrome 的 cookie/登录态（tier=default/full）复制到本地副本目录
+        `~/.config/agent-gavel/browser-profiles/`，之后浏览器会以该身份行动。
+        向用户说明：复制哪些内容、放在哪里、隐私影响；得到同意再执行。不需要登录身份时
+        用 tier="strict"（不含 cookie/站点态）。
+
         tier:
           strict  = 不含 cookie 与站点本地态（隐私最好，拿不到已登录/回头客）
           default = 含 cookie/站点态/历史（推荐，反识别优先）
@@ -36,14 +42,17 @@ def register_profile_tools(mcp):
     @mcp.tool()
     @guard
     async def browser_profile_list():
-        """列出所有资料副本 + 哪个是当前使用的。"""
+        """列出所有资料副本 + 哪个是当前使用的（只读，不涉及隐私外传）。"""
         return {"status": "ok", "active": profiles.active_name(),
                 "items": profiles.list_profiles()}
 
     @mcp.tool()
     @guard
     async def browser_profile_use(name: str):
-        """切换当前使用的资料副本（下次 C1 启动浏览器时生效）。"""
+        """切换当前使用的资料副本（下次 C1 启动浏览器时生效）。
+
+        ⚠ 切换副本 = 切换浏览器身份/登录态（含隐私），切换前向用户确认。
+        """
         items = {p["name"] for p in profiles.list_profiles()}
         if name not in items:
             return {"status": "error", "reason": "profile_not_found",
@@ -54,5 +63,8 @@ def register_profile_tools(mcp):
     @mcp.tool()
     @guard
     async def browser_profile_delete(name: str):
-        """删除一个资料副本（不影响用户原目录）。"""
+        """删除一个资料副本（不影响用户原目录）。
+
+        ⚠ 删除会移除该副本内的 cookie/登录态；非用户明确要求时，删除前先确认。
+        """
         return await asyncio.to_thread(profiles.delete_profile, name)

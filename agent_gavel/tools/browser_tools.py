@@ -97,6 +97,9 @@ def register_browser_tools(mcp):
         `browser_mode="attach"` + `cdp_endpoint` 则**接管**一个已存在的浏览器（C2，见警告）；
         `browser_mode="playwright"` 回到 Playwright 直接启动。
         headless 省略时按 AGENT_GAVEL_HEADLESS 决定（默认有头）。
+
+        ⚠ 隐私敏感：`browser_mode="attach"`（C2）会操作**用户真实账号环境**，并把控制权
+        暴露在本机调试口。使用前必须先向用户说明并取得同意。
         """
         rt = rt_get()
         explicit = any(x is not None for x in
@@ -157,6 +160,11 @@ def register_browser_tools(mcp):
         ephemeral：共享默认浏览器上建容器。persistent：独立进程 + 持久资料目录。
         clone：从 storage_state 起（默认用 isolated 容器，适合多账号）。
         browser_mode="attach" + cdp_endpoint：接管一个已存在浏览器（C2，见返回 warning）。
+
+        ⚠ 隐私敏感：`browser_mode="attach"` 会操作用户真实账号环境；`user_data_dir` 若指向
+        用户日常资料目录、或 `container="default"`/`persistent` 会读写其真实登录态。
+        这些用法的调用前必须先向用户说明并取得同意；不需要登录态时用 `container="isolated"`
+        并避免指向用户资料目录。
         """
         rt = rt_get()
         config = dict(headless=headless, proxy=proxy, channel=channel,
@@ -215,6 +223,9 @@ def register_browser_tools(mcp):
         """导出 storage state（cookie/localStorage）。
 
         给了 path 则写文件（受文件白名单约束）；否则直接返回 state。
+
+        ⚠ 隐私敏感：storage state 含登录态。写文件前确认目标路径，只交给可信位置；
+        不要提交到仓库、模板或外传。
         """
         rt = rt_get()
         session = rt.session_mgr.get(session_id)
@@ -233,7 +244,10 @@ def register_browser_tools(mcp):
     @mcp.tool()
     @_guard
     async def session_import_state(path: str, mode: str = "clone"):
-        """从 storage_state 文件创建新 session（默认 clone 模式）。"""
+        """从 storage_state 文件创建新 session（默认 clone 模式）。
+
+        ⚠ 隐私敏感：storage state 含登录态；确认来源可信、属于当前用户。
+        """
         rt = rt_get()
         rt.policies.check_local_path(path, purpose="导入 storage state")
         session = await rt.session_mgr.create(mode=mode, storage_state=path)
@@ -276,7 +290,10 @@ def register_browser_tools(mcp):
     @mcp.tool()
     @_guard
     async def context_cookies_get(context_id: str, url: str = None):
-        """读取 context 的 cookie（可选按 url 过滤）。"""
+        """读取 context 的 cookie（可选按 url 过滤）。
+
+        ⚠ 隐私敏感：cookie 含登录态。仅在用户授权下读取，不要写入日志/外传。
+        """
         rt = rt_get()
         ctx = rt.context_mgr.get(context_id)
         cookies = await ctx.browser_context.cookies(url) if url \
