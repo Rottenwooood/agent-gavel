@@ -929,27 +929,36 @@ class PlaywrightBackend:
             item.setdefault("op", "eq")
         return item
 
+    _CHECK_FIELDS = ("read", "selector", "expr", "value", "expected")
+
+    @classmethod
+    def _norm_single(cls, d):
+        """单条 check 的字段形态：归一 expected→value。"""
+        item = dict(d)
+        if "value" not in item and "expected" in item:
+            item["value"] = item.pop("expected")
+        item.pop("expected", None)
+        return item
+
     @classmethod
     def _normalize_checks(cls, checks):
         if checks is None:
             return []
         if isinstance(checks, dict):
-            # 顶层 op 绑定到唯一目标键：{ title:"百度", op:"contains" }
-            if "op" in checks and "read" not in checks:
-                keys = [k for k in checks if k in cls._READ_PREFIX
-                        or k in ("selector", "expr", "attr")]
-                if len(keys) == 1 and isinstance(checks.get("op"), str):
+            # 单条 check：含 read/selector/expr/value 等字段 → 直接当成一条
+            if any(k in checks for k in cls._CHECK_FIELDS):
+                return [cls._norm_single(checks)]
+            # 顶层 op + 单个目标键：{ title:"百度", op:"contains" }（无 read/selector/value 字段）
+            if "op" in checks and isinstance(checks.get("op"), str):
+                keys = [k for k in checks if k in cls._READ_PREFIX]
+                if len(keys) == 1:
                     k = keys[0]
-                    item = {"name": k, "read": cls._READ_PREFIX.get(k, "text"),
-                            "op": checks["op"], "value": checks[k]}
-                    for extra in ("selector", "frame"):
-                        if checks.get(extra) is not None:
-                            item[extra] = checks[extra]
-                    return [item]
+                    return [{"name": k, "read": cls._READ_PREFIX[k],
+                             "op": checks["op"], "value": checks[k]}]
+                return [cls._norm_single(checks)]
+            # 映射 {名字: spec}
             out = []
             for name, spec in checks.items():
-                if name == "op" and isinstance(spec, str):
-                    continue  # 顶层 op（未成功绑定），跳过，别当成一条 check
                 out.append(cls._norm_one(name, spec))
             return out
         return list(checks)

@@ -102,6 +102,10 @@ def register_assertion_tools(mcp):
             lambda: be.wait_for_selector(handle, selector, state=state,
                                          timeout_s=timeout_s),
             timeout_s=timeout_s + 5)
+        if rt.recorder is not None and rt.recorder.active:
+            rt.recorder.record(handle, {"type": "wait_for_selector",
+                                        "selector": selector, "state": state,
+                                        "timeout_s": timeout_s})
         return {"status": "ok", **ids(handle), **res}
 
     @mcp.tool()
@@ -122,6 +126,11 @@ def register_assertion_tools(mcp):
             lambda: be.wait_for_text(handle, text, state=state,
                                      timeout_s=timeout_s, selector=selector),
             timeout_s=timeout_s + 5)
+        if rt.recorder is not None and rt.recorder.active:
+            step = {"type": "wait_for_text", "text": text, "timeout_s": timeout_s}
+            if selector:
+                step["selector"] = selector
+            rt.recorder.record(handle, step)
         return {"status": "ok", **ids(handle), **res}
 
     @mcp.tool()

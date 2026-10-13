@@ -134,20 +134,40 @@ def save(template):
 
 
 def get(name_or_id):
-    """按 template_id 或 site 加载（用户层优先）。返回 (template, path)。"""
+    """按 template_id 或 site 加载（用户层优先）。返回 (template, path)。
+
+    找不到时做一次**自动补全**：template_id 等于/后缀匹配/包含该名字（唯一时）。
+    """
     ensure_dirs()
     if _is_safe_id(name_or_id):
         for d in _dirs():
             p = _path_for(name_or_id, d)
             if os.path.isfile(p):
                 return _read(p), p
-    # 按 site 匹配（name_or_id 不合法时也走到这里，不拼路径）
+    # 按 site 匹配
     for d in _dirs():
         for f in sorted(os.listdir(d)):
             if f.endswith(".json") and f != "stats.json":
                 t = _read(os.path.join(d, f))
                 if t.get("site") == name_or_id:
                     return t, os.path.join(d, f)
+    # 自动补全：template_id 等于/后缀/包含该名字（唯一时）
+    seen = {}
+    for d in _dirs():
+        for f in sorted(os.listdir(d)):
+            if not f.endswith(".json") or f == "stats.json":
+                continue
+            t = _read(os.path.join(d, f))
+            tid = t.get("template_id") or f[:-5]
+            if tid == name_or_id or tid.endswith("_" + str(name_or_id)) \
+                    or str(name_or_id) in tid:
+                seen.setdefault(tid, (t, os.path.join(d, f)))
+    if len(seen) == 1:
+        return next(iter(seen.values()))
+    if len(seen) > 1:
+        raise GavelError("workflow_ambiguous",
+                         f"{name_or_id} 匹配多个模板：{sorted(seen)}",
+                         hint="用完整 template_id")
     raise GavelError("workflow_not_found", f"未知 workflow：{name_or_id}",
                      hint="用 workflow_list 查看")
 
@@ -194,6 +214,28 @@ def publish(template_id, out_dir=None):
         _write(dest, t)
         return {"template_id": tid, "path": dest}
     return {"template_id": tid, "template": t}
+
+
+def delete(template_id):
+    """删除用户层模板（包内层只读，拒绝）。返回 info。"""
+    path = None
+    if _is_safe_id(template_id):
+        for d in _dirs():
+            cand = _path_for(template_id, d)
+            if os.path.isfile(cand):
+                path = cand
+                break
+    if path is None:
+        try:
+            _t, path = get(template_id)
+        except GavelError:
+            path = None
+    if path is None or path.startswith(PKG_DIR):
+        raise GavelError("workflow_not_found",
+                         f"没有可删除的用户层模板：{template_id}",
+                         hint="包内模板不可删；用 workflow_list 查看用户层模板")
+    os.remove(path)
+    return {"template_id": template_id, "deleted": True}
 
 
 def record_run(template_id, status):

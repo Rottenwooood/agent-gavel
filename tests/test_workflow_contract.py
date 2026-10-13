@@ -154,6 +154,54 @@ def test_template_metadata_fields():
     assert e3
 
 
+# ---------------- 断言归一（单条字典/顶层op/扁平/expected） ----------------
+
+def test_normalize_checks_forms():
+    from agent_gavel.backends.playwright_backend import PlaywrightBackend as B
+    # 单条 check 字段形态：不能被"顶层 op"逻辑误绑
+    n = B._normalize_checks({"read": "text", "selector": "#h", "op": "eq",
+                             "value": "READY"})
+    assert n == [{"read": "text", "selector": "#h", "op": "eq", "value": "READY"}], n
+    # 顶层 op + 目标键
+    n2 = B._normalize_checks({"title": "百度", "op": "contains"})
+    assert n2[0]["name"] == "title" and n2[0]["read"] == "title" \
+        and n2[0]["value"] == "百度" and n2[0]["op"] == "contains", n2
+    # 扁平写法
+    n3 = B._normalize_checks({"url_contains": "x"})
+    assert n3[0]["read"] == "url" and n3[0]["op"] == "contains" \
+        and n3[0]["value"] == "x", n3
+    # expected 别名
+    n4 = B._normalize_checks({"title": {"op": "contains", "expected": "百度"}})
+    assert n4[0]["value"] == "百度" and n4[0]["name"] == "title", n4
+
+
+def test_wait_for_text_action_schema():
+    tmpl = {"template_id": "ts_wft", "site": "ts", "desc": "",
+            "steps": [{"id": "w", "action": {"type": "wait_for_text",
+                                             "text": "READY"}}]}
+    norm, errs, _ = S.validate(tmpl)
+    assert not errs and norm["steps"][0]["action"]["type"] == "wait_for_text"
+    _n, e, _ = S.validate({"template_id": "ts_wft2", "site": "ts", "desc": "",
+                           "steps": [{"id": "w",
+                                      "action": {"type": "wait_for_text"}}]})
+    assert e  # 缺 text 报错
+
+
+def test_template_delete_and_name_completion():
+    from agent_gavel.runtime.errors import GavelError
+    norm, errs, _ = S.validate({
+        "template_id": "taobao_search_probe", "site": "taobao", "desc": "",
+        "steps": [{"id": "a", "action": {"type": "navigate",
+                                         "url": "https://e.com"}}]})
+    assert not errs
+    loader.save(norm)
+    got, _p = loader.get("search_probe")          # 无前缀名自动补全
+    assert got["template_id"] == "taobao_search_probe"
+    loader.delete("taobao_search_probe")
+    with pytest.raises(GavelError):
+        loader.get("taobao_search_probe")
+
+
 # ---------------- #7 幂等性按动作类型判定 ----------------
 
 def test_idempotency_defaults_by_action_type():

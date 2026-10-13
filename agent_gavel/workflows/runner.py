@@ -37,7 +37,7 @@ class Runner:
 
     async def run(self, template, params, *, session_id=None,
                   verbosity="summary", run_id=None, confirm=False,
-                  wait_s=6.0):
+                  wait_s=6.0, page_id=None):
         rt = self.runtime
         be = self.backend
         run_id = run_id or rt.next_id("run")
@@ -48,7 +48,7 @@ class Runner:
         state = RunState(run_id, template.get("template_id"))
         rt.runs[run_id] = state
         try:
-            page = await self._resolve_page(session)
+            page = await self._resolve_page(session, page_id)
             # preconditions：不满足立即阻断，绝不在错误页面上执行步骤
             ok, pc_detail = await _schema.check_preconditions(template, page.page)
             if not ok:
@@ -105,8 +105,10 @@ class Runner:
         raise GavelError("session_ambiguous", "有多个 session，请指定 session_id",
                          detail={"sessions": list(rt.sessions)})
 
-    async def _resolve_page(self, session):
+    async def _resolve_page(self, session, page_id=None):
         rt = self.runtime
+        if page_id:
+            return rt.page_mgr.get(page_id)
         if not session.context_ids:
             ctx = await rt.context_mgr.create(session, {})
         else:
@@ -274,6 +276,12 @@ class Runner:
             return await page.actor.submit(
                 "wait_for_url", lambda: be.wait_for_url(
                     page, act["url"], timeout_s=act.get("timeout_s", 30)))
+        if atype == "wait_for_text":
+            return await page.actor.submit(
+                "wait_for_text",
+                lambda: be.wait_for_text(page, act["text"],
+                                         timeout_s=act.get("timeout_s", 30),
+                                         selector=act.get("selector")))
         if atype == "expect":
             ev = await be.evaluate_checks(page.page, act.get("checks") or act,
                                           wait_s=act.get("wait_s", 6.0))

@@ -16,7 +16,8 @@ TEMPLATE_STATUSES = {"draft", "verified", "broken", "deprecated"}
 ACTION_TYPES = {
     "navigate", "click", "fill", "type", "press", "check", "uncheck", "select",
     "hover", "focus", "clear", "scroll", "upload", "drag",
-    "wait_for_selector", "wait_for_url", "expect", "screenshot", "pdf",
+    "wait_for_selector", "wait_for_url", "wait_for_text", "expect",
+    "screenshot", "pdf",
 }
 _TARGET_ACTIONS = {"click", "fill", "type", "press", "check", "uncheck",
                    "select", "hover", "focus", "clear", "scroll", "upload",
@@ -173,6 +174,10 @@ def validate(template):
             errors.append(f"steps[{i}] action={atype} 缺少 target")
         if atype == "navigate" and not act.get("url"):
             errors.append(f"steps[{i}] navigate 缺少 url")
+        if atype == "wait_for_text" and not act.get("text"):
+            errors.append(f"steps[{i}] wait_for_text 缺少 text")
+        if atype == "wait_for_selector" and not act.get("selector"):
+            errors.append(f"steps[{i}] wait_for_selector 缺少 selector")
         if atype in ("fill", "type") and "value" not in act:
             errors.append(f"steps[{i}] {atype} 缺少 value")
         step = {

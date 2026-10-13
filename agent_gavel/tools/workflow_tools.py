@@ -4,6 +4,13 @@ from ..runtime.errors import GavelError
 from .common import backend, guard
 
 
+def _build_tid(site_slug, name_slug):
+    """拼 template_id；若 name 已含 site 前缀则不重复拼。"""
+    if site_slug and name_slug.startswith(site_slug):
+        return name_slug
+    return "_".join(x for x in (site_slug, name_slug) if x) or "recorded_workflow"
+
+
 def _runner():
     from ..runtime import get_runtime
     from ..workflows.runner import Runner
@@ -37,6 +44,13 @@ def register_workflow_tools(mcp):
                     "errors": errors, "warnings": warnings}
         info = loader.save(norm)
         return {"status": "ok", **info, "warnings": warnings}
+
+    @mcp.tool()
+    @guard
+    async def workflow_delete(template_id: str):
+        """删除一个用户层模板（包内模板不可删）。"""
+        from ..workflows import loader
+        return {"status": "ok", **loader.delete(template_id)}
 
     @mcp.tool()
     @guard
@@ -112,10 +126,8 @@ def register_workflow_tools(mcp):
         rec = rt.recorder.stop()
         if rec is None:
             raise GavelError("not_recording", "当前没有在录制")
-        tid = template_id or "_".join(
-            x for x in (loader.slugify(site) if site else None,
-                        loader.slugify(name) if name else None) if x) \
-            or "recorded_workflow"
+        tid = template_id or _build_tid(loader.slugify(site) if site else "",
+                                        loader.slugify(name) if name else "")
         draft, errors, warnings = compiler.compile(
             rec.steps, template_id=tid, site=site or "", desc=desc,
             parameterize=parameterize, sensitive=sensitive)
@@ -132,18 +144,19 @@ def register_workflow_tools(mcp):
     async def workflow_run(name_or_id: str, params: dict = None,
                            session_id: str = None, verbosity: str = "summary",
                            run_id: str = None, confirm: bool = False,
-                           wait_s: float = 6.0):
+                           wait_s: float = 6.0, page_id: str = None):
         """一次调用重放模板。
 
         verbosity: summary（默认，只回检查点摘要）| steps（每步）| full（含证据）。
         失败步自动升级为 full。requires_confirmation 步需 confirm=True 才执行。
+        page_id：显式指定在哪个 page 上执行（省略则用 session 的 active page）。
         """
         from ..workflows import loader
         rt, runner = _runner()
         template, path = loader.get(name_or_id)
         result = await runner.run(
             template, params or {}, session_id=session_id, verbosity=verbosity,
-            run_id=run_id, confirm=confirm, wait_s=wait_s)
+            run_id=run_id, confirm=confirm, wait_s=wait_s, page_id=page_id)
         # 局部修复成功 → 发布新版本
         repaired = [s for s in result.get("steps", []) if s.get("repaired")]
         if repaired and not path.startswith(loader.PKG_DIR):
@@ -159,11 +172,12 @@ def register_workflow_tools(mcp):
     @guard
     async def workflow_replay(name_or_id: str, params: dict = None,
                               session_id: str = None, run_id: str = None,
-                              confirm: bool = False):
+                              confirm: bool = False, page_id: str = None):
         """同 workflow_run（summary 粒度）——语义化别名。"""
         return await workflow_run(name_or_id=name_or_id, params=params,
                                   session_id=session_id, verbosity="summary",
-                                  run_id=run_id, confirm=confirm)
+                                  run_id=run_id, confirm=confirm,
+                                  page_id=page_id)
 
     @mcp.tool()
     @guard

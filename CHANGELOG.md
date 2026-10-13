@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Workflow 修复与增强（依测试反馈）
+
+- **修 checkpoint 归一 bug（关键）**：单条 check 字段形态 `{read,selector,op,value}` 曾被
+  "顶层 op"逻辑误绑（`value` 取成了 `selector`），导致录制下来的异步断言（如"成功加入购物车"）
+  必假失败。现在单条字段形态 / 顶层 op `{title:'百度',op:'contains'}` / 扁平 `{url_contains:'x'}`
+  / `expected` 别名 各自正确。
+- 新增 action 类型 `wait_for_text`：模板可表达"等待异步文案出现"；`page_wait_for_text` /
+  `page_wait_for_selector` 会被录制器落成步骤。
+- 新增 `workflow_delete`；`workflow_get`/`workflow_run` 支持**不带 site 前缀的名字**自动补全；
+  录制生成 template_id 时若 name 已含 site 前缀则不重复拼（不再 `taobao_taobao_...`）。
+- `workflow_run`/`workflow_replay` 支持显式 `page_id`。
+
 ## 0.3.1 — 2026-10-13
 
 ### 浏览器启动与资料副本
