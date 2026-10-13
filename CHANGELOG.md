@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.2 — 2026-10-14
 
 ### Workflow 修复与增强（依测试反馈）
 
