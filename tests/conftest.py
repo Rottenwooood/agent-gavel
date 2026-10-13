@@ -18,6 +18,13 @@ os.environ.setdefault("AGENT_GAVEL_HEADLESS", "1")
 os.environ["AGENT_GAVEL_WORKFLOWS_DIR"] = tempfile.mkdtemp(
     prefix="agent-gavel-test-workflows-")
 
+# 测试用独立的浏览器持久 profile，避免污染用户 ~/.config/agent-gavel/browser-profile
+os.environ.setdefault("AGENT_GAVEL_BROWSER_PROFILE",
+                      tempfile.mkdtemp(prefix="agent-gavel-test-profile-"))
+# 资料副本目录也隔离到临时目录
+os.environ.setdefault("AGENT_GAVEL_BROWSER_PROFILES",
+                      tempfile.mkdtemp(prefix="agent-gavel-test-profiles-"))
+
 from agent_gavel.runtime import reset_runtime, shutdown_runtime  # noqa: E402
 from webapp_server import start_server  # noqa: E402
 

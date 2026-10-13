@@ -71,7 +71,8 @@ class Session:
 class SessionManager:
     """会话创建/关闭。进程分配规则见 docs/tech-plan.md §3.2/§5.4。"""
 
-    _LAUNCH_KEYS = ("headless", "channel", "proxy", "slow_mo", "downloads_path")
+    _LAUNCH_KEYS = ("headless", "channel", "proxy", "slow_mo", "downloads_path",
+                    "browser_mode", "cdp_endpoint")
 
     def __init__(self, runtime):
         self.runtime = runtime
@@ -98,11 +99,13 @@ class SessionManager:
             session = Session(sid, mode, config, handle)
             self.runtime.sessions[sid] = session
             await self.runtime.context_mgr.adopt(
-                session, handle.persistent_context)
+                session, handle.persistent_context, container="default")
         else:
             # 只有显式给了 launch 级参数（proxy/channel/headless）才独占进程，
             # 否则复用共享默认浏览器（headless=None 不应触发独占）。
             needs_dedicated = bool(opts.get("proxy") or opts.get("channel")
+                                   or opts.get("browser_mode")
+                                   or opts.get("cdp_endpoint")
                                    or config.get("headless") is not None)
             if needs_dedicated:
                 handle = await self.runtime.processes.launch(**opts)
@@ -110,6 +113,10 @@ class SessionManager:
                 handle = await self.runtime.ensure_default_browser()
             session = Session(sid, mode, config, handle)
             self.runtime.sessions[sid] = session
+            # clone（多账号）默认用隔离容器；ephemeral 默认用 profile 默认容器
+            if mode == "clone" and not config.get("container"):
+                config = dict(config)
+                config["container"] = "isolated"
             storage_state = config.get("storage_state") if mode == "clone" else None
             await self.runtime.context_mgr.create(session, config,
                                                storage_state=storage_state)
@@ -118,7 +125,8 @@ class SessionManager:
     async def close(self, session_id):
         session = self.get(session_id)
         for cid in list(session.context_ids):
-            await self.runtime.context_mgr.close(cid)
+            await self.runtime.context_mgr.close(cid, session_id=session_id)
+        session.context_ids.clear()
         handle = session.handle
         # 独占进程的 session 才关浏览器；共享默认浏览器的留到 shutdown
         if handle is not None and self.runtime.default_handle is not handle:

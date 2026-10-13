@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### 浏览器启动与资料副本
+
+- 新增**资料副本工具** `browser_profile_copy / list / use / delete`：从用户 Chrome 资料目录
+  复制一份可累计的副本（档位 `strict|default|full`），默认剔除密码/自动填充/同步/设备标识/
+  缓存，保留 cookie/历史/站点态；首个副本自动成为当前，可在多份副本间切换。
+- **容器策略**：`session_create` 默认走 **profile 默认容器**（继承 profile 登录/cookie，
+  改动累积回 profile，可迭代）；`container="isolated"` 新建隔离容器（继承 profile 的 cookie，
+  但不写回）。`context_create` 默认 isolated；`clone` 默认 isolated。
+- 浏览器默认 **C1**：自起加固 Chrome（持久真实 profile）+ `connect_over_cdp`；`browser_mode="attach"`
+  + `cdp_endpoint` 可**接管**已存在浏览器（C2，返回 warning）；`playwright` 为旧路径。
+- 启动前若已有同 profile 的 Chrome 且调试口可用则**复用**，避免资料目录单实例冲突与残留窗口。
+- 关闭自起 Chrome 时改用 CDP `Browser.close` 干净退出，确保 localStorage/cookie 落盘。
+
 ### 反检测
 
 - 启动参数加 `--disable-blink-features=AutomationControlled`：关闭 `navigator.webdriver`

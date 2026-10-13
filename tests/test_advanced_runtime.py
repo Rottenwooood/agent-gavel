@@ -13,7 +13,7 @@ from agent_gavel.tools.common import backend
 
 
 async def _open(rt, url=None):
-    session = await rt.session_mgr.create(mode="ephemeral")
+    session = await rt.session_mgr.create(mode="ephemeral", container="isolated")
     ctx = rt.contexts[session.context_ids[0]]
     handle = await rt.page_mgr.open(ctx, url)
     return session, ctx, handle
@@ -21,14 +21,14 @@ async def _open(rt, url=None):
 
 async def test_multi_context_cookie_isolation(runtime, webapp_server):
     session = await runtime.session_mgr.create()
-    c1 = runtime.contexts[session.context_ids[0]]
-    c2 = await runtime.context_mgr.create(session, {})
+    c1 = await runtime.context_mgr.create(session, {"container": "isolated"})
+    c2 = await runtime.context_mgr.create(session, {"container": "isolated"})
     await c1.browser_context.add_cookies(
         [{"name": "k", "value": "v1", "url": webapp_server}])
     ck1 = await c1.browser_context.cookies(webapp_server)
     ck2 = await c2.browser_context.cookies(webapp_server)
     assert any(c["name"] == "k" and c["value"] == "v1" for c in ck1)
-    assert not any(c["name"] == "k" for c in ck2)  # 另一个 context 看不到
+    assert not any(c["name"] == "k" for c in ck2)  # 另一个隔离容器看不到
 
 
 async def test_server_redirect_followed(runtime, webapp_server):
@@ -65,7 +65,8 @@ async def test_navigation_timeout(runtime, webapp_server):
 
 async def test_multi_session_parallel_work(runtime, webapp_server):
     async def work():
-        session = await runtime.session_mgr.create(mode="ephemeral")
+        session = await runtime.session_mgr.create(mode="ephemeral",
+                                                   container="isolated")
         ctx = runtime.contexts[session.context_ids[0]]
         pg = await runtime.page_mgr.open(ctx, f"{webapp_server}/basic.html")
         title = await pg.page.title()

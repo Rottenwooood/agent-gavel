@@ -25,8 +25,8 @@ class FakeMCP:
         return deco
 
 
-async def _open(rt, url=None):
-    session = await rt.session_mgr.create(mode="ephemeral")
+async def _open(rt, url=None, container="isolated"):
+    session = await rt.session_mgr.create(mode="ephemeral", container=container)
     ctx = rt.contexts[session.context_ids[0]]
     handle = await rt.page_mgr.open(ctx, url)
     return session, ctx, handle
@@ -176,13 +176,16 @@ async def test_no_leak_1000_ops(runtime):
     assert len(runtime.pages) == 2
 
 
-async def test_ephemeral_sessions_share_default_browser(runtime, gavel_tools):
-    """ephemeral 共享默认浏览器进程，但 context 相互隔离。"""
+async def test_ephemeral_sessions_container_policy(runtime, gavel_tools):
+    """默认走 profile 默认容器（共享）；isolated 才隔离。"""
     a = await gavel_tools["session_create"]()
     b = await gavel_tools["session_create"]()
     assert a["process_id"] == b["process_id"]
-    assert a["context_id"] != b["context_id"]
-    assert a["page_id"] != b["page_id"]
+    assert a["context_id"] == b["context_id"]     # 默认都复用 profile 默认容器
+    i1 = await gavel_tools["session_create"](container="isolated")
+    i2 = await gavel_tools["session_create"](container="isolated")
+    assert i1["context_id"] != i2["context_id"]   # 隔离容器各自独立
+    assert i1["context_id"] != a["context_id"]
 
 
 async def test_cold_start_threshold(runtime):

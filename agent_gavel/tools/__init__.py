@@ -8,9 +8,11 @@ def register_runtime_tools(mcp):
     from .browser_tools import register_browser_tools
     from .diagnostics_tools import register_diagnostics_tools
     from .page_tools import register_page_tools
+    from .profile_tools import register_profile_tools
     from .workflow_tools import register_workflow_tools
 
     register_browser_tools(mcp)
+    register_profile_tools(mcp)
     register_page_tools(mcp)
     register_action_tools(mcp)
     register_assertion_tools(mcp)

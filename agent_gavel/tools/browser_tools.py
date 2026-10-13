@@ -7,10 +7,23 @@
 """
 
 import functools
+import os
 
 from ..backends.playwright_backend import PlaywrightBackend
 from ..runtime import get_runtime
 from ..runtime.errors import GavelError, wrap_exception
+
+_ATTACH_WARNING = (
+    "attach 模式：正在接管一个已存在的浏览器。注意——你控制的是用户真实账号环境，"
+    "本机任何进程都能通过该调试端口操作它；本项目不会关闭它；运行期间用户关闭浏览器"
+    "会导致会话中断；同一资料目录存在单实例限制。仅在你明确需要时使用。")
+
+
+def _mode_is_attach(browser_mode, cdp_endpoint=None):
+    mode = (browser_mode or os.environ.get("AGENT_GAVEL_BROWSER_MODE")
+            or "").strip().lower()
+    endpoint = cdp_endpoint or os.environ.get("AGENT_GAVEL_CDP_ENDPOINT")
+    return mode == "attach" or bool(endpoint)
 
 
 def _guard(fn):
@@ -59,23 +72,32 @@ def register_browser_tools(mcp):
     @mcp.tool()
     @_guard
     async def browser_launch(headless: bool = None, channel: str = None,
-                             proxy: dict = None):
-        """启动/确保默认浏览器进程（Playwright 自管，独立于旧 CDP Chrome）。
+                             proxy: dict = None, browser_mode: str = None,
+                             cdp_endpoint: str = None):
+        """启动/确保默认浏览器进程。
 
-        headless 省略时按 AGENT_GAVEL_HEADLESS 决定；channel 默认系统 Chrome；
-        带 proxy 会独立进程。返回 process_id 与运行计数。
+        默认 **managed（C1）**：自起加固 Chrome（持久真实资料目录）+ Playwright 连接；
+        `browser_mode="attach"` + `cdp_endpoint` 则**接管**一个已存在的浏览器（C2，见警告）；
+        `browser_mode="playwright"` 回到 Playwright 直接启动。
+        headless 省略时按 AGENT_GAVEL_HEADLESS 决定（默认有头）。
         """
         rt = rt_get()
-        if headless is None and not channel and not proxy:
+        explicit = any(x is not None for x in
+                       (headless, channel, proxy, browser_mode, cdp_endpoint))
+        if not explicit:
             handle = await rt.ensure_default_browser()
         else:
             if rt.default_handle is not None:
                 await rt.processes.close(rt.default_handle)
             rt._default_handle = await rt.processes.launch(
-                headless=headless, channel=channel, proxy=proxy)
+                headless=headless, channel=channel, proxy=proxy,
+                browser_mode=browser_mode, cdp_endpoint=cdp_endpoint)
             handle = rt._default_handle
-        return {"status": "ok", **handle.to_dict(),
-                "counts": rt.status()["counts"]}
+        out = {"status": "ok", **handle.to_dict(),
+               "counts": rt.status()["counts"]}
+        if handle.mode == "attach" or _mode_is_attach(browser_mode, cdp_endpoint):
+            out["warning"] = _ATTACH_WARNING
+        return out
 
     @mcp.tool()
     @_guard
@@ -101,25 +123,35 @@ def register_browser_tools(mcp):
                              proxy: dict = None, channel: str = None,
                              locale: str = None, timezone_id: str = None,
                              viewport: dict = None, device: str = None,
-                             user_data_dir: str = None, storage_state: str = None):
+                             user_data_dir: str = None, storage_state: str = None,
+                             browser_mode: str = None, cdp_endpoint: str = None,
+                             container: str = None):
         """创建隔离 session（ephemeral / persistent / clone）。
 
-        ephemeral：共享默认浏览器上新建 context，关闭即弃。
-        persistent：独立进程 + 持久 profile（user_data_dir）。
-        clone：从 storage_state（文件路径或 dict）起，适合多账号。
-        返回 session_id / context_id / page_id。
+        container（容器策略）：
+          default（默认）= 用资料目录的**默认容器**：继承 profile 的登录/cookie，
+                  改动累积回 profile（可迭代）。
+          isolated      = 新建隔离容器：继承 profile 的 cookie，但不写回 profile。
+        ephemeral：共享默认浏览器上建容器。persistent：独立进程 + 持久资料目录。
+        clone：从 storage_state 起（默认用 isolated 容器，适合多账号）。
+        browser_mode="attach" + cdp_endpoint：接管一个已存在浏览器（C2，见返回 warning）。
         """
         rt = rt_get()
         config = dict(headless=headless, proxy=proxy, channel=channel,
                       locale=locale, timezone_id=timezone_id, viewport=viewport,
                       device=device, user_data_dir=user_data_dir,
-                      storage_state=storage_state)
+                      storage_state=storage_state, browser_mode=browser_mode,
+                      cdp_endpoint=cdp_endpoint, container=container)
         session = await rt.session_mgr.create(mode=mode, **config)
         ctx_id = session.context_ids[0] if session.context_ids else None
         ctx = rt.contexts.get(ctx_id)
         page_id = ctx.active_page_id if ctx else None
-        return {"status": "ok", **session.to_dict(),
-                "context_id": ctx_id, "page_id": page_id}
+        out = {"status": "ok", **session.to_dict(),
+               "context_id": ctx_id, "page_id": page_id}
+        handle = session.handle
+        if handle is not None and handle.mode == "attach":
+            out["warning"] = _ATTACH_WARNING
+        return out
 
     @mcp.tool()
     @_guard
@@ -196,14 +228,19 @@ def register_browser_tools(mcp):
                              timezone_id: str = None, viewport: dict = None,
                              device: str = None, permissions: list = None,
                              extra_http_headers: dict = None,
-                             storage_state: dict = None):
-        """在指定 session 下新建隔离 context（不同账号/cookie/语言/设备）。"""
+                             storage_state: dict = None,
+                             container: str = "isolated"):
+        """在指定 session 下新建容器（不同账号/cookie/语言/设备）。
+
+        container 默认 isolated：新建隔离容器（继承 profile 的 cookie，但不写回）；
+        传 "default" 则复用 profile 默认容器。
+        """
         rt = rt_get()
         session = await _resolve_session(session_id)
         config = dict(locale=locale, timezone_id=timezone_id, viewport=viewport,
                       device=device, permissions=permissions,
                       extra_http_headers=extra_http_headers,
-                      storage_state=storage_state)
+                      storage_state=storage_state, container=container)
         ctx = await rt.context_mgr.create(session, config)
         return {"status": "ok", **ctx.to_dict()}
 
