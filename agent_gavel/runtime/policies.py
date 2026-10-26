@@ -17,41 +17,20 @@
 import os
 from urllib.parse import urlparse
 
-from .errors import GavelError
-
-_DEFAULT_MAX_DOWNLOAD = 256 * 1024 * 1024
-_DEFAULT_ARTIFACT_TTL_DAYS = 7
-_DEFAULT_ARTIFACT_MAX_BYTES = 2 * 1024 * 1024 * 1024
-
-
-def _env_set(name):
-    raw = (os.environ.get(name) or "").strip()
-    return {x.strip().lower() for x in raw.split(",") if x.strip()}
-
-
-def _env_int(name, default):
-    try:
-        return int(os.environ[name])
-    except (KeyError, ValueError):
-        return default
+from ..core import config
+from ..core.errors import GavelError
 
 
 class PolicyManager:
     def __init__(self):
-        self.domains = _env_set("AGENT_GAVEL_ALLOW_DOMAINS")
+        self.domains = config.allow_domains()
         # 发布/Docker 加固：即使 allowlist 为空也强制开启域名限制（空集=全拒，
         # 必须显式配置 AGENT_GAVEL_ALLOW_DOMAINS 才放行）。开发默认关。
-        self.domain_guard = (os.environ.get("AGENT_GAVEL_DOMAIN_GUARD") or "").strip().lower() \
-            in ("1", "true", "yes", "on")
-        self.allowed_paths = [p for p in
-                              (os.environ.get("AGENT_GAVEL_ALLOW_PATHS") or "").split(",")
-                              if p.strip()]
-        self.max_download_bytes = _env_int("AGENT_GAVEL_MAX_DOWNLOAD_BYTES",
-                                           _DEFAULT_MAX_DOWNLOAD)
-        self.artifact_ttl_days = _env_int("AGENT_GAVEL_ARTIFACT_TTL_DAYS",
-                                          _DEFAULT_ARTIFACT_TTL_DAYS)
-        self.artifact_max_bytes = _env_int("AGENT_GAVEL_ARTIFACT_MAX_BYTES",
-                                           _DEFAULT_ARTIFACT_MAX_BYTES)
+        self.domain_guard = config.domain_guard()
+        self.allowed_paths = config.allow_paths()
+        self.max_download_bytes = config.max_download_bytes()
+        self.artifact_ttl_days = config.artifact_ttl_days()
+        self.artifact_max_bytes = config.artifact_max_bytes()
 
     @property
     def domain_restricted(self) -> bool:

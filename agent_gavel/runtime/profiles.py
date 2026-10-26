@@ -17,28 +17,19 @@ import datetime
 import json
 import os
 import shutil
-import sys
 import time
 
-from .errors import GavelError
-
-_HEADLESS_TRUE = ("1", "true", "yes", "on")
-
-
-def _data_root():
-    return os.environ.get("AGENT_GAVEL_DATA_DIR") or os.path.join(
-        os.path.expanduser("~"), ".config", "agent-gavel")
+from ..core import config as gavel_config
+from ..core.errors import GavelError
 
 
 def profiles_root():
-    return os.environ.get("AGENT_GAVEL_BROWSER_PROFILES") or \
-        os.path.join(_data_root(), "browser-profiles")
+    return str(gavel_config.browser_profiles_root())
 
 
 def default_profile_dir():
     """没有任何副本时，C1 用的自有可累计目录。"""
-    return os.environ.get("AGENT_GAVEL_BROWSER_PROFILE") or \
-        os.path.join(_data_root(), "browser-profile")
+    return str(gavel_config.default_browser_profile())
 
 
 def _active_file():
@@ -69,21 +60,7 @@ def set_active(name):
 
 def default_source():
     """用户本机 Chrome 的资料目录（可用 AGENT_GAVEL_CHROME_USER_DATA 覆盖）。"""
-    override = os.environ.get("AGENT_GAVEL_CHROME_USER_DATA")
-    if override:
-        return override
-    if sys.platform.startswith("win"):
-        base = os.environ.get("LOCALAPPDATA") or ""
-        return os.path.join(base, "Google", "Chrome", "User Data")
-    if sys.platform == "darwin":
-        return os.path.expanduser(
-            "~/Library/Application Support/Google/Chrome")
-    for p in (os.path.expanduser("~/.config/google-chrome"),
-              os.path.expanduser("~/.config/chromium"),
-              os.path.expanduser("~/.config/google-chrome-beta")):
-        if os.path.isdir(p):
-            return p
-    return os.path.expanduser("~/.config/google-chrome")
+    return gavel_config.chrome_user_data_dir()
 
 
 # ---------------- 复制选择 ----------------

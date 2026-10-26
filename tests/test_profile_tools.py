@@ -103,13 +103,13 @@ def test_active_switch_and_delete(monkeypatch, tmp_path):
 def test_bad_name_rejected(monkeypatch, tmp_path):
     _use_tmp_profiles(monkeypatch, tmp_path)
     src = _make_source(tmp_path)
-    from agent_gavel.runtime.errors import GavelError
+    from agent_gavel.core.errors import GavelError
     with pytest.raises(GavelError):
         profiles.copy_profile(source=str(src), name="../evil")
 
 
 def test_missing_source(monkeypatch, tmp_path):
     _use_tmp_profiles(monkeypatch, tmp_path)
-    from agent_gavel.runtime.errors import GavelError
+    from agent_gavel.core.errors import GavelError
     with pytest.raises(GavelError):
         profiles.copy_profile(source=str(tmp_path / "nope"), name="x")

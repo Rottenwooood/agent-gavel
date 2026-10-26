@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from agent_gavel.runtime.errors import GavelError
+from agent_gavel.core.errors import GavelError
 from agent_gavel.tools.common import backend
 
 

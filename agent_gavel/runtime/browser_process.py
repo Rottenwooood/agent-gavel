@@ -13,7 +13,6 @@
 import asyncio
 import json
 import os
-import shutil
 import signal
 import socket
 import subprocess
@@ -23,60 +22,22 @@ import urllib.request
 
 from playwright.async_api import async_playwright
 
-from .errors import GavelError
-
-_HEADLESS_TRUE = ("1", "true", "yes", "on")
-
-
-def env_headless() -> bool:
-    return os.environ.get("AGENT_GAVEL_HEADLESS", "").strip().lower() in _HEADLESS_TRUE
-
+from ..core import config
+from ..core.errors import GavelError
 
 def _default_channel():
-    """Playwright 模式的 channel：系统 Chrome 优先，缺则自带 chromium。"""
-    if "AGENT_GAVEL_CHROME_CHANNEL" in os.environ:
-        return os.environ.get("AGENT_GAVEL_CHROME_CHANNEL").strip() or None
-    names = (("google-chrome", "google-chrome-stable") if not sys.platform.startswith("win")
-             else ("chrome.exe",))
-    if any(shutil.which(n) for n in names):
-        return "chrome"
-    if any(shutil.which(n) for n in ("chromium", "chromium-browser", "chrome")):
-        return "chromium"
-    return None
+    return config.chrome_channel()
 
 
 def _find_chrome_binary():
     """managed 模式：找到可用的 Chrome/Chromium 可执行文件。"""
-    p = os.environ.get("AGENT_GAVEL_CHROME_BIN", "")
-    if p and os.path.isfile(p):
-        return p
-    if sys.platform.startswith("win"):
-        cands = []
-        for env in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
-            base = os.environ.get(env)
-            if base:
-                cands.append(os.path.join(base, "Google", "Chrome",
-                                          "Application", "chrome.exe"))
-        cands += [shutil.which(n) for n in ("chrome.exe", "msedge.exe")]
-        for c in cands:
-            if c and os.path.isfile(c):
-                return c
-        return None
-    for n in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
-        q = shutil.which(n)
-        if q:
-            return q
-    return None
-
-
-def _browser_mode():
-    return (os.environ.get("AGENT_GAVEL_BROWSER_MODE") or "managed").strip().lower()
+    return config.chrome_bin()
 
 
 def _default_profile_dir():
     from .profiles import active_profile_dir, default_profile_dir
-    return os.environ.get("AGENT_GAVEL_BROWSER_PROFILE") \
-        or active_profile_dir() or default_profile_dir()
+    return config.browser_profile_override() or active_profile_dir() \
+        or default_profile_dir()
 
 
 def _launch_args():
@@ -90,9 +51,9 @@ def _launch_args():
     args = ["--no-first-run", "--disable-blink-features=AutomationControlled"]
     if sys.platform.startswith("linux"):
         args += ["--no-sandbox", "--disable-dev-shm-usage"]
-    if os.environ.get("AGENT_GAVEL_DISABLE_GPU", "").strip().lower() in _HEADLESS_TRUE:
+    if config.disable_gpu():
         args.append("--disable-gpu")
-    extra = os.environ.get("AGENT_GAVEL_EXTRA_ARGS", "").strip()
+    extra = config.extra_args()
     if extra:
         args += extra.split()
     return args
@@ -304,12 +265,16 @@ class BrowserHandle:
         return True
 
     def to_dict(self):
-        return {"process_id": self.process_id, "mode": self.mode,
+        info = {"process_id": self.process_id, "mode": self.mode,
                 "pid": self.pid, "alive": self.alive,
                 "headless": self.opts.get("headless"),
                 "channel": self.opts.get("channel"),
                 "user_data_dir": self.opts.get("user_data_dir"),
                 "proxy": bool(self.opts.get("proxy"))}
+        if self.opts.get("mode_resolved"):
+            info["mode_resolved"] = self.opts["mode_resolved"]
+            info["mode_warning"] = self.opts.get("mode_warning")
+        return info
 
 
 class BrowserProcessManager:
@@ -333,7 +298,7 @@ class BrowserProcessManager:
         return f"proc_{self._n:03d}"
 
     def _resolve_headless(self, override):
-        return env_headless() if override is None else bool(override)
+        return config.headless() if override is None else bool(override)
 
     async def _headless_default_ua(self, browser):
         """无头模式取一次真实 UA，去掉 'HeadlessChrome' 作为默认 context UA。"""
@@ -375,14 +340,10 @@ class BrowserProcessManager:
         proc = subprocess.Popen(args, **kwargs)
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
-            try:
-                with urllib.request.urlopen(
-                        f"http://127.0.0.1:{port}/json/version", timeout=1) as r:
-                    json.loads(r.read())
-                    _write_state(udd, proc.pid, port)
-                    return proc, port
-            except Exception:
-                await asyncio.sleep(0.2)
+            if await asyncio.to_thread(_cdp_ready, port):
+                _write_state(udd, proc.pid, port)
+                return proc, port
+            await asyncio.sleep(0.2)
         await _kill_tree(proc.pid)
         _clear_singletons(udd)
         raise GavelError(
@@ -435,38 +396,81 @@ class BrowserProcessManager:
 
     # ---- 对外 ----
     async def launch(self, **opts):
+        return await self._start(None, **opts)
+
+    async def launch_persistent(self, user_data_dir, **opts):
+        return await self._start(user_data_dir, **opts)
+
+    async def _start(self, persistent_dir=None, **opts):
+        """启动或接管的唯一实现；persistent_dir 非空时使用资料目录的默认 context。"""
         async with self._lock:
             pw = await self._ensure_pw()
             opts = dict(opts)
-            endpoint = opts.pop("cdp_endpoint", None) \
-                or os.environ.get("AGENT_GAVEL_CDP_ENDPOINT")
-            mode = (opts.pop("browser_mode", None) or _browser_mode()).strip().lower()
-            # 接管已存在的 Chrome（#2）：只连接，不负责关闭
+            endpoint = opts.pop("cdp_endpoint", None) or config.cdp_endpoint()
+            requested = (opts.pop("browser_mode", None)
+                         or config.browser_mode()).strip().lower()
+            notes = {}
+
             if endpoint:
                 browser = await self._connect(pw, endpoint)
+                ctx = None
+                if persistent_dir:
+                    ctx = browser.contexts[0] if browser.contexts \
+                        else await browser.new_context()
                 h = BrowserHandle(self._next_id(), browser=browser,
-                                  mode="attach", opts=opts)
+                                  persistent_context=ctx, mode="attach",
+                                  opts=opts)
                 self._handles[h.process_id] = h
                 return h
-            # Playwright 直接 launch（带 proxy 等 Playwright 特有参数，或显式要求）
-            if mode == "playwright" or opts.get("proxy") or opts.get("channel") \
-                    or not _find_chrome_binary():
+
+            reason = None
+            if requested == "playwright":
+                reason = "explicit"
+            elif opts.get("proxy"):
+                reason = "proxy"
+            elif opts.get("channel"):
+                reason = "channel"
+            elif not _find_chrome_binary():
+                reason = "no_chrome_binary"
+            if requested == "managed" and reason:
+                notes["mode_resolved"] = "playwright"
+                notes["mode_warning"] = \
+                    f"managed 模式不适用（{reason}），已改用 playwright"
+
+            if reason:
                 kw, headless = self._launch_kwargs(opts)
-                browser = await self._launch_with_fallback(pw, kw)
+                if persistent_dir:
+                    os.makedirs(persistent_dir, exist_ok=True)
+                    ctx = await self._launch_with_fallback(
+                        pw, kw, persistent_dir=persistent_dir)
+                    browser = ctx.browser
+                    mode = "persistent"
+                else:
+                    ctx = None
+                    browser = await self._launch_with_fallback(pw, kw)
+                    mode = "shared"
                 opts["headless"] = headless
+                if persistent_dir:
+                    opts["user_data_dir"] = persistent_dir
                 if headless:
                     ua = await self._headless_default_ua(browser)
                     if ua:
                         opts["default_user_agent"] = ua
                 h = BrowserHandle(self._next_id(), browser=browser,
-                                  mode="shared", opts=opts)
+                                  persistent_context=ctx, mode=mode,
+                                  opts={**opts, **notes})
                 self._handles[h.process_id] = h
                 return h
-            # managed：自起加固 Chrome（持久真实 profile）+ 连接
+
+            # managed：自起加固 Chrome（持久资料目录）+ Playwright 连接
             headless = self._resolve_headless(opts.get("headless"))
-            udd = opts.get("user_data_dir") or _default_profile_dir()
+            udd = persistent_dir or opts.get("user_data_dir") or _default_profile_dir()
             proc, port = await self._spawn_managed(udd, _free_port(), headless)
             browser = await self._connect(pw, port)
+            ctx = None
+            if persistent_dir:
+                ctx = browser.contexts[0] if browser.contexts \
+                    else await browser.new_context()
             opts["headless"] = headless
             opts["user_data_dir"] = udd
             if headless:
@@ -474,56 +478,31 @@ class BrowserProcessManager:
                 if ua:
                     opts["default_user_agent"] = ua
             h = BrowserHandle(self._next_id(), browser=browser,
-                              mode="managed", opts=opts, owned_pid=proc.pid)
-            self._handles[h.process_id] = h
-            return h
-
-    async def launch_persistent(self, user_data_dir, **opts):
-        async with self._lock:
-            pw = await self._ensure_pw()
-            opts = dict(opts)
-            endpoint = opts.pop("cdp_endpoint", None) \
-                or os.environ.get("AGENT_GAVEL_CDP_ENDPOINT")
-            mode = (opts.pop("browser_mode", None) or _browser_mode()).strip().lower()
-            if endpoint:
-                browser = await self._connect(pw, endpoint)
-                ctx = browser.contexts[0] if browser.contexts \
-                    else await browser.new_context()
-                h = BrowserHandle(self._next_id(), browser=browser,
-                                  persistent_context=ctx, mode="attach",
-                                  opts=opts)
-                self._handles[h.process_id] = h
-                return h
-            if mode == "playwright" or opts.get("proxy") \
-                    or not _find_chrome_binary():
-                kw, headless = self._launch_kwargs(opts)
-                os.makedirs(user_data_dir, exist_ok=True)
-                ctx = await self._launch_with_fallback(pw, kw,
-                                                       persistent_dir=user_data_dir)
-                opts["headless"] = headless
-                opts["user_data_dir"] = user_data_dir
-                h = BrowserHandle(self._next_id(), browser=ctx.browser,
-                                  persistent_context=ctx, mode="persistent",
-                                  opts=opts)
-                self._handles[h.process_id] = h
-                return h
-            # managed 持久：自起 + 连接，用它的默认 context
-            headless = self._resolve_headless(opts.get("headless"))
-            proc, port = await self._spawn_managed(user_data_dir, _free_port(),
-                                                   headless)
-            browser = await self._connect(pw, port)
-            ctx = browser.contexts[0] if browser.contexts \
-                else await browser.new_context()
-            opts["headless"] = headless
-            opts["user_data_dir"] = user_data_dir
-            h = BrowserHandle(self._next_id(), browser=browser,
                               persistent_context=ctx, mode="managed",
-                              opts=opts, owned_pid=proc.pid)
+                              opts={**opts, **notes}, owned_pid=proc.pid)
             self._handles[h.process_id] = h
             return h
 
     def get(self, process_id):
         return self._handles.get(process_id)
+
+    def matches(self, handle, *, headless=None, channel=None, proxy=None,
+                browser_mode=None, cdp_endpoint=None):
+        """已有浏览器与请求参数是否一致（None 表示不限定）。"""
+        if handle is None or not handle.alive:
+            return False
+        opts = handle.opts or {}
+        if headless is not None and bool(opts.get("headless")) != bool(headless):
+            return False
+        if proxy is not None and bool(opts.get("proxy")) != bool(proxy):
+            return False
+        if channel is not None and opts.get("channel") != channel:
+            return False
+        attach = ((browser_mode or config.browser_mode()).strip().lower()
+                  == "attach" or bool(cdp_endpoint or config.cdp_endpoint()))
+        if attach and handle.mode != "attach":
+            return False
+        return True
 
     def list(self):
         return [h.to_dict() for h in self._handles.values()]

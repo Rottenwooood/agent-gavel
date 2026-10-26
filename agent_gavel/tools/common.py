@@ -4,7 +4,7 @@ import functools
 
 from ..backends.playwright_backend import PlaywrightBackend
 from ..runtime import get_runtime
-from ..runtime.errors import GavelError, wrap_exception
+from ..core.errors import GavelError, wrap_exception
 
 _BACKEND = None
 

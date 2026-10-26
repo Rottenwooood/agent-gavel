@@ -2,7 +2,7 @@
 
 from .browser_runtime import (BrowserRuntime, get_runtime, reset_runtime,
                               shutdown_runtime)
-from .errors import GavelError, wrap_exception
+from ..core.errors import GavelError, wrap_exception
 
 __all__ = [
     "BrowserRuntime", "get_runtime", "reset_runtime", "shutdown_runtime",

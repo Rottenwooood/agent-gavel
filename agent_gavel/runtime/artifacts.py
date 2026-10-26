@@ -5,21 +5,15 @@
 M1 提供基础存储与清理；下载捕获、MIME/文本抽取在 M3 补全。
 """
 
+import asyncio
 import hashlib
 import json
 import os
 import shutil
-import tempfile
 import time
 
-from .errors import GavelError
-
-_DATA_ROOT = os.environ.get(
-    "AGENT_GAVEL_DATA_DIR",
-    os.path.join(tempfile.gettempdir(), "agent-gavel"),
-)
-ARTIFACT_DIR = os.environ.get(
-    "AGENT_GAVEL_ARTIFACT_DIR", os.path.join(_DATA_ROOT, "artifacts"))
+from ..core import config
+from ..core.errors import GavelError
 
 
 def _now():
@@ -27,9 +21,9 @@ def _now():
 
 
 class ArtifactStore:
-    def __init__(self, root: str = ARTIFACT_DIR):
-        self.root = root
-        self._index_path = os.path.join(root, "index.json")
+    def __init__(self, root=None):
+        self.root = str(root or config.artifacts_dir())
+        self._index_path = os.path.join(self.root, "index.json")
         self._index = None
 
     # ---- index ----
@@ -220,7 +214,7 @@ class ArtifactStore:
                 "suggested_filename": filename,
                 "mime_type": _guess_mime(dest, filename),
                 "size_bytes": size,
-                "sha256": _sha256(dest),
+                "sha256": await asyncio.to_thread(_sha256, dest),
                 "source_url": download.url,
                 "session_id": session_id,
                 "page_id": page_id,

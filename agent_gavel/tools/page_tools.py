@@ -1,6 +1,6 @@
 """M2：导航/读取/快照/探索/截图/PDF MCP 工具（docs/tech-plan.md §8）。"""
 
-from ..runtime.errors import GavelError
+from ..core.errors import GavelError
 from .common import backend, guard, ids
 
 

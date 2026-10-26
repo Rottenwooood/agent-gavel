@@ -12,7 +12,7 @@
 
 from urllib.parse import urlparse
 
-from .errors import GavelError
+from ..core.errors import GavelError
 
 _CONTEXT_KEYS = ("locale", "timezone_id", "viewport", "extra_http_headers",
                  "permissions", "geolocation", "user_agent", "color_scheme")

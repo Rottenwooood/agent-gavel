@@ -11,16 +11,9 @@
 
 import asyncio
 import os
-import tempfile
 
-from .errors import GavelError
-
-_DATA_ROOT = os.environ.get(
-    "AGENT_GAVEL_DATA_DIR",
-    os.path.join(tempfile.gettempdir(), "agent-gavel"),
-)
-PROFILE_DIR = os.environ.get(
-    "AGENT_GAVEL_PROFILE_DIR", os.path.join(_DATA_ROOT, "profiles"))
+from ..core import config as gavel_config
+from ..core.errors import GavelError
 
 
 class Session:
@@ -94,7 +87,7 @@ class SessionManager:
         sid = self.runtime.next_id("sess")
         opts = self._launch_opts(config)
         if mode == "persistent":
-            udd = config.get("user_data_dir") or os.path.join(PROFILE_DIR, sid)
+            udd = config.get("user_data_dir") or str(gavel_config.profile_dir() / sid)
             handle = await self.runtime.processes.launch_persistent(udd, **opts)
             session = Session(sid, mode, config, handle)
             self.runtime.sessions[sid] = session
@@ -107,7 +100,7 @@ class SessionManager:
                                    or opts.get("cdp_endpoint"))
             if needs_dedicated:
                 # 独占进程：给独立资料目录，绝不与共享 profile 抢单实例
-                udd = config.get("user_data_dir") or os.path.join(PROFILE_DIR, sid)
+                udd = config.get("user_data_dir") or str(gavel_config.profile_dir() / sid)
                 handle = await self.runtime.processes.launch(user_data_dir=udd,
                                                              **opts)
             else:

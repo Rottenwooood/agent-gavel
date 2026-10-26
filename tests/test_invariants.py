@@ -39,16 +39,8 @@ def _assigned_names(tree):
 
 # ---------------- I1：只有 core/config.py 读环境变量 ----------------
 
-# 阶段 1 结束时清零。
-ENV_WHITELIST = {
-    "runtime/policies.py",
-    "runtime/artifacts.py",
-    "runtime/sessions.py",
-    "runtime/profiles.py",
-    "runtime/browser_process.py",
-    "tools/browser_tools.py",
-    "workflows/loader.py",
-}
+# 阶段 1 已清零。
+ENV_WHITELIST = set()
 
 
 def _uses_env(tree):
@@ -163,8 +155,8 @@ def test_i5_status_values():
 
 # ---------------- I6：模板写路径只接受精确 id ----------------
 
-# 阶段 1 结束时清零。
-WRITE_PATH_WHITELIST = {("delete", "get"), ("record_run", "get")}
+# 阶段 1 已清零。
+WRITE_PATH_WHITELIST = set()
 
 
 def test_i6_loader_write_paths_exact():
@@ -201,9 +193,8 @@ BLOCKING_CALLS = {
     "shutil.copy2", "shutil.move",
 }
 
-# 阶段 1 结束时清零。
-BLOCKING_WHITELIST = {("runtime/browser_process.py", "_spawn_managed",
-                       "urllib.request.urlopen")}
+# 阶段 1 已清零。
+BLOCKING_WHITELIST = set()
 
 
 def test_i7_no_direct_blocking_in_async():
@@ -218,6 +209,36 @@ def test_i7_no_direct_blocking_in_async():
                     if key not in BLOCKING_WHITELIST:
                         bad.append(key)
     assert not bad, f"async 函数内直接调用阻塞 API：{bad}"
+
+
+# 会阻塞的同步函数 → 必须在这些位置通过 asyncio.to_thread 调用。
+BLOCKING_INVENTORY = {
+    ("tools/profile_tools.py", "copy_profile"),
+    ("tools/profile_tools.py", "list_profiles"),
+    ("tools/profile_tools.py", "delete_profile"),
+    ("tools/artifact_tools.py", "read_text"),
+    ("tools/diagnostics_tools.py", "register_file"),
+    ("runtime/browser_runtime.py", "os_browsers"),
+    ("runtime/browser_process.py", "_reuse_existing"),
+    ("runtime/browser_process.py", "_managed_pids"),
+    ("runtime/browser_process.py", "_cdp_ready"),
+}
+
+
+def test_i7_blocking_inventory_is_wrapped():
+    for rel, name in BLOCKING_INVENTORY:
+        tree = ast.parse((PKG / rel).read_text(encoding="utf-8"))
+        wrapped = False
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and _dotted(node.func) == "asyncio.to_thread"):
+                continue
+            if not node.args:
+                continue
+            if _dotted(node.args[0]).rsplit(".", 1)[-1] == name:
+                wrapped = True
+                break
+        assert wrapped, f"{rel} 未通过 asyncio.to_thread 调用 {name}"
 
 
 # ---------------- I8：包依赖单向 ----------------

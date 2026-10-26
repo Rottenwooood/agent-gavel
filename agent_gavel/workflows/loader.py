@@ -1,7 +1,9 @@
-"""工作流模板存取（docs/tech-plan.md §5.15.5）。
+"""工作流模板存取。
 
-双层目录：用户层 ~/.config/agent-gavel/workflows/（可写、优先）+ 包内层。
-同 template_id 再存 = version+1，stats 写进模板本体。旧 schema 只读迁移。
+单一目录：用户工作流目录（由 core/config 决定）。
+- `resolve_id`：宽松解析（精确 id / site / 唯一后缀匹配），只读入口使用
+- `get_exact` / `load`：精确读取
+- `save` / `delete` / `record_run`：写入路径，只接受精确 id
 """
 
 import datetime
@@ -9,25 +11,15 @@ import json
 import os
 import re
 
-from ..runtime.errors import GavelError
+from ..core import config as gavel_config
+from ..core.errors import GavelError
 from . import schema as _schema
 
-PKG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
-
-
-def _config_root():
-    if os.name == "nt":
-        return os.environ.get("APPDATA") or os.path.expanduser("~/.config")
-    return os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
-
-
-# 目录隔离别动 XDG_CONFIG_HOME——实测把它指到空目录会让 Chrome 后续外网导航
-# net::ERR_NETWORK_CHANGED / 超时（Chrome 会读该变量）。专用覆盖变量更安全。
-USER_DIR = (os.environ.get("AGENT_GAVEL_WORKFLOWS_DIR")
-            or os.path.join(_config_root(), "agent-gavel", "workflows"))
-
-
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
+
+
+def user_dir() -> str:
+    return str(gavel_config.workflows_dir())
 
 
 def _is_safe_id(name) -> bool:
@@ -47,15 +39,11 @@ def slugify(name):
 
 
 def ensure_dirs():
-    os.makedirs(USER_DIR, exist_ok=True)
+    os.makedirs(user_dir(), exist_ok=True)
 
 
-def _dirs():
-    return [d for d in (USER_DIR, PKG_DIR) if os.path.isdir(d)]
-
-
-def _path_for(template_id, directory=USER_DIR):
-    return os.path.join(directory, f"{template_id}.json")
+def _path_for(template_id):
+    return os.path.join(user_dir(), f"{template_id}.json")
 
 
 def _read(path):
@@ -69,6 +57,19 @@ def _write(path, data):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
+
+
+def _iter_templates():
+    directory = user_dir()
+    if not os.path.isdir(directory):
+        return
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".json") or name == "stats.json":
+            continue
+        try:
+            yield _read(os.path.join(directory, name))
+        except Exception:
+            continue
 
 
 def migrate_old(old):
@@ -104,8 +105,46 @@ def migrate_old(old):
     return _schema.validate(t)[0]
 
 
+def resolve_id(name_or_id) -> str:
+    """把用户给的名称解析成唯一 template_id；只读入口使用。"""
+    if _is_safe_id(name_or_id) and os.path.isfile(_path_for(name_or_id)):
+        return name_or_id
+    hits = {}
+    for t in _iter_templates():
+        tid = t.get("template_id")
+        if not tid:
+            continue
+        if (tid == name_or_id or t.get("site") == name_or_id
+                or tid.endswith("_" + str(name_or_id))
+                or str(name_or_id) in tid):
+            hits.setdefault(tid, True)
+    if len(hits) == 1:
+        return next(iter(hits))
+    if len(hits) > 1:
+        raise GavelError("workflow_ambiguous",
+                         f"{name_or_id} 匹配多个模板：{sorted(hits)}",
+                         hint="用完整 template_id")
+    raise GavelError("workflow_not_found", f"未知 workflow：{name_or_id}",
+                     hint="用 workflow_list 查看")
+
+
+def get_exact(template_id):
+    """按精确 id 读取；不存在即报错。返回 (template, path)。"""
+    _require_safe_id(template_id)
+    path = _path_for(template_id)
+    if not os.path.isfile(path):
+        raise GavelError("workflow_not_found", f"未知 workflow：{template_id}",
+                         hint="用 workflow_list 查看")
+    return _read(path), path
+
+
+def load(name_or_id):
+    """按名称解析后精确读取。"""
+    return get_exact(resolve_id(name_or_id))
+
+
 def save(template):
-    """保存模板到用户层；同 id 则 version+1 并保留 stats。返回 info。"""
+    """保存模板；同 id 则 version+1 并保留 stats。返回 info。"""
     ensure_dirs()
     tid = _require_safe_id(template["template_id"])
     path = _path_for(tid)
@@ -125,87 +164,41 @@ def save(template):
         template.setdefault("version", 1)
         template.setdefault("stats", {"success_count": 0, "fail_count": 0,
                                       "last_status": None, "last_at": None})
-    template.setdefault("saved_at",
-                        datetime.datetime.now().isoformat(timespec="seconds"))
+    template["saved_at"] = datetime.datetime.now().isoformat(timespec="seconds")
     _write(path, template)
     return {"file": f"{tid}.json", "template_id": tid,
             "version": template["version"], "steps": len(template["steps"]),
             "parameters": template.get("parameters", {})}
 
 
-def get(name_or_id):
-    """按 template_id 或 site 加载（用户层优先）。返回 (template, path)。
-
-    找不到时做一次**自动补全**：template_id 等于/后缀匹配/包含该名字（唯一时）。
-    """
-    ensure_dirs()
-    if _is_safe_id(name_or_id):
-        for d in _dirs():
-            p = _path_for(name_or_id, d)
-            if os.path.isfile(p):
-                return _read(p), p
-    # 按 site 匹配
-    for d in _dirs():
-        for f in sorted(os.listdir(d)):
-            if f.endswith(".json") and f != "stats.json":
-                t = _read(os.path.join(d, f))
-                if t.get("site") == name_or_id:
-                    return t, os.path.join(d, f)
-    # 自动补全：template_id 等于/后缀/包含该名字（唯一时）
-    seen = {}
-    for d in _dirs():
-        for f in sorted(os.listdir(d)):
-            if not f.endswith(".json") or f == "stats.json":
-                continue
-            t = _read(os.path.join(d, f))
-            tid = t.get("template_id") or f[:-5]
-            if tid == name_or_id or tid.endswith("_" + str(name_or_id)) \
-                    or str(name_or_id) in tid:
-                seen.setdefault(tid, (t, os.path.join(d, f)))
-    if len(seen) == 1:
-        return next(iter(seen.values()))
-    if len(seen) > 1:
-        raise GavelError("workflow_ambiguous",
-                         f"{name_or_id} 匹配多个模板：{sorted(seen)}",
-                         hint="用完整 template_id")
-    raise GavelError("workflow_not_found", f"未知 workflow：{name_or_id}",
-                     hint="用 workflow_list 查看")
-
-
 def list_workflows():
-    ensure_dirs()
     seen = {}
-    for d in _dirs():
-        for f in sorted(os.listdir(d)):
-            if not f.endswith(".json") or f == "stats.json" or f in seen:
-                continue
-            try:
-                t = _read(os.path.join(d, f))
-            except Exception:
-                continue
-            stats = t.get("stats") or {}
-            seen[f] = {
-                "file": f, "template_id": t.get("template_id"),
-                "site": t.get("site"), "desc": t.get("desc"),
-                "version": t.get("version"),
-                "steps": len(t.get("steps", [])),
-                "parameters": t.get("parameters", {}),
-                "status": t.get("status", "draft"),
-                "login_required": bool(t.get("login_required")),
-                "author": t.get("author", ""),
-                "verified_at": t.get("verified_at"),
-                "task": t.get("task", ""),
-                "success_count": stats.get("success_count", 0),
-                "fail_count": stats.get("fail_count", 0),
-                "last_status": stats.get("last_status"),
-                "layer": "user" if d == USER_DIR else "package",
-            }
+    for t in _iter_templates():
+        tid = t.get("template_id")
+        if not tid:
+            continue
+        stats = t.get("stats") or {}
+        seen[tid] = {
+            "file": f"{tid}.json", "template_id": tid,
+            "site": t.get("site"), "desc": t.get("desc"),
+            "version": t.get("version"),
+            "steps": len(t.get("steps", [])),
+            "parameters": t.get("parameters", {}),
+            "status": t.get("status", "draft"),
+            "login_required": bool(t.get("login_required")),
+            "author": t.get("author", ""),
+            "verified_at": t.get("verified_at"),
+            "task": t.get("task", ""),
+            "success_count": stats.get("success_count", 0),
+            "fail_count": stats.get("fail_count", 0),
+            "last_status": stats.get("last_status"),
+        }
     return sorted(seen.values(), key=lambda x: x["file"])
 
 
 def publish(template_id, out_dir=None):
     """导出干净 JSON 供 PR（不改远端）。"""
-    t, path = get(template_id)
+    t, path = load(template_id)
     t = dict(t)
     t.pop("saved_at", None)
     tid = _require_safe_id(t.get("template_id"))
@@ -217,34 +210,21 @@ def publish(template_id, out_dir=None):
 
 
 def delete(template_id):
-    """删除用户层模板（包内层只读，拒绝）。返回 info。"""
-    path = None
-    if _is_safe_id(template_id):
-        for d in _dirs():
-            cand = _path_for(template_id, d)
-            if os.path.isfile(cand):
-                path = cand
-                break
-    if path is None:
-        try:
-            _t, path = get(template_id)
-        except GavelError:
-            path = None
-    if path is None or path.startswith(PKG_DIR):
-        raise GavelError("workflow_not_found",
-                         f"没有可删除的用户层模板：{template_id}",
-                         hint="包内模板不可删；用 workflow_list 查看用户层模板")
+    """按精确 id 删除；不存在即报错。"""
+    _require_safe_id(template_id)
+    path = _path_for(template_id)
+    if not os.path.isfile(path):
+        raise GavelError("workflow_not_found", f"未知 workflow：{template_id}",
+                         hint="用 workflow_list 查看")
     os.remove(path)
     return {"template_id": template_id, "deleted": True}
 
 
 def record_run(template_id, status):
-    """更新模板 stats（写回文件；用户层优先，包内层不可写则跳过）。"""
+    """更新模板 stats（精确 id；文件不存在则跳过）。"""
     try:
-        t, path = get(template_id)
+        t, path = get_exact(template_id)
     except GavelError:
-        return None
-    if path.startswith(PKG_DIR):
         return None
     stats = t.setdefault("stats", {"success_count": 0, "fail_count": 0,
                                    "last_status": None, "last_at": None})

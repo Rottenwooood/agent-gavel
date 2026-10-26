@@ -3,7 +3,7 @@
 动作 + 可选断言一次调用（三态）；默认 strict locator（多重命中报错给候选）。
 """
 
-from ..runtime.errors import GavelError
+from ..core.errors import GavelError
 from .common import backend, guard, ids, rec, run_with_optional_assert
 
 

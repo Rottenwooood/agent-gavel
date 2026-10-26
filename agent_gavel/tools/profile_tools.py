@@ -44,7 +44,7 @@ def register_profile_tools(mcp):
     async def browser_profile_list():
         """列出所有资料副本 + 哪个是当前使用的（只读，不涉及隐私外传）。"""
         return {"status": "ok", "active": profiles.active_name(),
-                "items": profiles.list_profiles()}
+                "items": await asyncio.to_thread(profiles.list_profiles)}
 
     @mcp.tool()
     @guard

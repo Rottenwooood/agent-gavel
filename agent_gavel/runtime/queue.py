@@ -12,7 +12,7 @@ import itertools
 import time
 import uuid
 
-from .errors import GavelError, wrap_exception
+from ..core.errors import GavelError, wrap_exception
 
 
 class Operation:

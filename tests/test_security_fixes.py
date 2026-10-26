@@ -11,7 +11,7 @@
 import pytest
 
 from agent_gavel.runtime.artifacts import ArtifactStore
-from agent_gavel.runtime.errors import GavelError
+from agent_gavel.core.errors import GavelError
 from agent_gavel.runtime.policies import PolicyManager
 
 

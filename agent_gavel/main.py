@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import signal
 import sys
@@ -7,6 +8,7 @@ import time
 
 from mcp.server.mcpserver import MCPServer
 
+from .core import config
 from .tools import register_runtime_tools
 
 mcp = MCPServer("agent-gavel")
@@ -16,6 +18,26 @@ register_runtime_tools(mcp)
 
 # 记录启动时父进程 pid，供 Windows 看门狗使用。
 _PARENT_PID = os.getppid()
+
+
+def _setup_logging():
+    """内部错误写文件；stdio 的 stdout 留给 MCP 协议，不能污染。"""
+    try:
+        log_dir = config.data_dir() / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        handler = logging.FileHandler(log_dir / "agent-gavel.log",
+                                      encoding="utf-8")
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s %(message)s"))
+        logger = logging.getLogger("agent_gavel")
+        logger.setLevel(logging.ERROR)
+        if not any(isinstance(h, logging.FileHandler) for h in logger.handlers):
+            logger.addHandler(handler)
+    except Exception:
+        pass
+
+
+_setup_logging()
 
 
 def _set_pdeathsig():
@@ -39,16 +61,18 @@ def _set_pdeathsig():
 
 
 def _shutdown(signum, frame):  # noqa: ARG001
-    """退出信号：先清理新 runtime 的浏览器进程，再退出。"""
+    """退出信号：先尽力清理浏览器进程（有上限），再退出。"""
     try:
-        threading.Thread(target=_cleanup_sync, daemon=True).start()
+        worker = threading.Thread(target=_cleanup_sync, daemon=True)
+        worker.start()
+        worker.join(timeout=10.0)
     except Exception:
         pass
     os._exit(0)
 
 
 async def _shutdown_runtime():
-    """尽力关闭新 runtime 的浏览器进程（跨事件循环失败也无妨）。"""
+    """尽力关闭 runtime 的浏览器进程（跨事件循环失败也无妨）。"""
     try:
         from .runtime import shutdown_runtime
         await shutdown_runtime()
@@ -56,11 +80,14 @@ async def _shutdown_runtime():
         pass
 
 
-def _cleanup_sync():
+def _cleanup_sync(timeout=8.0):
     try:
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(asyncio.gather(_shutdown_runtime()))
-        loop.close()
+        try:
+            loop.run_until_complete(
+                asyncio.wait_for(_shutdown_runtime(), timeout))
+        finally:
+            loop.close()
     except Exception:
         pass
 

@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from agent_gavel.runtime.errors import GavelError
+from agent_gavel.core.errors import GavelError
 from agent_gavel.tools.browser_tools import register_browser_tools
 
 
@@ -54,7 +54,7 @@ async def test_mcp_tools_registered(runtime):
 async def test_launch_and_status(runtime):
     handle = await runtime.ensure_default_browser()
     assert handle.alive
-    st = runtime.status()
+    st = await runtime.status()
     assert st["counts"]["processes"] >= 1
 
 

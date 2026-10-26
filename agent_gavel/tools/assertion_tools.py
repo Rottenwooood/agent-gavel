@@ -3,7 +3,7 @@
 expect 做 UI/业务层断言，三态：pass / fail / ambiguous（有动作前后签名时）。
 """
 
-from ..runtime.errors import GavelError
+from ..core.errors import GavelError
 from .common import backend, guard, ids
 
 
@@ -171,7 +171,7 @@ def register_assertion_tools(mcp):
                                      timeout_s: float = 30.0):
         """等待下载完成并返回 artifact（由 page.on('download') 自动捕获）。"""
         from ..runtime import get_runtime
-        from ..runtime.errors import GavelError
+        from ..core.errors import GavelError
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)
         ev = await rt.events.wait_for(
@@ -191,7 +191,7 @@ def register_assertion_tools(mcp):
                                   timeout_s: float = 30.0):
         """等待由该 page 打开的新页面（popup / target=_blank）。"""
         from ..runtime import get_runtime
-        from ..runtime.errors import GavelError
+        from ..core.errors import GavelError
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)
 
@@ -225,7 +225,7 @@ def register_assertion_tools(mcp):
         """
         import time
         from ..runtime import get_runtime
-        from ..runtime.errors import GavelError
+        from ..core.errors import GavelError
         rt = get_runtime()
         allowed = set(kinds) if kinds else None
 

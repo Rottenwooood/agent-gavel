@@ -1,9 +1,10 @@
 """M4：trace / network / console / errors / metrics MCP 工具（docs/tech-plan.md §8）。"""
 
+import asyncio
 import os
 import tempfile
 
-from ..runtime.errors import GavelError
+from ..core.errors import GavelError
 from .common import guard
 
 
@@ -31,8 +32,9 @@ def register_diagnostics_tools(mcp):
         fd, path = tempfile.mkstemp(suffix=".zip")
         os.close(fd)
         await rt.tracer.stop(ctx, path)
-        info = rt.artifacts.register_file(
-            path, filename=f"{context_id}.trace.zip", kind="trace",
+        info = await asyncio.to_thread(
+            rt.artifacts.register_file, path,
+            filename=f"{context_id}.trace.zip", kind="trace",
             mime_type="application/zip")
         return {"status": "ok", "context_id": context_id,
                 "artifact_id": info["artifact_id"],

@@ -11,12 +11,8 @@ import asyncio
 import re
 import time
 
-from ..runtime.errors import GavelError
+from ..core.errors import GavelError
 from . import schema as _schema
-
-_TARGETLESS = {"navigate", "wait_for_selector", "wait_for_url", "expect",
-               "screenshot", "pdf"}
-
 
 class RunState:
     def __init__(self, run_id, template_id):

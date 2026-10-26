@@ -56,26 +56,37 @@ class BrowserRuntime:
         return self._default_handle
 
     async def ensure_default_browser(self):
+        return await self.ensure_browser()
+
+    async def ensure_browser(self, **opts):
+        """按需启动/复用默认浏览器；参数一致时幂等，模式由调用方或配置决定。"""
+        explicit = any(v is not None for v in opts.values())
         async with self._default_lock:
-            if self._default_handle is None or not self._default_handle.alive:
-                if self._default_handle is not None:
-                    await self.processes.close(self._default_handle)
-                self._default_handle = await self.processes.launch()
+            current = self._default_handle
+            if not explicit:
+                if current is None or not current.alive:
+                    if current is not None:
+                        await self.processes.close(current)
+                    current = await self.processes.launch()
+                    self._default_handle = current
+                return current
+            if current is not None and self.processes.matches(current, **opts):
+                return current
+            if current is not None:
+                await self.processes.close(current)
+            self._default_handle = await self.processes.launch(**opts)
             return self._default_handle
 
     # ---- 异步任务调度（事件回调里用）----
     def schedule(self, coro):
         return asyncio.ensure_future(coro)
 
-    def page_id_for(self, pw_page):
-        h = self.page_mgr._by_key.get(id(pw_page))
-        return h.page_id if h else None
-
     # ---- 状态 ----
-    def status(self):
+    async def status(self):
+        os_browsers = await asyncio.to_thread(self.processes.os_browsers)
         return {
             "processes": self.processes.list(),
-            "os_browsers": self.processes.os_browsers(),
+            "os_browsers": os_browsers,
             "sessions": [s.to_dict() for s in self.sessions.values()],
             "counts": {
                 "sessions": len(self.sessions),

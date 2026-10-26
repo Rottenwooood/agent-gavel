@@ -3,7 +3,9 @@
 产物用 artifact_id 引用；对外**绝不暴露绝对路径**（内部 path 字段剥掉）。
 """
 
-from ..runtime.errors import GavelError
+import asyncio
+
+from ..core.errors import GavelError
 from .common import guard
 
 
@@ -109,7 +111,8 @@ def register_artifact_tools(mcp):
         """抽取下载文档的文本（PDF/Word/文本）。"""
         from ..runtime import get_runtime
         rt = get_runtime()
-        return {"status": "ok", **rt.artifacts.read_text(artifact_id)}
+        return {"status": "ok", **await asyncio.to_thread(
+            rt.artifacts.read_text, artifact_id)}
 
     @mcp.tool()
     @guard

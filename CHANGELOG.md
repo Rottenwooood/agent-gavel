@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### 架构收敛（阶段 0 / 阶段 1）
+
+- 新增 `tests/test_contract_snapshot.py`：真实浏览器端到端固定对外字段、三态语义、
+  `session_busy` 与 `precondition_failed`。
+- 新增 `tests/test_invariants.py` 与 `tests/test_vocabulary.py`：环境变量、词表唯一性、
+  写路径、async 阻塞、包依赖方向等结构不变量。
+- 新增 `agent_gavel/core/`：`config`（唯一环境变量入口）、`errors`（含 `trace_id` 与日志）。
+- 修复：浏览器关闭时 `Browser.close` 的 await 可能永久挂起，导致整个服务卡死。
+- 修复：`AGENT_GAVEL_PROFILE_DIR` 为空字符串时会在进程工作目录创建 `sess_*` 资料目录。
+- 浏览器进程的 kill / 扫描 / 探测改为异步或线程化，不再阻塞事件循环。
+- 退出信号改为等待清理完成（有上限）后再退出，减少孤儿 Chrome。
+- `internal` 错误现在带 `trace_id`，完整堆栈写入 `<数据目录>/logs/agent-gavel.log`。
+- 模板存储收敛为单一用户目录；`workflow_list` / `workflow_get` 不再返回 `layer` 字段。
+- `loader` 拆分 `resolve_id`（只读宽松解析）与精确读写；`delete` / `record_run` 只接受精确 id。
+- 浏览器启动合并为单一实现；因 proxy/channel 等原因切换模式时返回 `mode_resolved` 与
+  `mode_warning`，不再静默改变。
+- 持久 session 的资料目录从临时目录改到 `<数据目录>/profiles/`，重启后可保留。
+
 ## 0.3.2 — 2026-10-14
 
 ### Workflow 修复与增强（依测试反馈）

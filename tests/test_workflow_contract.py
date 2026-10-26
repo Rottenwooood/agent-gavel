@@ -13,7 +13,7 @@
 
 import pytest
 
-from agent_gavel.runtime.errors import GavelError
+from agent_gavel.core.errors import GavelError
 from agent_gavel.workflows import loader
 from agent_gavel.workflows import schema as S
 
@@ -188,18 +188,18 @@ def test_wait_for_text_action_schema():
 
 
 def test_template_delete_and_name_completion():
-    from agent_gavel.runtime.errors import GavelError
+    from agent_gavel.core.errors import GavelError
     norm, errs, _ = S.validate({
         "template_id": "taobao_search_probe", "site": "taobao", "desc": "",
         "steps": [{"id": "a", "action": {"type": "navigate",
                                          "url": "https://e.com"}}]})
     assert not errs
     loader.save(norm)
-    got, _p = loader.get("search_probe")          # 无前缀名自动补全
+    got, _p = loader.load("search_probe")          # 无前缀名自动补全
     assert got["template_id"] == "taobao_search_probe"
-    loader.delete("taobao_search_probe")
+    loader.delete(loader.resolve_id("taobao_search_probe"))
     with pytest.raises(GavelError):
-        loader.get("taobao_search_probe")
+        loader.load("taobao_search_probe")
 
 
 # ---------------- #7 幂等性按动作类型判定 ----------------

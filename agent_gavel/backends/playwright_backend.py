@@ -9,7 +9,7 @@ import re
 import struct
 import time
 
-from ..runtime.errors import GavelError
+from ..core.errors import GavelError
 
 _TARGET_KEYS = ("role", "label", "placeholder", "text", "testid", "css", "xpath")
 

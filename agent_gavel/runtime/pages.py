@@ -6,7 +6,7 @@ dialog 在 M3 补全）。每个 page 带一个 PageActor 保证动作串行。
 
 import asyncio
 
-from .errors import GavelError
+from ..core.errors import GavelError
 from .queue import PageActor
 
 

@@ -6,7 +6,7 @@
 import copy
 import re
 
-from ..runtime.errors import GavelError
+from ..core.errors import GavelError
 
 SCHEMA_VERSION = 2
 

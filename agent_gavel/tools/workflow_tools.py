@@ -1,6 +1,6 @@
 """M4：workflow_* MCP 工具（docs/tech-plan.md §8、§5.15）。"""
 
-from ..runtime.errors import GavelError
+from ..core.errors import GavelError
 from .common import backend, guard
 
 
@@ -48,9 +48,9 @@ def register_workflow_tools(mcp):
     @mcp.tool()
     @guard
     async def workflow_delete(template_id: str):
-        """删除一个用户层模板（包内模板不可删）。"""
+        """删除一个模板（按名称解析后精确删除）。"""
         from ..workflows import loader
-        return {"status": "ok", **loader.delete(template_id)}
+        return {"status": "ok", **loader.delete(loader.resolve_id(template_id))}
 
     @mcp.tool()
     @guard
@@ -75,9 +75,8 @@ def register_workflow_tools(mcp):
     async def workflow_get(name_or_id: str):
         """按 template_id 或 site 取模板全文。"""
         from ..workflows import loader
-        t, path = loader.get(name_or_id)
-        layer = "package" if path.startswith(loader.PKG_DIR) else "user"
-        return {"status": "ok", "template": t, "layer": layer}
+        t, _path = loader.load(name_or_id)
+        return {"status": "ok", "template": t}
 
     @mcp.tool()
     @guard
@@ -153,13 +152,13 @@ def register_workflow_tools(mcp):
         """
         from ..workflows import loader
         rt, runner = _runner()
-        template, path = loader.get(name_or_id)
+        template, _path = loader.load(name_or_id)
         result = await runner.run(
             template, params or {}, session_id=session_id, verbosity=verbosity,
             run_id=run_id, confirm=confirm, wait_s=wait_s, page_id=page_id)
         # 局部修复成功 → 发布新版本
         repaired = [s for s in result.get("steps", []) if s.get("repaired")]
-        if repaired and not path.startswith(loader.PKG_DIR):
+        if repaired:
             for s in repaired:
                 for st in template.get("steps", []):
                     if st.get("id") == s.get("step_id") and s.get("repaired_target"):
