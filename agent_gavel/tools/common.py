@@ -79,7 +79,17 @@ def rec(action_type, target=None, **kw):
 
 
 async def run_with_optional_assert(
-    rt, handle, action_type, fn, *, assertions=None, wait_s=6.0, timeout_s=30.0, record=None
+    rt,
+    handle,
+    action_type,
+    fn,
+    *,
+    assertions=None,
+    wait_s=6.0,
+    timeout_s=30.0,
+    record=None,
+    flatten=False,
+    post=None,
 ):
     """执行动作，若给断言则做三态判定（含 before 签名 diff 判 ambiguous）。"""
     be = backend()
@@ -87,7 +97,12 @@ async def run_with_optional_assert(
     before = await be.page_signature(handle, target=target) if assertions else None
     url_before = handle.page.url
     execution = await handle.actor.submit(action_type, fn, timeout_s=timeout_s + 5)
-    out = {"status": "ok", **ids(handle), "execution": execution}
+    if flatten:
+        out = {"status": "ok", **ids(handle), **execution}
+    else:
+        out = {"status": "ok", **ids(handle), "execution": execution}
+    if post is not None:
+        await post(out, execution, handle)
     passed = None
     if assertions:
         ev = await be.evaluate_checks(

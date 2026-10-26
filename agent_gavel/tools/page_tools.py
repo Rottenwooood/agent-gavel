@@ -3,7 +3,7 @@
 import asyncio
 
 from ..core.errors import GavelError
-from .common import backend, guard, ids
+from .common import backend, guard, ids, rec, run_with_optional_assert
 
 
 def register_page_tools(mcp):
@@ -33,59 +33,50 @@ def register_page_tools(mcp):
         rt = get_runtime()
         if not url:
             raise GavelError("bad_args", "需要 url")
-        rt.policies.check_domain(url)
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
-        before = await be.page_signature(handle) if assertions else None
-        url_before = handle.page.url
-        res = await handle.actor.submit(
+
+        async def post(out, execution, handle):
+            code = execution.get("status_code")
+            if isinstance(code, int) and code >= 400:
+                out["http_error"] = True
+                out["http_status"] = code
+                out["warning"] = f"http_{code}"
+                if fail_on_http_error:
+                    out["status"] = "error"
+                    out["reason"] = "http_error"
+            try:
+                tl = await handle.actor.submit(
+                    "content_len",
+                    lambda: handle.page.evaluate(
+                        "() => document.body ? document.body.innerText.length : 0"
+                    ),
+                )
+            except Exception:
+                tl = None
+            if isinstance(tl, int):
+                out["text_len"] = tl
+                if min_text_chars is not None and tl < min_text_chars:
+                    out["status"] = "fail"
+                    out["reason"] = "empty_page"
+                elif min_text_chars is None and tl < 20:
+                    prev = out.get("warning")
+                    out["warning"] = (
+                        f"{prev} page_looks_empty".strip() if prev else "page_looks_empty"
+                    )
+
+        return await run_with_optional_assert(
+            rt,
+            handle,
             "navigate",
             lambda: be.goto(handle, url, wait_until=wait_until, timeout_s=timeout_s),
-            timeout_s=timeout_s + 5,
+            assertions=assertions,
+            wait_s=wait_s,
+            timeout_s=timeout_s,
+            record=rec("navigate", None, url=url),
+            flatten=True,
+            post=post,
         )
-        out = {"status": "ok", **ids(handle), **res}
-        code = res.get("status_code")
-        if isinstance(code, int) and code >= 400:
-            out["http_error"] = True
-            out["http_status"] = code
-            out["warning"] = f"http_{code}"
-            if fail_on_http_error:
-                out["status"] = "error"
-                out["reason"] = "http_error"
-        try:
-            tl = await handle.actor.submit(
-                "content_len",
-                lambda: handle.page.evaluate(
-                    "() => document.body ? document.body.innerText.length : 0"
-                ),
-            )
-        except Exception:
-            tl = None
-        if isinstance(tl, int):
-            out["text_len"] = tl
-            if min_text_chars is not None and tl < min_text_chars:
-                out["status"] = "fail"
-                out["reason"] = "empty_page"
-            elif min_text_chars is None and tl < 20:
-                prev = out.get("warning")
-                out["warning"] = f"{prev} page_looks_empty".strip() if prev else "page_looks_empty"
-        passed = None
-        if assertions:
-            ev = await be.evaluate_checks(handle, assertions, before_sig=before, wait_s=wait_s)
-            out["status"] = ev["status"]
-            out["assertions"] = ev["assertions"]
-            passed = ev["status"] == "pass"
-            if ev.get("diff") is not None:
-                out["diff"] = ev["diff"]
-        if rt.recorder is not None and rt.recorder.active:
-            rt.recorder.record(
-                handle,
-                {"type": "navigate", "url": url},
-                url_before=url_before,
-                url_after=handle.page.url,
-                checkpoint=assertions if passed else None,
-            )
-        return out
 
     @mcp.tool()
     @guard

@@ -1,6 +1,6 @@
-"""M2：locator_* 页面动作 MCP 工具（docs/tech-plan.md §8）。
+"""locator_* 页面动作工具：动作 + 可选断言一次调用（三态）。
 
-动作 + 可选断言一次调用（三态）；默认 strict locator（多重命中报错给候选）。
+执行路径统一为 `_run_target`；各工具只保留 MCP 需要的签名与差异参数。
 """
 
 from ..core.errors import GavelError
@@ -12,6 +12,37 @@ def _rt_and_handle(page_id):
 
     rt = get_runtime()
     return rt, rt.page_mgr.resolve(page_id)
+
+
+async def _run_target(
+    page_id,
+    action,
+    target,
+    *,
+    record,
+    assertions,
+    wait_s,
+    timeout_s,
+    invoke=None,
+    **kw,
+):
+    rt, handle = _rt_and_handle(page_id)
+    if invoke is None:
+        be = backend()
+
+        def invoke(h):
+            return be.act(h, target, action, timeout_s=timeout_s, **kw)
+
+    return await run_with_optional_assert(
+        rt,
+        handle,
+        action,
+        lambda: invoke(handle),
+        assertions=assertions,
+        wait_s=wait_s,
+        timeout_s=timeout_s,
+        record=record,
+    )
 
 
 def register_action_tools(mcp):
@@ -29,26 +60,18 @@ def register_action_tools(mcp):
         wait_s: float = 6.0,
     ):
         """点击元素。target 见 locator 规范；count=2 双击，button=right 右键。"""
-        rt, handle = _rt_and_handle(page_id)
-        be = backend()
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "click",
-            lambda: be.act(
-                handle,
-                target,
-                "click",
-                button=button,
-                count=count,
-                force=force,
-                wait_navigation=wait_navigation,
-                timeout_s=timeout_s,
-            ),
+            target,
+            record=rec("click", target, button=button),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("click", target, button=button),
+            button=button,
+            count=count,
+            force=force,
+            wait_navigation=wait_navigation,
         )
 
     @mcp.tool()
@@ -62,17 +85,15 @@ def register_action_tools(mcp):
         wait_s: float = 6.0,
     ):
         """清空并填入文本（真实输入）。"""
-        rt, handle = _rt_and_handle(page_id)
-        be = backend()
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "fill",
-            lambda: be.act(handle, target, "fill", value=value, timeout_s=timeout_s),
+            target,
+            record=rec("fill", target, value=value),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("fill", target, value=value),
+            value=value,
         )
 
     @mcp.tool()
@@ -87,19 +108,16 @@ def register_action_tools(mcp):
         wait_s: float = 6.0,
     ):
         """逐键输入文本（含中文/emoji；delay_ms 控制按键间隔）。"""
-        rt, handle = _rt_and_handle(page_id)
-        be = backend()
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "type",
-            lambda: be.act(
-                handle, target, "type", value=text, delay_ms=delay_ms, timeout_s=timeout_s
-            ),
+            target,
+            record=rec("type", target, text=text),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("type", target, text=text),
+            value=text,
+            delay_ms=delay_ms,
         )
 
     @mcp.tool()
@@ -114,24 +132,16 @@ def register_action_tools(mcp):
         wait_s: float = 6.0,
     ):
         """对元素按键/组合键，如 Enter / Tab / Control+A / Shift+Tab。"""
-        rt, handle = _rt_and_handle(page_id)
-        be = backend()
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "press",
-            lambda: be.act(
-                handle,
-                target,
-                "press",
-                keys=keys,
-                timeout_s=timeout_s,
-                wait_navigation=wait_navigation,
-            ),
+            target,
+            record=rec("press", target, keys=keys),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("press", target, keys=keys),
+            keys=keys,
+            wait_navigation=wait_navigation,
         )
 
     @mcp.tool()
@@ -144,17 +154,14 @@ def register_action_tools(mcp):
         wait_s: float = 6.0,
     ):
         """悬停元素（触发 tooltip/hover 态）。"""
-        rt, handle = _rt_and_handle(page_id)
-        be = backend()
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "hover",
-            lambda: be.act(handle, target, "hover", timeout_s=timeout_s),
+            target,
+            record=rec("hover", target),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("hover", target),
         )
 
     @mcp.tool()
@@ -167,17 +174,14 @@ def register_action_tools(mcp):
         wait_s: float = 6.0,
     ):
         """聚焦元素（不清空）。"""
-        rt, handle = _rt_and_handle(page_id)
-        be = backend()
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "focus",
-            lambda: be.act(handle, target, "focus", timeout_s=timeout_s),
+            target,
+            record=rec("focus", target),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("focus", target),
         )
 
     @mcp.tool()
@@ -190,17 +194,14 @@ def register_action_tools(mcp):
         wait_s: float = 6.0,
     ):
         """清空元素内容。"""
-        rt, handle = _rt_and_handle(page_id)
-        be = backend()
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "clear",
-            lambda: be.act(handle, target, "clear", timeout_s=timeout_s),
+            target,
+            record=rec("clear", target),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("clear", target),
         )
 
     @mcp.tool()
@@ -219,28 +220,28 @@ def register_action_tools(mcp):
         be = backend()
         if target:
 
-            def fn():
-                return be.act(handle, target, "scroll", timeout_s=timeout_s)
+            def invoke(h):
+                return be.act(h, target, "scroll", timeout_s=timeout_s)
 
         else:
 
-            def fn():
+            def invoke(h):
                 return be.page_scroll(
-                    handle.page,
+                    h.page,
                     direction=direction,
                     amount=amount,
                     timeout_s=timeout_s,
                 )
 
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "scroll",
-            fn,
+            target,
+            record=rec("scroll", target, direction=direction, amount=amount),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("scroll", target, direction=direction, amount=amount),
+            invoke=invoke,
         )
 
     @mcp.tool()
@@ -253,17 +254,14 @@ def register_action_tools(mcp):
         wait_s: float = 6.0,
     ):
         """勾选 checkbox/radio。"""
-        rt, handle = _rt_and_handle(page_id)
-        be = backend()
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "check",
-            lambda: be.act(handle, target, "check", timeout_s=timeout_s),
+            target,
+            record=rec("check", target),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("check", target),
         )
 
     @mcp.tool()
@@ -276,17 +274,14 @@ def register_action_tools(mcp):
         wait_s: float = 6.0,
     ):
         """取消勾选 checkbox。"""
-        rt, handle = _rt_and_handle(page_id)
-        be = backend()
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "uncheck",
-            lambda: be.act(handle, target, "uncheck", timeout_s=timeout_s),
+            target,
+            record=rec("uncheck", target),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("uncheck", target),
         )
 
     @mcp.tool()
@@ -301,19 +296,16 @@ def register_action_tools(mcp):
         wait_s: float = 6.0,
     ):
         """选择 <select> 选项。select_by: value|label|index。"""
-        rt, handle = _rt_and_handle(page_id)
-        be = backend()
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "select",
-            lambda: be.act(
-                handle, target, "select", value=value, select_by=select_by, timeout_s=timeout_s
-            ),
+            target,
+            record=rec("select", target, value=value, select_by=select_by),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("select", target, value=value, select_by=select_by),
+            value=value,
+            select_by=select_by,
         )
 
     @mcp.tool()
@@ -327,17 +319,15 @@ def register_action_tools(mcp):
         wait_s: float = 6.0,
     ):
         """拖拽：把 target 拖到 destination。"""
-        rt, handle = _rt_and_handle(page_id)
-        be = backend()
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "drag",
-            lambda: be.act(handle, target, "drag", destination=destination, timeout_s=timeout_s),
+            target,
+            record=rec("drag", target, destination=destination),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("drag", target, destination=destination),
+            destination=destination,
         )
 
     @mcp.tool()
@@ -351,28 +341,30 @@ def register_action_tools(mcp):
         wait_s: float = 6.0,
     ):
         """给 <input type=file> 设置文件（受文件白名单约束）。"""
-        rt, handle = _rt_and_handle(page_id)
+        rt, _handle = _rt_and_handle(page_id)
         if not files:
             raise GavelError("bad_args", "需要 files（路径或路径列表）")
-        for p in files if isinstance(files, list) else [files]:
-            rt.policies.check_local_path(p, purpose="上传")
-        be = backend()
+        for path in files if isinstance(files, list) else [files]:
+            rt.policies.check_local_path(path, purpose="上传")
         payload = files if isinstance(files, list) else [files]
-        return await run_with_optional_assert(
-            rt,
-            handle,
+        return await _run_target(
+            page_id,
             "upload",
-            lambda: be.act(handle, target, "upload", files=payload, timeout_s=timeout_s),
+            target,
+            record=rec("upload", target, files=payload),
             assertions=assertions,
             wait_s=wait_s,
             timeout_s=timeout_s,
-            record=rec("upload", target, files=payload),
+            files=payload,
         )
 
     @mcp.tool()
     @guard
     async def page_handle_dialog(
-        page_id: str = None, action: str = "accept", prompt_text: str = None, policy: str = None
+        page_id: str = None,
+        action: str = "accept",
+        prompt_text: str = None,
+        policy: str = None,
     ):
         """处理页面对话框（alert/confirm/prompt）。
 

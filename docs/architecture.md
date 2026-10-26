@@ -123,7 +123,7 @@ agent_gavel/
     loader.py          # resolve_id（只读）+ get/save/delete（精确）
 
   tools/
-    common.py          # guard / backend() / envelope() / action_tool()
+    common.py          # guard / backend() / envelope() / run_with_optional_assert()
     browser_tools.py       # 浏览器进程
     session_tools.py       # 会话
     context_tools.py       # 容器

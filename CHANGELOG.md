@@ -6,6 +6,8 @@
 
 - 所有工具经 `guard` 统一封装：`status` 取值受限，自动补 `operation_id` 与 `elapsed_ms`。
 - 状态归一：`no_match` → `fail` + `reason`；`partial_error` → `ok` + `complete:false`。
+- `page_navigate` 复用统一执行流水线（`post` 钩子承接 HTTP/空页检查）。
+- `locator_*` 共用 `_run_target`，删除重复执行代码；签名保持显式。
 - 删除三个别名工具：`page_focus`、`locator_set_files`、`workflow_replay`（工具数 97 → 94）。
 - 后端拆分为 `locator` / `reader` / `jsrender` / `frames` / `util`，`__init__` 只保留编排。
 - 工具按资源拆分：`session_tools` / `context_tools` / `page_lifecycle`，`browser_tools` 只留浏览器。
