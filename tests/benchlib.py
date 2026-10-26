@@ -86,10 +86,10 @@ async def run_suite(rt, base, n=30):
         lambda: h.actor.submit("count", lambda: h.page.locator("#heading").count()), n)
     report["latency"]["click"] = await measure(
         lambda: h.actor.submit("click", lambda: be.act(
-            h.page, {"by": "css", "value": "#btn"}, "click")), n)
+            h, {"by": "css", "value": "#btn"}, "click")), n)
     report["latency"]["fill"] = await measure(
         lambda: h.actor.submit("fill", lambda: be.act(
-            h.page, {"by": "css", "value": "#text-input"}, "fill", value="x")), n)
+            h, {"by": "css", "value": "#text-input"}, "fill", value="x")), n)
     report["latency"]["snapshot_summary"] = await measure(
         lambda: h.actor.submit("snap", lambda: be.snapshot(h.page, level="summary")),
         min(n, 15))

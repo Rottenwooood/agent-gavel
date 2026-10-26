@@ -96,7 +96,8 @@ def register_workflow_tools(mcp):
     @guard
     async def workflow_record_start(session_id: str = None,
                                     context_id: str = None,
-                                    page_id: str = None):
+                                    page_id: str = None,
+                                    keep_all: bool = False):
         """开始录制：之后通过 locator_*/page_navigate 执行的动作会被记录。"""
         from ..runtime import get_runtime
         rt = get_runtime()
@@ -108,7 +109,8 @@ def register_workflow_tools(mcp):
                 h = None
         info = rt.recorder.start(
             context_id=context_id or (h.context_id if h else None),
-            page_id=page_id or (h.page_id if h else None))
+            page_id=page_id or (h.page_id if h else None),
+            keep_all=keep_all)
         return {"status": "ok", **info}
 
     @mcp.tool()
@@ -116,7 +118,8 @@ def register_workflow_tools(mcp):
     async def workflow_record_stop(site: str = None, desc: str = "",
                                    name: str = None, template_id: str = None,
                                    parameterize: dict = None,
-                                   sensitive: list = None):
+                                   sensitive: list = None,
+                                   auto_checkpoint: bool = False):
         """停止录制，编译成模板草稿并保存。"""
         from ..runtime import get_runtime
         from ..workflows import compiler, loader
@@ -128,7 +131,8 @@ def register_workflow_tools(mcp):
                                         loader.slugify(name) if name else "")
         draft, errors, warnings = compiler.compile(
             rec.steps, template_id=tid, site=site or "", desc=desc,
-            parameterize=parameterize, sensitive=sensitive)
+            parameterize=parameterize, sensitive=sensitive,
+            auto_checkpoint=auto_checkpoint)
         if errors:
             return {"status": "error", "reason": "compile_failed",
                     "errors": errors, "warnings": warnings,

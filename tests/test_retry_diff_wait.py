@@ -81,8 +81,8 @@ async def test_assertion_wakes_before_timeout(page):
 
 
 def test_event_predicate_skips_frames():
-    from agent_gavel.backends.playwright_backend import PlaywrightBackend
-    be = PlaywrightBackend()
-    assert be._event_predicate([{"selector": "#x", "op": "exists",
-                                 "frame": "#f"}]) is None
-    assert be._event_predicate([{"selector": "#x", "op": "exists"}]) is not None
+    from agent_gavel.backends.playwright.assertion import predicate
+    from agent_gavel.core.checks import parse
+    assert predicate(parse([{"selector": "#x", "op": "exists",
+                             "frame": "#f"}])) is None
+    assert predicate(parse([{"selector": "#x", "op": "exists"}])) is not None

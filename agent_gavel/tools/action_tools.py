@@ -26,7 +26,7 @@ def register_action_tools(mcp):
         be = backend()
         return await run_with_optional_assert(
             rt, handle, "click",
-            lambda: be.act(handle.page, target, "click", button=button,
+            lambda: be.act(handle, target, "click", button=button,
                            count=count, force=force,
                            wait_navigation=wait_navigation, timeout_s=timeout_s),
             assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
@@ -42,7 +42,7 @@ def register_action_tools(mcp):
         be = backend()
         return await run_with_optional_assert(
             rt, handle, "fill",
-            lambda: be.act(handle.page, target, "fill", value=value,
+            lambda: be.act(handle, target, "fill", value=value,
                            timeout_s=timeout_s),
             assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
             record=rec("fill", target, value=value))
@@ -58,7 +58,7 @@ def register_action_tools(mcp):
         be = backend()
         return await run_with_optional_assert(
             rt, handle, "type",
-            lambda: be.act(handle.page, target, "type", value=text,
+            lambda: be.act(handle, target, "type", value=text,
                            delay_ms=delay_ms, timeout_s=timeout_s),
             assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
             record=rec("type", target, text=text))
@@ -74,7 +74,7 @@ def register_action_tools(mcp):
         be = backend()
         return await run_with_optional_assert(
             rt, handle, "press",
-            lambda: be.act(handle.page, target, "press", keys=keys,
+            lambda: be.act(handle, target, "press", keys=keys,
                            timeout_s=timeout_s,
                            wait_navigation=wait_navigation),
             assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
@@ -90,7 +90,7 @@ def register_action_tools(mcp):
         be = backend()
         return await run_with_optional_assert(
             rt, handle, "hover",
-            lambda: be.act(handle.page, target, "hover", timeout_s=timeout_s),
+            lambda: be.act(handle, target, "hover", timeout_s=timeout_s),
             assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
             record=rec("hover", target))
 
@@ -104,7 +104,7 @@ def register_action_tools(mcp):
         be = backend()
         return await run_with_optional_assert(
             rt, handle, "focus",
-            lambda: be.act(handle.page, target, "focus", timeout_s=timeout_s),
+            lambda: be.act(handle, target, "focus", timeout_s=timeout_s),
             assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
             record=rec("focus", target))
 
@@ -118,7 +118,7 @@ def register_action_tools(mcp):
         be = backend()
         return await run_with_optional_assert(
             rt, handle, "clear",
-            lambda: be.act(handle.page, target, "clear", timeout_s=timeout_s),
+            lambda: be.act(handle, target, "clear", timeout_s=timeout_s),
             assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
             record=rec("clear", target))
 
@@ -132,7 +132,7 @@ def register_action_tools(mcp):
         rt, handle = _rt_and_handle(page_id)
         be = backend()
         if target:
-            fn = lambda: be.act(handle.page, target, "scroll",  # noqa: E731
+            fn = lambda: be.act(handle, target, "scroll",  # noqa: E731
                                 timeout_s=timeout_s)
         else:
             fn = lambda: be.page_scroll(handle.page, direction=direction,  # noqa: E731
@@ -152,7 +152,7 @@ def register_action_tools(mcp):
         be = backend()
         return await run_with_optional_assert(
             rt, handle, "check",
-            lambda: be.act(handle.page, target, "check", timeout_s=timeout_s),
+            lambda: be.act(handle, target, "check", timeout_s=timeout_s),
             assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
             record=rec("check", target))
 
@@ -166,7 +166,7 @@ def register_action_tools(mcp):
         be = backend()
         return await run_with_optional_assert(
             rt, handle, "uncheck",
-            lambda: be.act(handle.page, target, "uncheck", timeout_s=timeout_s),
+            lambda: be.act(handle, target, "uncheck", timeout_s=timeout_s),
             assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
             record=rec("uncheck", target))
 
@@ -181,7 +181,7 @@ def register_action_tools(mcp):
         be = backend()
         return await run_with_optional_assert(
             rt, handle, "select",
-            lambda: be.act(handle.page, target, "select", value=value,
+            lambda: be.act(handle, target, "select", value=value,
                            select_by=select_by, timeout_s=timeout_s),
             assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
             record=rec("select", target, value=value, select_by=select_by))
@@ -196,7 +196,7 @@ def register_action_tools(mcp):
         be = backend()
         return await run_with_optional_assert(
             rt, handle, "drag",
-            lambda: be.act(handle.page, target, "drag",
+            lambda: be.act(handle, target, "drag",
                            destination=destination, timeout_s=timeout_s),
             assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
             record=rec("drag", target, destination=destination))
@@ -216,7 +216,7 @@ def register_action_tools(mcp):
         payload = files if isinstance(files, list) else [files]
         return await run_with_optional_assert(
             rt, handle, "upload",
-            lambda: be.act(handle.page, target, "upload", files=payload,
+            lambda: be.act(handle, target, "upload", files=payload,
                            timeout_s=timeout_s),
             assertions=assertions, wait_s=wait_s, timeout_s=timeout_s,
             record=rec("upload", target, files=payload))

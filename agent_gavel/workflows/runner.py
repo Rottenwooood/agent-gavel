@@ -11,6 +11,8 @@ import asyncio
 import re
 import time
 
+from ..core.actions import spec as action_spec
+from ..core.checks import from_checkpoint
 from ..core.errors import GavelError
 from . import schema as _schema
 
@@ -218,10 +220,8 @@ class Runner:
         act = step["action"]
         atype = act["type"]
         wait_s = ctx.get("wait_s", 6.0)
-        checks = _schema.checkpoint_to_checks(step.get("checkpoint"))
-        if isinstance(checks, dict) and "checkpoint" in checks:
-            checks = checks["checkpoint"]
-        before = await be.page_signature(page.page, target=act.get("target")) \
+        checks = from_checkpoint(step.get("checkpoint"))
+        before = await be.page_signature(page, target=act.get("target")) \
             if checks else None
         started = time.perf_counter()
         entry = {"step_id": step["id"], "action_type": atype}
@@ -250,7 +250,7 @@ class Runner:
             return entry
         entry["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
         if checks and atype != "expect":
-            ev = await be.evaluate_checks(page.page, checks,
+            ev = await be.evaluate_checks(page, checks,
                                           before_sig=before, wait_s=wait_s,
                                           target=act.get("target"))
             entry["status"] = ev["status"]
@@ -262,67 +262,96 @@ class Runner:
             entry["checkpoint_passed"] = entry["status"] == "pass"
         return entry
 
+    _HANDLERS = {
+        "navigate": "_do_navigate",
+        "wait_for_selector": "_do_wait_selector",
+        "wait_for_url": "_do_wait_url",
+        "wait_for_text": "_do_wait_text",
+        "expect": "_do_expect",
+        "screenshot": "_do_screenshot",
+        "pdf": "_do_pdf",
+    }
+
     async def _dispatch(self, page, act):
+        name = self._HANDLERS.get(act["type"])
+        if name is not None:
+            return await getattr(self, name)(page, act)
+        if action_spec(act["type"]).target_required:
+            return await self._do_target(page, act)
+        raise GavelError("bad_action", f"未知动作：{act['type']}")
+
+    async def _do_navigate(self, page, act):
+        be, rt = self.backend, self.runtime
+        rt.policies.check_domain(act["url"])
+        return await page.actor.submit(
+            "navigate",
+            lambda: be.goto(page, act["url"],
+                            wait_until=act.get("wait_until", "domcontentloaded"),
+                            timeout_s=act.get("timeout_s", 30)))
+
+    async def _do_wait_selector(self, page, act):
         be = self.backend
-        rt = self.runtime
+        return await page.actor.submit(
+            "wait_for_selector",
+            lambda: be.wait_for_selector(page, act["selector"],
+                                         state=act.get("state", "visible"),
+                                         timeout_s=act.get("timeout_s", 30)))
+
+    async def _do_wait_url(self, page, act):
+        be = self.backend
+        return await page.actor.submit(
+            "wait_for_url",
+            lambda: be.wait_for_url(page, act["url"],
+                                    timeout_s=act.get("timeout_s", 30)))
+
+    async def _do_wait_text(self, page, act):
+        be = self.backend
+        return await page.actor.submit(
+            "wait_for_text",
+            lambda: be.wait_for_text(page, act["text"],
+                                     timeout_s=act.get("timeout_s", 30),
+                                     selector=act.get("selector")))
+
+    async def _do_expect(self, page, act):
+        ev = await self.backend.evaluate_checks(
+            page, act.get("checks") or act,
+            wait_s=act.get("wait_s", 6.0))
+        return {"action": "expect", "status": ev["status"],
+                "assertions": ev.get("assertions"), "diff": ev.get("diff")}
+
+    async def _do_screenshot(self, page, act):
+        be, rt = self.backend, self.runtime
+        res = await page.actor.submit(
+            "screenshot",
+            lambda: be.screenshot(page.page, full_page=bool(act.get("full_page"))))
+        info = await asyncio.to_thread(
+            rt.artifacts.save_bytes, res["data"],
+            filename=f"{page.page_id}.png", kind="screenshot",
+            mime_type="image/png", page_id=page.page_id,
+            session_id=page.context.lease_session_id())
+        return {"action": "screenshot", "artifact_id": info["artifact_id"]}
+
+    async def _do_pdf(self, page, act):
+        be, rt = self.backend, self.runtime
+        res = await page.actor.submit("pdf", lambda: be.pdf(page))
+        info = await asyncio.to_thread(
+            rt.artifacts.save_bytes, res["data"],
+            filename=f"{page.page_id}.pdf", kind="pdf",
+            mime_type="application/pdf", page_id=page.page_id,
+            session_id=page.context.lease_session_id())
+        return {"action": "pdf", "artifact_id": info["artifact_id"]}
+
+    async def _do_target(self, page, act):
+        be = self.backend
         atype = act["type"]
-        if atype == "navigate":
-            rt.policies.check_domain(act["url"])
-            return await page.actor.submit(
-                "navigate", lambda: be.goto(page, act["url"],
-                                            wait_until=act.get("wait_until",
-                                                               "domcontentloaded"),
-                                            timeout_s=act.get("timeout_s", 30)))
-        if atype == "wait_for_selector":
-            return await page.actor.submit(
-                "wait_for_selector",
-                lambda: be.wait_for_selector(page, act["selector"],
-                                             state=act.get("state", "visible"),
-                                             timeout_s=act.get("timeout_s", 30)))
-        if atype == "wait_for_url":
-            return await page.actor.submit(
-                "wait_for_url", lambda: be.wait_for_url(
-                    page, act["url"], timeout_s=act.get("timeout_s", 30)))
-        if atype == "wait_for_text":
-            return await page.actor.submit(
-                "wait_for_text",
-                lambda: be.wait_for_text(page, act["text"],
-                                         timeout_s=act.get("timeout_s", 30),
-                                         selector=act.get("selector")))
-        if atype == "expect":
-            ev = await be.evaluate_checks(page.page, act.get("checks") or act,
-                                          wait_s=act.get("wait_s", 6.0))
-            return {"action": "expect", "status": ev["status"],
-                    "assertions": ev.get("assertions"), "diff": ev.get("diff")}
-        if atype == "screenshot":
-            res = await page.actor.submit(
-                "screenshot", lambda: be.screenshot(page.page,
-                                                    full_page=bool(act.get("full_page"))))
-            info = await asyncio.to_thread(
-                rt.artifacts.save_bytes, res["data"],
-                filename=f"{page.page_id}.png", kind="screenshot",
-                mime_type="image/png", page_id=page.page_id,
-                session_id=page.context.lease_session_id())
-            return {"action": "screenshot", "artifact_id": info["artifact_id"]}
-        if atype == "pdf":
-            res = await page.actor.submit("pdf", lambda: be.pdf(page))
-            info = await asyncio.to_thread(
-                rt.artifacts.save_bytes, res["data"],
-                filename=f"{page.page_id}.pdf", kind="pdf",
-                mime_type="application/pdf", page_id=page.page_id,
-                session_id=page.context.lease_session_id())
-            return {"action": "pdf", "artifact_id": info["artifact_id"]}
-        # 目标型动作
-        kw = {}
-        for k in ("button", "count", "value", "text", "keys", "select_by",
-                  "files", "destination", "full_page"):
-            if k in act:
-                kw[k] = act[k]
-        # type 用 text 传值的兼容（schema 已归一，这里再兜一层）
+        kw = {k: act[k] for k in
+              ("button", "count", "force", "value", "text", "keys",
+               "select_by", "files", "destination", "delay_ms")
+              if k in act}
         if atype == "type" and "value" not in kw and act.get("text") is not None:
             kw["value"] = act["text"]
         return await page.actor.submit(
-            atype, lambda: be.act(page.page, act.get("target"), atype,
+            atype, lambda: be.act(page, act.get("target"), atype,
                                   timeout_s=act.get("timeout_s", 30), **kw))
 
     @staticmethod
@@ -352,7 +381,7 @@ class Runner:
         策略由模板的 failure_policy.retry 控制：none 禁用，safe_only（默认）。
         """
         act = step["action"]
-        if act.get("type") not in _TARGET_ACTIONS_SAFE:
+        if action_spec(act["type"]).retry_scope != "target":
             return None
         if not self._retry_allowed(step, res):
             return None
@@ -423,7 +452,7 @@ class Runner:
         if policy != "explore_local_step":
             return None
         act = step["action"]
-        if act.get("type") not in _TARGET_ACTIONS_SAFE:
+        if action_spec(act["type"]).retry_scope != "target":
             return None
         # 副作用安全：需确认 / 不可重试 / 非幂等的步骤，失败后绝不重新点击
         if not self._retry_allowed(step, res):
@@ -470,5 +499,3 @@ class Runner:
         return None
 
 
-_TARGET_ACTIONS_SAFE = {"click", "fill", "type", "press", "check", "uncheck",
-                        "select", "hover", "focus", "clear"}

@@ -67,7 +67,7 @@ async def test_record_keeps_assertions_as_checkpoint(gavel_tools,
 async def test_compile_keeps_hover(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
     _s, _c, pid = await _session_on(T, base)
-    await T["workflow_record_start"](page_id=pid)
+    await T["workflow_record_start"](page_id=pid, keep_all=True)
     await T["locator_hover"](page_id=pid,
                              target={"by": "css", "value": "#btn"})
     stop = await T["workflow_record_stop"](site="ts", name="hover_rec")
@@ -157,22 +157,23 @@ def test_template_metadata_fields():
 # ---------------- 断言归一（单条字典/顶层op/扁平/expected） ----------------
 
 def test_normalize_checks_forms():
-    from agent_gavel.backends.playwright_backend import PlaywrightBackend as B
-    # 单条 check 字段形态：不能被"顶层 op"逻辑误绑
-    n = B._normalize_checks({"read": "text", "selector": "#h", "op": "eq",
-                             "value": "READY"})
-    assert n == [{"read": "text", "selector": "#h", "op": "eq", "value": "READY"}], n
+    from agent_gavel.core.checks import parse
+    # 单条 check 字段形态
+    n = parse({"read": "text", "selector": "#h", "op": "eq",
+               "value": "READY"})
+    assert n[0].read == "text" and n[0].selector == "#h" \
+        and n[0].op == "eq" and n[0].expected == "READY"
     # 顶层 op + 目标键
-    n2 = B._normalize_checks({"title": "百度", "op": "contains"})
-    assert n2[0]["name"] == "title" and n2[0]["read"] == "title" \
-        and n2[0]["value"] == "百度" and n2[0]["op"] == "contains", n2
+    n2 = parse({"title": "百度", "op": "contains"})
+    assert n2[0].name == "title" and n2[0].read == "title" \
+        and n2[0].expected == "百度" and n2[0].op == "contains"
     # 扁平写法
-    n3 = B._normalize_checks({"url_contains": "x"})
-    assert n3[0]["read"] == "url" and n3[0]["op"] == "contains" \
-        and n3[0]["value"] == "x", n3
+    n3 = parse({"url_contains": "x"})
+    assert n3[0].read == "url" and n3[0].op == "contains" \
+        and n3[0].expected == "x"
     # expected 别名
-    n4 = B._normalize_checks({"title": {"op": "contains", "expected": "百度"}})
-    assert n4[0]["value"] == "百度" and n4[0]["name"] == "title", n4
+    n4 = parse({"title": {"op": "contains", "expected": "百度"}})
+    assert n4[0].expected == "百度" and n4[0].name == "title"
 
 
 def test_wait_for_text_action_schema():

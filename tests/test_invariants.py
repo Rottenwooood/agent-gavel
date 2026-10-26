@@ -63,9 +63,8 @@ def test_i1_env_only_in_config():
 
 # 阶段 3/4 结束时清零。
 PAGE_FIRST_WHITELIST = {
-    "retry_on_nav_race", "resolve", "act", "page_scroll", "read", "text",
+    "retry_on_nav_race", "resolve", "page_scroll", "read", "text",
     "snapshot", "explore", "find_text", "page_meta", "screenshot",
-    "page_signature", "evaluate_checks",
 }
 
 
@@ -103,12 +102,7 @@ VOCAB_OWNERS = {
 }
 
 # 阶段 3 结束时清零。
-VOCAB_WHITELIST = {
-    ("workflows/schema.py", "ACTION_TYPES"),
-    ("backends/playwright_backend.py", "_READ_PREFIX"),
-    ("backends/playwright_backend.py", "_OP_SUFFIXES"),
-    ("backends/playwright_backend.py", "_READ_KINDS"),
-}
+VOCAB_WHITELIST = set()
 
 
 def test_i3_i4_vocabulary_single_owner():

@@ -52,11 +52,38 @@ async def runtime():
 
 
 
+def _kill_test_chrome():
+    """杀掉用测试资料目录启动的 Chrome（含未登记的残留）。"""
+    import signal
+    profile = os.environ.get("AGENT_GAVEL_BROWSER_PROFILE")
+    if not profile or not os.path.isdir("/proc"):
+        return
+    markers = (f"--user-data-dir={profile}", "--user-data-dir=/tmp/agent-gavel-test-")
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/cmdline", "rb") as f:
+                cmd = f.read().decode("utf-8", "ignore")
+        except Exception:
+            continue
+        if any(marker in cmd for marker in markers) and "chrome" in cmd.lower():
+            try:
+                os.kill(int(name), signal.SIGKILL)
+            except Exception:
+                pass
+
+
+import atexit
+atexit.register(_kill_test_chrome)
+
+
 def pytest_sessionfinish(session, exitstatus):
     from agent_gavel.runtime import browser_runtime
     rt = browser_runtime._RUNTIME
     if rt is not None:
         rt.processes.kill_all_sync()
+    _kill_test_chrome()
 
 
 class FakeMCP:

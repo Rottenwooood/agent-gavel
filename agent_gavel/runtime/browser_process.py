@@ -13,6 +13,7 @@
 import asyncio
 import json
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -60,6 +61,29 @@ def _launch_args():
     if extra:
         args += extra.split()
     return args
+
+
+def _chrome_version(binary):
+    try:
+        out = subprocess.run([binary, "--version"], capture_output=True,
+                             text=True, timeout=5).stdout
+    except Exception:
+        return None
+    found = re.search(r"(\d+\.\d+\.\d+\.\d+)", out or "")
+    return found.group(1) if found else None
+
+
+def _desktop_user_agent(version):
+    """无头启动时给默认容器用的桌面 UA，避免 navigator.userAgent 暴露 HeadlessChrome。"""
+    v = version or "140.0.0.0"
+    if sys.platform.startswith("win"):
+        platform = "Windows NT 10.0; Win64; x64"
+    elif sys.platform == "darwin":
+        platform = "Macintosh; Intel Mac OS X 10_15_7"
+    else:
+        platform = "X11; Linux x86_64"
+    return ("Mozilla/5.0 (" + platform + ") AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/" + v + " Safari/537.36")
 
 
 def _free_port() -> int:
@@ -333,6 +357,9 @@ class BrowserProcessManager:
                  "--remote-allow-origins=*", "--no-default-browser-check"]
         if headless:
             args += ["--headless=new", "--window-size=1920,1080"]
+            # 默认持久容器无法事后改 UA，只能在启动参数里给桌面 UA。
+            version = await asyncio.to_thread(_chrome_version, binary)
+            args.append(f"--user-agent={_desktop_user_agent(version)}")
         args.append("about:blank")
         logf = open(os.path.join(udd, "chrome.log"), "ab")
         kwargs = {"stdout": logf, "stderr": logf}

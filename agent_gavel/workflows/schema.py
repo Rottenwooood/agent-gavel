@@ -6,29 +6,13 @@
 import copy
 import re
 
+from ..core import actions as action_specs
 from ..core.errors import GavelError
 
 SCHEMA_VERSION = 2
 
 # 模板状态机（社区分享用）
 TEMPLATE_STATUSES = {"draft", "verified", "broken", "deprecated"}
-
-ACTION_TYPES = {
-    "navigate", "click", "fill", "type", "press", "check", "uncheck", "select",
-    "hover", "focus", "clear", "scroll", "upload", "drag",
-    "wait_for_selector", "wait_for_url", "wait_for_text", "expect",
-    "screenshot", "pdf",
-}
-_TARGET_ACTIONS = {"click", "fill", "type", "press", "check", "uncheck",
-                   "select", "hover", "focus", "clear", "scroll", "upload",
-                   "drag"}
-# 语义上可重复执行而不产生新副作用的动作（重试/修复默认只对这些放行）。
-# 注意：click/press/type/drag 不在此列——它们可能提交/追加，默认不可自动重试。
-_INHERENTLY_IDEMPOTENT = {"navigate", "fill", "select", "check", "uncheck",
-                          "hover", "focus", "clear", "scroll", "upload"}
-_SIDE_EFFECT_HINTS = ("提交", "保存", "删除", "支付", "付款", "购买", "下单",
-                      "确认", "submit", "save", "delete", "pay", "buy",
-                      "purchase", "confirm", "send")
 
 _VAR_RE = re.compile(r"\$([A-Z][A-Z0-9_]*)")
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
@@ -93,49 +77,6 @@ def norm_parameters(template):
     return out
 
 
-def checkpoint_to_checks(cp):
-    """把 checkpoint 描述归一成断言 checks（dict 或 list）。"""
-    if not cp:
-        return None
-    if isinstance(cp, dict) and "checks" in cp:
-        return cp["checks"]
-    if isinstance(cp, dict) and "op" in cp:
-        return cp
-    if not isinstance(cp, dict):
-        return None
-    t = cp.get("type")
-    val = cp.get("value")
-    sel = cp.get("selector")
-    mapping = {
-        "url_contains": {"read": "url", "op": "contains", "value": val},
-        "url_eq": {"read": "url", "op": "eq", "value": val},
-        "url_matches": {"read": "url", "op": "regex", "value": val},
-        "title_contains": {"read": "title", "op": "contains", "value": val},
-        "text_contains": {"read": "text", "selector": sel, "op": "contains",
-                          "value": val},
-        "text_eq": {"read": "text", "selector": sel, "op": "eq", "value": val},
-        "value_eq": {"read": "value", "selector": sel, "op": "eq", "value": val},
-        "exists": {"read": "count", "selector": sel, "op": "exists"},
-        "not_exists": {"read": "count", "selector": sel, "op": "not_exists"},
-        "count_eq": {"read": "count", "selector": sel, "op": "count_eq",
-                     "value": val},
-    }
-    if t in mapping:
-        chk = mapping[t]
-        if cp.get("frame"):
-            chk["frame"] = cp["frame"]
-        return {"checkpoint": chk}
-    return cp
-
-
-def _looks_side_effect(action):
-    text = ""
-    target = action.get("target") or {}
-    text = str(target.get("value", "")) + " " + str(target.get("name", ""))
-    low = text.lower()
-    return any(h in text or h in low for h in _SIDE_EFFECT_HINTS)
-
-
 def validate(template):
     """校验并归一；返回 (normalized, errors, warnings)。"""
     errors, warnings = [], []
@@ -163,23 +104,19 @@ def validate(template):
             errors.append(f"steps[{i}] 缺少 action.type")
             continue
         atype = act["type"]
-        if atype not in ACTION_TYPES:
+        if atype not in action_specs.ACTIONS:
             errors.append(f"steps[{i}] 未知 action.type：{atype}")
             continue
+        sp = action_specs.spec(atype)
         # 归一：type/fill 用 text 传值的一律落到 value（避免"没输入却报成功"）
         if atype in ("type", "fill") and "value" not in act \
                 and act.get("text") is not None:
             act["value"] = act["text"]
-        if atype in _TARGET_ACTIONS and not act.get("target"):
+        if sp.target_required and not act.get("target"):
             errors.append(f"steps[{i}] action={atype} 缺少 target")
-        if atype == "navigate" and not act.get("url"):
-            errors.append(f"steps[{i}] navigate 缺少 url")
-        if atype == "wait_for_text" and not act.get("text"):
-            errors.append(f"steps[{i}] wait_for_text 缺少 text")
-        if atype == "wait_for_selector" and not act.get("selector"):
-            errors.append(f"steps[{i}] wait_for_selector 缺少 selector")
-        if atype in ("fill", "type") and "value" not in act:
-            errors.append(f"steps[{i}] {atype} 缺少 value")
+        for field in sp.required_fields:
+            if not act.get(field):
+                errors.append(f"steps[{i}] {atype} 缺少 {field}")
         step = {
             "id": st.get("id") or f"step{i + 1}",
             "action": act,
@@ -189,9 +126,9 @@ def validate(template):
         # 可重试性：默认按"动作类型是否天然幂等"判断，而不是"没命中副作用关键词
         # 就当安全"。click/press/type/drag 默认不可自动重试；命中副作用关键词的
         # 还需确认。显式声明的值优先，并记录 retry_explicit 供执行器区分。
-        side = _looks_side_effect(act)
+        side = action_specs.looks_like_side_effect(act)
         explicit = ("idempotent" in st) or ("safe_to_retry" in st)
-        inherent = (atype in _INHERENTLY_IDEMPOTENT) and not side
+        inherent = sp.idempotent and not side
         step["idempotent"] = bool(st.get("idempotent", inherent))
         step["safe_to_retry"] = bool(st.get("safe_to_retry", inherent))
         step["requires_confirmation"] = bool(

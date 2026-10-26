@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### 动作与断言词表（阶段 3）
+
+- 无头 managed 启动时通过 `--user-agent` 给默认持久容器设置桌面 UA，默认容器不再
+  暴露 `HeadlessChrome`（此前只有隔离容器会替换 UA）。
+- 测试默认无头；会话结束时按测试资料目录清理 Chrome（含未登记的残留）。
+
+
+- 新增 `core/actions.py`：动作类型、必填字段、幂等性、副作用判定、录制字段的唯一来源；
+  schema / runner / backend 全部改为查询它，删除四套重复分类。
+- 后端拆为 `backends/playwright/` 包，目标型动作移入 `actions.py`；`act()` 统一以
+  `handle` 为第一参数。
+- 新增 `core/checks.py`（断言 IR）：`Check`、`READ_KINDS`、`OPS`、`parse`、
+  `from_checkpoint`；未知 checkpoint 直接报错，不再静默放行。
+- 新增 `backends/playwright/assertion.py`：读取、比较、JS 谓词、三态求值各一份；
+  删除 `_normalize_checks` / `_actual` / `_event_predicate` / `_cmp_js` 等重复实现。
+- `assertion_schema` 的 read/op 列表由 `core/checks.py` 生成。
+- 录制：`focus/scroll/hover` 默认不录（`keep_all=True` 才保留）；同目标连续输入合并；
+  只有断言 `pass` 时才写入 checkpoint。
+- 编译器：`url_contains` 自动断言改为 `workflow_record_stop(auto_checkpoint=True)`
+  显式开启，默认关闭。
+
 ### 测试与生命周期（本轮）
 
 - 测试复用同一个浏览器进程（`reset_runtime(keep_browser=True)`），用例共享一个事件

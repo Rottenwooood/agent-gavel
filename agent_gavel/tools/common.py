@@ -2,7 +2,7 @@
 
 import functools
 
-from ..backends.playwright_backend import PlaywrightBackend
+from ..backends.playwright import PlaywrightBackend
 from ..runtime import get_runtime
 from ..core.errors import GavelError, wrap_exception
 
@@ -53,22 +53,24 @@ async def run_with_optional_assert(rt, handle, action_type, fn, *,
     """执行动作，若给断言则做三态判定（含 before 签名 diff 判 ambiguous）。"""
     be = backend()
     target = (record or {}).get("target")
-    before = await be.page_signature(handle.page, target=target) \
+    before = await be.page_signature(handle, target=target) \
         if assertions else None
     url_before = handle.page.url
     execution = await handle.actor.submit(action_type, fn,
                                           timeout_s=timeout_s + 5)
     out = {"status": "ok", **ids(handle), "execution": execution}
-    if rt.recorder is not None and rt.recorder.active and record is not None:
-        rt.recorder.record(handle, record, url_before=url_before,
-                           url_after=handle.page.url,
-                           checkpoint=assertions or None)
+    passed = None
     if assertions:
-        ev = await be.evaluate_checks(handle.page, assertions,
+        ev = await be.evaluate_checks(handle, assertions,
                                       before_sig=before, wait_s=wait_s,
                                       target=target)
         out["status"] = ev["status"]
         out["assertions"] = ev["assertions"]
+        passed = ev["status"] == "pass"
         if ev.get("diff") is not None:
             out["diff"] = ev["diff"]
+    if rt.recorder is not None and rt.recorder.active and record is not None:
+        rt.recorder.record(handle, record, url_before=url_before,
+                           url_after=handle.page.url,
+                           checkpoint=assertions if passed else None)
     return out

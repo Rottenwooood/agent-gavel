@@ -18,7 +18,7 @@ def _same_target(a, b):
 
 
 def compile(recorded_steps, *, template_id, site="", desc="",
-            parameterize=None, sensitive=None):
+            parameterize=None, sensitive=None, auto_checkpoint=False):
     """recorded_steps: [{"action": {...}, "url_before", "url_after"}, ...]"""
     parameterize = parameterize or {}
     sensitive = set(sensitive or [])
@@ -76,7 +76,7 @@ def compile(recorded_steps, *, template_id, site="", desc="",
         # 5) 保留录制时用过的断言（checkpoint）；没有则按 url 变化补 url_contains
         if st.get("checkpoint"):
             step["checkpoint"] = st["checkpoint"]
-        elif st.get("url_before") and st.get("url_after") \
+        elif auto_checkpoint and st.get("url_before") and st.get("url_after") \
                 and st["url_before"] != st["url_after"]:
             p = urlparse(st["url_after"])
             token = (p.path or "").rstrip("/").split("/")[-1] or p.netloc

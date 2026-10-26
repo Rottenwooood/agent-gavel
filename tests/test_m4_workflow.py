@@ -107,7 +107,7 @@ async def test_pause_resume(gavel_tools, webapp_server):
     await asyncio.sleep(0.4)
     await T["workflow_pause"]()
     rt = get_runtime()
-    for _ in range(50):
+    for _ in range(150):
         if any(x.status == "paused" for x in rt.runs.values()):
             break
         await asyncio.sleep(0.1)

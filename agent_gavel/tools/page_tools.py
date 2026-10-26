@@ -31,17 +31,13 @@ def register_page_tools(mcp):
         rt.policies.check_domain(url)
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
-        before = await be.page_signature(handle.page) if assertions else None
+        before = await be.page_signature(handle) if assertions else None
         url_before = handle.page.url
         res = await handle.actor.submit(
             "navigate",
             lambda: be.goto(handle, url, wait_until=wait_until,
                             timeout_s=timeout_s),
             timeout_s=timeout_s + 5)
-        if rt.recorder is not None and rt.recorder.active:
-            rt.recorder.record(handle, {"type": "navigate", "url": url},
-                               url_before=url_before, url_after=handle.page.url,
-                               checkpoint=assertions or None)
         out = {"status": "ok", **ids(handle), **res}
         code = res.get("status_code")
         if isinstance(code, int) and code >= 400:
@@ -67,13 +63,19 @@ def register_page_tools(mcp):
                 prev = out.get("warning")
                 out["warning"] = f"{prev} page_looks_empty".strip() if prev \
                     else "page_looks_empty"
+        passed = None
         if assertions:
-            ev = await be.evaluate_checks(handle.page, assertions,
+            ev = await be.evaluate_checks(handle, assertions,
                                           before_sig=before, wait_s=wait_s)
             out["status"] = ev["status"]
             out["assertions"] = ev["assertions"]
+            passed = ev["status"] == "pass"
             if ev.get("diff") is not None:
                 out["diff"] = ev["diff"]
+        if rt.recorder is not None and rt.recorder.active:
+            rt.recorder.record(handle, {"type": "navigate", "url": url},
+                               url_before=url_before, url_after=handle.page.url,
+                               checkpoint=assertions if passed else None)
         return out
 
     @mcp.tool()

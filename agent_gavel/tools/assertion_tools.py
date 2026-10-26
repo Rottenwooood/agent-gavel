@@ -4,6 +4,7 @@ expect 做 UI/业务层断言，三态：pass / fail / ambiguous（有动作前�
 """
 
 from ..core.errors import GavelError
+from ..core.checks import OPS, READ_KINDS
 from .common import backend, guard, ids
 
 
@@ -35,7 +36,7 @@ def register_assertion_tools(mcp):
         if not checks:
             raise GavelError("bad_args", "需要 checks（或 assertions）")
         be = backend()
-        ev = await be.evaluate_checks(handle.page, checks, wait_s=wait_s)
+        ev = await be.evaluate_checks(handle, checks, wait_s=wait_s)
         return {"status": ev["status"], **ids(handle),
                 "assertions": ev["assertions"]}
 
@@ -50,10 +51,8 @@ def register_assertion_tools(mcp):
                 "flat": "{url_contains: 'x', text_eq: 'y', title_contains: 'z', count_gte: 1}",
                 "top_op": "{title: '百度', op: 'contains'}",
             },
-            "read": ["url", "title", "text", "value", "count", "html", "expr", "attr"],
-            "ops": ["eq", "neq", "contains", "not_contains", "regex", "exists",
-                    "not_exists", "gt", "lt", "gte", "lte", "count_eq",
-                    "count_gte", "count_gt"],
+            "read": sorted(READ_KINDS),
+            "ops": sorted(OPS),
             "value_alias": "value 与 expected 等价",
             "defaults": "read 缺省按名字（url/title/...）或 selector（元素文本）；判断不出会报错",
             "status": {"pass": "满足", "fail": "未满足",
