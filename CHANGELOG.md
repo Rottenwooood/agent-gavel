@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### 多进程资源所有权（阶段 2A）
+
+- 新增单实例 daemon（`agent_gavel/daemon.py`）：唯一持有浏览器、session/context/page、
+  队列、事件、产物索引与锁；用 `<数据根>/daemon.lock` 的 flock 保证单实例，崩溃由内核释放。
+- 新增 adapter（`agent_gavel/remote.py` + 重写的 `main.py`）：MCP stdio 进程只转发工具调用，
+  不导入 Playwright、不持有运行时状态；daemon 不在时自动拉起并等待就绪。
+- 工具 schema 由 daemon 提供，adapter 动态注册，避免两处维护工具清单。
+- 跨 adapter：资源 id 一致；同一 session 的并发 `workflow_run` 由一个 daemon 统一裁决，
+  `session_busy` 真正生效；同页动作由同一 PageActor 串行化。
+- `browser_status` 增加 `daemon_pid` 与 `adapters` 计数。
+- daemon 崩溃后：adapter 自动重连并拉起新 daemon，复用原 Chrome，不产生第二个浏览器；
+  本地传输在 POSIX 用 Unix socket，在 Windows 用 127.0.0.1 + token。
+- 新增 `tests/test_multiprocess.py`：4 个真实 adapter、1 个 daemon、1 个 Chrome；
+  验证 id 一致、跨进程 `session_busy`、崩溃恢复与单实例。
+
 ### 架构收敛（阶段 0 / 阶段 1）
 
 - 新增 `tests/test_contract_snapshot.py`：真实浏览器端到端固定对外字段、三态语义、

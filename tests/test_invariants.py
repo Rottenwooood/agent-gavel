@@ -276,3 +276,21 @@ def test_i8_core_does_not_import_layers():
                 if any(x in mod for x in ("runtime", "workflows", "backends", "tools")):
                     bad.append((rel, mod))
     assert not bad, f"core 依赖了上层：{bad}"
+
+
+def test_i9_adapter_does_not_own_runtime():
+    """adapter 只转发；不得导入浏览器栈或运行时。"""
+    forbidden = ("runtime", "backends", "tools", "workflows", "playwright")
+    bad = []
+    for rel in ("main.py", "remote.py"):
+        tree = ast.parse((PKG / rel).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                mod = "." * node.level + (node.module or "")
+                if any(x in mod for x in forbidden):
+                    bad.append((rel, mod))
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if any(x in alias.name for x in forbidden):
+                        bad.append((rel, alias.name))
+    assert not bad, f"adapter 导入了运行时依赖：{bad}"

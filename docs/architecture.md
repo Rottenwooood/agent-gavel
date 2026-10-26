@@ -262,7 +262,7 @@ agent_gavel/
 1. 新增 `agent_gavel/daemon.py`：
    - 唯一持有 `BrowserRuntime`、工具注册表与本地 socket 服务的进程
    - 启动时对 `<数据根>/daemon.lock` 取 `flock`；取不到即退出（单实例由内核保证）
-   - 监听 Unix socket `<数据根>/daemon.sock`，协议为逐行 JSON：`{"id", "tool", "args"}` → `{"id", "result"}` 或 `{"id", "error"}`
+   - 监听本地 socket（POSIX 为 `<数据根>/daemon.sock`；Windows 为 127.0.0.1 随机端口），协议为逐行 JSON：`{"id", "token", "tool", "args"}` → `{"id", "result"}` 或 `{"id", "error"}`；token 写入 0600 的 `daemon.json`
    - 提供 `describe` 请求，返回工具名与 JSON Schema（供 adapter 注册）
    - 进程内的工具调用与现在完全一致，串行化仍由 PageActor 与 session 锁负责
 2. 新增 `agent_gavel/remote.py`（adapter 侧，不得 import playwright / runtime / tools）：

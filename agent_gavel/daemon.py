@@ -1,0 +1,231 @@
+"""单实例运行时守护进程。
+
+所有浏览器、session/context/page、队列、事件与产物只存在于本进程。
+MCP 适配器（main.py）通过本地 socket 转发工具调用，不再各自持有运行时。
+
+单实例由 <数据根>/daemon.lock 的 flock 保证：内核在进程崩溃时自动释放，
+不依赖 pid 判断。
+"""
+
+import asyncio
+import errno
+import json
+import os
+import secrets
+import signal
+import sys
+
+from .core import config
+from .core.errors import wrap_exception
+from .core.logging import setup as setup_logging
+from .tools import register_runtime_tools
+
+
+class _Registry:
+    """收集工具函数，不生成 MCP 传输。"""
+
+    def __init__(self):
+        self.tools = {}
+
+    def tool(self, *args, **kwargs):
+        def decorator(fn):
+            self.tools[fn.__name__] = fn
+            return fn
+        return decorator
+
+
+def _paths():
+    root = config.data_dir()
+    return {
+        "lock": root / "daemon.lock",
+        "sock": root / "daemon.sock",
+        "info": root / "daemon.json",
+    }
+
+
+def _acquire_lock(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as e:
+        os.close(fd)
+        if e.errno in (errno.EAGAIN, errno.EACCES):
+            return None
+        raise
+    os.ftruncate(fd, 0)
+    os.write(fd, str(os.getpid()).encode())
+    return fd
+
+
+async def _tool_schemas():
+    from mcp.server.mcpserver import MCPServer
+    server = MCPServer("agent-gavel")
+    register_runtime_tools(server)
+    return [t.model_dump(by_alias=True, exclude_none=True)
+            for t in await server.list_tools()]
+
+
+async def _dispatch(registry, schemas, name, args, adapter_count):
+    if name == "__describe__":
+        return {"tools": schemas, "daemon_pid": os.getpid()}
+    if name == "__ping__":
+        return {"status": "ok", "daemon_pid": os.getpid()}
+    fn = registry.tools.get(name)
+    if fn is None:
+        return {"status": "error", "reason": "unknown_tool",
+                "error": f"daemon 没有这个工具：{name}"}
+    result = await fn(**(args or {}))
+    if name == "browser_status" and isinstance(result, dict):
+        result["daemon_pid"] = os.getpid()
+        result["adapters"] = adapter_count()
+    return result
+
+
+async def _serve(paths, token, registry, schemas, stop):
+    state = {"adapters": 0}
+    tasks = set()
+
+    async def reply(req, writer, write_lock, adapter_count):
+        rid = req.get("id")
+        if req.get("token") != token:
+            data = (json.dumps({"id": rid, "error": {
+                "status": "error", "reason": "unauthorized",
+                "error": "daemon token 不匹配"}}, ensure_ascii=False) + "\n").encode()
+            async with write_lock:
+                writer.write(data)
+                try:
+                    await writer.drain()
+                except Exception:
+                    pass
+            return
+        try:
+            result = await _dispatch(registry, schemas, req.get("tool"),
+                                     req.get("args"), adapter_count)
+            out = {"id": rid, "result": result}
+        except Exception as e:  # noqa: BLE001
+            out = {"id": rid, "error": wrap_exception(e).to_dict()}
+        data = (json.dumps(out, ensure_ascii=False, default=str) + "\n").encode()
+        async with write_lock:
+            writer.write(data)
+            try:
+                await writer.drain()
+            except Exception:
+                pass
+
+    def adapter_count():
+        return state["adapters"]
+
+    async def handle(reader, writer):
+        state["adapters"] += 1
+        write_lock = asyncio.Lock()
+        try:
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break
+                try:
+                    req = json.loads(line)
+                except Exception:
+                    continue
+                task = asyncio.create_task(
+                    reply(req, writer, write_lock, adapter_count))
+                tasks.add(task)
+                task.add_done_callback(tasks.discard)
+        finally:
+            state["adapters"] -= 1
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    transport = {}
+    if os.name == "nt":
+        server = await asyncio.start_server(handle, "127.0.0.1", 0,
+                                            limit=64 * 1024 * 1024)
+        transport["port"] = server.sockets[0].getsockname()[1]
+    else:
+        sock_path = paths["sock"]
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
+        server = await asyncio.start_unix_server(
+            handle, path=str(sock_path), limit=64 * 1024 * 1024)
+        os.chmod(sock_path, 0o600)
+        transport["socket"] = str(sock_path)
+    paths["info"].write_text(json.dumps({
+        "pid": os.getpid(), "token": token, **transport}), encoding="utf-8")
+    try:
+        os.chmod(paths["info"], 0o600)
+    except OSError:
+        pass
+    await stop.wait()
+
+    server.close()
+    await server.wait_closed()
+    for task in list(tasks):
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    if os.name != "nt":
+        try:
+            os.unlink(paths["sock"])
+        except OSError:
+            pass
+
+
+async def _run(lock_fd):
+    paths = _paths()
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except (NotImplementedError, RuntimeError):
+            pass
+
+    registry = _Registry()
+    register_runtime_tools(registry)
+    schemas = await _tool_schemas()
+    token = secrets.token_hex(16)
+
+    try:
+        await _serve(paths, token, registry, schemas, stop)
+    finally:
+        try:
+            from .runtime import shutdown_runtime
+            await asyncio.wait_for(shutdown_runtime(), timeout=8)
+        except Exception:
+            pass
+        try:
+            paths["info"].unlink()
+        except OSError:
+            pass
+        try:
+            os.close(lock_fd)
+        except OSError:
+            pass
+
+
+def main():
+    setup_logging()
+    # daemon 必须比拉起它的 adapter 活得久：显式清掉可能继承的父进程死亡信号。
+    if sys.platform.startswith("linux"):
+        try:
+            import ctypes
+            ctypes.CDLL("libc.so.6").prctl(1, 0, 0, 0, 0)
+        except Exception:
+            pass
+    lock_fd = _acquire_lock(_paths()["lock"])
+    if lock_fd is None:
+        return
+    asyncio.run(_run(lock_fd))
+
+
+if __name__ == "__main__":
+    main()
