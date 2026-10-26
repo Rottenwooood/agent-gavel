@@ -625,7 +625,7 @@ class PlaywrightBackend:
                 "url": page.url}
 
     async def pdf(self, handle, *, timeout_s=30.0):
-        headless = handle.context.session.handle.opts.get("headless")
+        headless = handle.context.browser_handle.opts.get("headless")
         if headless is False:
             raise GavelError("pdf_requires_headless", "page_pdf 只能在无头模式生成",
                              hint="用 AGENT_GAVEL_HEADLESS=1 启动")

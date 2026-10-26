@@ -128,7 +128,10 @@ def register_browser_tools(mcp):
         ctx = rt.contexts.get(ctx_id)
         page_id = ctx.active_page_id if ctx else None
         out = {"status": "ok", **session.to_dict(),
-               "context_id": ctx_id, "page_id": page_id}
+               "context_id": ctx_id, "page_id": page_id,
+               "shared_container": bool(
+                   ctx and ctx.container == "default"
+                   and len(ctx.session_ids) > 1)}
         handle = session.handle
         if handle is not None and handle.mode == "attach":
             out["warning"] = _ATTACH_WARNING
@@ -205,7 +208,10 @@ def register_browser_tools(mcp):
         ctx_id = session.context_ids[0] if session.context_ids else None
         ctx = rt.contexts.get(ctx_id)
         return {"status": "ok", **session.to_dict(), "context_id": ctx_id,
-                "page_id": ctx.active_page_id if ctx else None}
+                "page_id": ctx.active_page_id if ctx else None,
+                "shared_container": bool(
+                    ctx and ctx.container == "default"
+                    and len(ctx.session_ids) > 1)}
 
     # ---------------- context ----------------
 
@@ -345,7 +351,6 @@ def register_browser_tools(mcp):
         rt = rt_get()
         handle = rt.page_mgr.get(page_id)
         handle.context.active_page_id = page_id
-        rt.active_page_id = page_id
         return {"status": "ok", **handle.to_dict()}
 
     @mcp.tool()
@@ -355,7 +360,6 @@ def register_browser_tools(mcp):
         rt = rt_get()
         handle = rt.page_mgr.get(page_id)
         handle.context.active_page_id = page_id
-        rt.active_page_id = page_id
         return {"status": "ok", **handle.to_dict()}
 
     @mcp.tool()

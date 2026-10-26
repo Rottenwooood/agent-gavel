@@ -50,9 +50,9 @@ def register_artifact_tools(mcp):
         """
         from ..runtime import get_runtime
         rt = get_runtime()
-        res = rt.artifacts.export(artifact_id, dest_dir, filename,
-                                  policies=rt.policies,
-                                  path_visibility=path_visibility)
+        res = await asyncio.to_thread(
+            rt.artifacts.export, artifact_id, dest_dir, filename,
+            policies=rt.policies, path_visibility=path_visibility)
         return {"status": "ok", **res}
 
     @mcp.tool()
@@ -64,8 +64,9 @@ def register_artifact_tools(mcp):
         ttl = ttl_days if ttl_days is not None else rt.policies.artifact_ttl_days
         cap = max_bytes if max_bytes is not None \
             else rt.policies.artifact_max_bytes
-        return {"status": "ok", **rt.artifacts.cleanup(ttl_days=ttl,
-                                                       max_bytes=cap)}
+        res = await asyncio.to_thread(rt.artifacts.cleanup,
+                                      ttl_days=ttl, max_bytes=cap)
+        return {"status": "ok", **res}
 
     @mcp.tool()
     @guard
@@ -99,10 +100,10 @@ def register_artifact_tools(mcp):
         from ..runtime import get_runtime
         rt = get_runtime()
         info = rt.artifacts.get(artifact_id)
-        res = rt.artifacts.export(artifact_id, dest_dir,
-                                  filename or info.get("suggested_filename"),
-                                  policies=rt.policies,
-                                  path_visibility=path_visibility)
+        res = await asyncio.to_thread(
+            rt.artifacts.export, artifact_id, dest_dir,
+            filename or info.get("suggested_filename"),
+            policies=rt.policies, path_visibility=path_visibility)
         return {"status": "ok", **res}
 
     @mcp.tool()

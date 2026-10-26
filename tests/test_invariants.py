@@ -217,7 +217,12 @@ BLOCKING_INVENTORY = {
     ("tools/profile_tools.py", "list_profiles"),
     ("tools/profile_tools.py", "delete_profile"),
     ("tools/artifact_tools.py", "read_text"),
+    ("tools/artifact_tools.py", "export"),
+    ("tools/artifact_tools.py", "cleanup"),
+    ("tools/page_tools.py", "save_bytes"),
+    ("tools/page_tools.py", "export"),
     ("tools/diagnostics_tools.py", "register_file"),
+    ("workflows/runner.py", "save_bytes"),
     ("runtime/browser_runtime.py", "os_browsers"),
     ("runtime/browser_process.py", "_reuse_existing"),
     ("runtime/browser_process.py", "_managed_pids"),
@@ -243,8 +248,8 @@ def test_i7_blocking_inventory_is_wrapped():
 
 # ---------------- I8：包依赖单向 ----------------
 
-# 阶段 2 结束时清零。
-IMPORT_WHITELIST = {("runtime/browser_runtime.py", "..workflows.recorder")}
+# 阶段 2 已清零。
+IMPORT_WHITELIST = set()
 
 
 def test_i8_runtime_does_not_import_upper_layers():

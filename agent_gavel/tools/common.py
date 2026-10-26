@@ -29,8 +29,11 @@ def guard(fn):
 
 
 def ids(handle):
-    return {"session_id": handle.session_id, "context_id": handle.context_id,
-            "page_id": handle.page_id}
+    out = {"context_id": handle.context_id, "page_id": handle.page_id}
+    lease = handle.context.lease_session_id()
+    if lease:
+        out["session_id"] = lease
+    return out
 
 
 def rec(action_type, target=None, **kw):

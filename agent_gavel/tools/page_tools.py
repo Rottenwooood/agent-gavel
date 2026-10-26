@@ -1,5 +1,7 @@
 """M2：导航/读取/快照/探索/截图/PDF MCP 工具（docs/tech-plan.md §8）。"""
 
+import asyncio
+
 from ..core.errors import GavelError
 from .common import backend, guard, ids
 
@@ -229,10 +231,12 @@ def register_page_tools(mcp):
             "page_screenshot",
             lambda: be.screenshot(handle.page, full_page=full_page,
                                   selector=selector))
-        info = rt.artifacts.save_bytes(
-            res["data"], filename=f"{handle.page_id}.png", kind="screenshot",
+        info = await asyncio.to_thread(
+            rt.artifacts.save_bytes, res["data"],
+            filename=f"{handle.page_id}.png", kind="screenshot",
             mime_type="image/png", source_url=handle.page.url,
-            session_id=handle.session_id, page_id=handle.page_id)
+            session_id=handle.context.lease_session_id(),
+            page_id=handle.page_id)
         out = {"status": "ok", **ids(handle),
                "artifact_id": info["artifact_id"],
                "width": res["width"], "height": res["height"],
@@ -240,8 +244,9 @@ def register_page_tools(mcp):
                "coordinate_height": res["height"], "scale": 1.0,
                "device_scale_factor": res["device_scale_factor"]}
         if save_to:
-            exp = rt.artifacts.export(info["artifact_id"], save_to,
-                                      policies=rt.policies)
+            exp = await asyncio.to_thread(
+                rt.artifacts.export, info["artifact_id"], save_to,
+                policies=rt.policies)
             out["exported"] = True
             out["exported_filename"] = exp["filename"]
         return out
@@ -255,16 +260,19 @@ def register_page_tools(mcp):
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
         res = await handle.actor.submit("page_pdf", lambda: be.pdf(handle))
-        info = rt.artifacts.save_bytes(
-            res["data"], filename=f"{handle.page_id}.pdf", kind="pdf",
+        info = await asyncio.to_thread(
+            rt.artifacts.save_bytes, res["data"],
+            filename=f"{handle.page_id}.pdf", kind="pdf",
             mime_type="application/pdf", source_url=handle.page.url,
-            session_id=handle.session_id, page_id=handle.page_id)
+            session_id=handle.context.lease_session_id(),
+            page_id=handle.page_id)
         out = {"status": "ok", **ids(handle),
                "artifact_id": info["artifact_id"],
                "size_bytes": info["size_bytes"]}
         if save_to:
-            exp = rt.artifacts.export(info["artifact_id"], save_to,
-                                      policies=rt.policies)
+            exp = await asyncio.to_thread(
+                rt.artifacts.export, info["artifact_id"], save_to,
+                policies=rt.policies)
             out["exported"] = True
             out["exported_filename"] = exp["filename"]
         return out

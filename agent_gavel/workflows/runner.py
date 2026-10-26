@@ -40,11 +40,14 @@ class Runner:
         t0 = time.perf_counter()
 
         session, owned = await self._resolve_session(session_id)
+        page_ctx = None
         await session.acquire(run_id)
         state = RunState(run_id, template.get("template_id"))
         rt.runs[run_id] = state
         try:
             page = await self._resolve_page(session, page_id)
+            page_ctx = page.context
+            await page_ctx.acquire_run(run_id)
             # preconditions：不满足立即阻断，绝不在错误页面上执行步骤
             ok, pc_detail = await _schema.check_preconditions(template, page.page)
             if not ok:
@@ -72,6 +75,8 @@ class Runner:
             return await self._execute_steps(state, steps, ctx, arts_before,
                                              verbosity, t0)
         finally:
+            if page_ctx is not None:
+                page_ctx.release_run(run_id)
             session.release(run_id)
             rt.runs.pop(run_id, None)
             if owned:
@@ -105,11 +110,17 @@ class Runner:
         rt = self.runtime
         if page_id:
             return rt.page_mgr.get(page_id)
-        if not session.context_ids:
+        contexts = [rt.contexts[c] for c in session.context_ids
+                    if c in rt.contexts and rt.contexts[c].page_ids]
+        if not contexts:
             ctx = await rt.context_mgr.create(session, {})
-        else:
-            ctx = rt.contexts[session.context_ids[0]]
-        return rt.page_mgr.resolve(ctx.active_page_id)
+            return rt.page_mgr.resolve(None, context_id=ctx.context_id)
+        if len(contexts) > 1:
+            raise GavelError(
+                "ambiguous_page",
+                "该会话有多个 context 持有页面，请指定 page_id",
+                detail={"contexts": [c.context_id for c in contexts]})
+        return rt.page_mgr.resolve(None, context_id=contexts[0].context_id)
 
     # ---- 主循环 ----
     async def _execute_steps(self, state, steps, ctx, arts_before, verbosity,
@@ -287,17 +298,19 @@ class Runner:
             res = await page.actor.submit(
                 "screenshot", lambda: be.screenshot(page.page,
                                                     full_page=bool(act.get("full_page"))))
-            info = rt.artifacts.save_bytes(res["data"], filename=f"{page.page_id}.png",
-                                           kind="screenshot", mime_type="image/png",
-                                           page_id=page.page_id,
-                                           session_id=page.session_id)
+            info = await asyncio.to_thread(
+                rt.artifacts.save_bytes, res["data"],
+                filename=f"{page.page_id}.png", kind="screenshot",
+                mime_type="image/png", page_id=page.page_id,
+                session_id=page.context.lease_session_id())
             return {"action": "screenshot", "artifact_id": info["artifact_id"]}
         if atype == "pdf":
             res = await page.actor.submit("pdf", lambda: be.pdf(page))
-            info = rt.artifacts.save_bytes(res["data"], filename=f"{page.page_id}.pdf",
-                                           kind="pdf", mime_type="application/pdf",
-                                           page_id=page.page_id,
-                                           session_id=page.session_id)
+            info = await asyncio.to_thread(
+                rt.artifacts.save_bytes, res["data"],
+                filename=f"{page.page_id}.pdf", kind="pdf",
+                mime_type="application/pdf", page_id=page.page_id,
+                session_id=page.context.lease_session_id())
             return {"action": "pdf", "artifact_id": info["artifact_id"]}
         # 目标型动作
         kw = {}

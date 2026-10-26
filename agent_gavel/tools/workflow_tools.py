@@ -107,7 +107,6 @@ def register_workflow_tools(mcp):
             except Exception:
                 h = None
         info = rt.recorder.start(
-            session_id=session_id or (h.session_id if h else None),
             context_id=context_id or (h.context_id if h else None),
             page_id=page_id or (h.page_id if h else None))
         return {"status": "ok", **info}

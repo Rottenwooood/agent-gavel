@@ -497,7 +497,7 @@ CI 与本地提交前必须执行：
 ruff check
 ruff format --check
 mypy agent_gavel
-pytest -q
+pytest -q   # 配置 pytest-timeout，单测上限 90s
 ```
 
 `mypy` 的配置写入 `pyproject.toml`；首次启用时把存量错误数记为基线，之后只能减少，不能增加。

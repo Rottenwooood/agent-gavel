@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import shutil
+import threading
 import time
 
 from ..core import config
@@ -25,25 +26,28 @@ class ArtifactStore:
         self.root = str(root or config.artifacts_dir())
         self._index_path = os.path.join(self.root, "index.json")
         self._index = None
+        self._lock = threading.RLock()
 
     # ---- index ----
     def _load(self):
-        if self._index is not None:
+        with self._lock:
+            if self._index is not None:
+                return self._index
+            os.makedirs(self.root, exist_ok=True)
+            try:
+                with open(self._index_path, encoding="utf-8") as f:
+                    self._index = json.load(f)
+            except Exception:
+                self._index = {}
             return self._index
-        os.makedirs(self.root, exist_ok=True)
-        try:
-            with open(self._index_path, encoding="utf-8") as f:
-                self._index = json.load(f)
-        except Exception:
-            self._index = {}
-        return self._index
 
     def _save(self):
-        os.makedirs(self.root, exist_ok=True)
-        tmp = self._index_path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(self._index or {}, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, self._index_path)
+        with self._lock:
+            os.makedirs(self.root, exist_ok=True)
+            tmp = self._index_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self._index or {}, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self._index_path)
 
     def _next_id(self):
         idx = self._load()
@@ -52,10 +56,37 @@ class ArtifactStore:
             n += 1
         return f"artifact_{n:03d}"
 
+    def _reserve(self):
+        with self._lock:
+            aid = self._next_id()
+            self._load()[aid] = {"artifact_id": aid, "pending": True}
+            self._save()
+            return aid
+
+    def _finalize(self, aid, info):
+        with self._lock:
+            self._load()[aid] = info
+            self._save()
+
+    def _discard(self, aid):
+        with self._lock:
+            self._load().pop(aid, None)
+            self._save()
+
     # ---- 写入 ----
     def save_bytes(self, data: bytes, *, filename=None, kind="file",
                    mime_type=None, source_url=None, session_id=None,
                    page_id=None, meta=None) -> dict:
+        with self._lock:
+            return self._save_bytes_locked(data, filename=filename, kind=kind,
+                                           mime_type=mime_type,
+                                           source_url=source_url,
+                                           session_id=session_id,
+                                           page_id=page_id, meta=meta)
+
+    def _save_bytes_locked(self, data, *, filename=None, kind="file",
+                           mime_type=None, source_url=None, session_id=None,
+                           page_id=None, meta=None) -> dict:
         aid = self._next_id()
         dest = os.path.join(self.root, aid)
         with open(dest, "wb") as f:
@@ -81,6 +112,12 @@ class ArtifactStore:
 
     def register_file(self, src_path: str, *, filename=None, kind="file",
                       move=True, **kw) -> dict:
+        with self._lock:
+            return self._register_file_locked(src_path, filename=filename,
+                                              kind=kind, move=move, **kw)
+
+    def _register_file_locked(self, src_path, *, filename=None, kind="file",
+                              move=True, **kw) -> dict:
         if not os.path.isfile(src_path):
             raise GavelError("artifact_missing", f"文件不存在：{src_path}")
         aid = self._next_id()
@@ -111,14 +148,20 @@ class ArtifactStore:
 
     # ---- 读 ----
     def get(self, artifact_id: str) -> dict:
-        info = self._load().get(artifact_id)
-        if not info:
-            raise GavelError("artifact_not_found", f"未知 artifact：{artifact_id}")
-        return dict(info)
+        with self._lock:
+            info = self._load().get(artifact_id)
+            if not info or info.get("pending"):
+                raise GavelError("artifact_not_found",
+                                 f"未知 artifact：{artifact_id}")
+            return dict(info)
 
     def list(self, *, kind=None, run_id=None, session_id=None) -> list:
         out = []
-        for info in self._load().values():
+        with self._lock:
+            items = list(self._load().values())
+        for info in items:
+            if info.get("pending"):
+                continue
             if kind and info.get("kind") != kind:
                 continue
             if run_id and info.get("run_id") != run_id:
@@ -174,12 +217,14 @@ class ArtifactStore:
         return out
 
     def delete(self, artifact_id: str) -> dict:
-        idx = self._load()
-        if artifact_id not in idx:
-            raise GavelError("artifact_not_found", f"未知 artifact：{artifact_id}")
-        self._remove(artifact_id, idx)
-        self._save()
-        return {"artifact_id": artifact_id, "deleted": True}
+        with self._lock:
+            idx = self._load()
+            if artifact_id not in idx:
+                raise GavelError("artifact_not_found",
+                                 f"未知 artifact：{artifact_id}")
+            self._remove(artifact_id, idx)
+            self._save()
+            return {"artifact_id": artifact_id, "deleted": True}
 
     # ---- 下载捕获（page.on("download") 调用）----
     async def capture_download(self, download, *, session_id=None, page_id=None,
@@ -204,7 +249,7 @@ class ArtifactStore:
                                      "session_id": session_id, "page_id": page_id,
                                      "error": e.message, "size_bytes": size})
                     return None
-            aid = self._next_id()
+            aid = self._reserve()
             dest = os.path.join(self.root, aid)
             await download.save_as(dest)
             filename = download.suggested_filename or aid
@@ -221,8 +266,7 @@ class ArtifactStore:
                 "path": dest,
                 "created_at": _now(),
             }
-            self._load()[aid] = info
-            self._save()
+            self._finalize(aid, info)
             if events:
                 events.emit({"event": "download_completed", "session_id": session_id,
                              "page_id": page_id, "artifact_id": aid,
@@ -230,6 +274,11 @@ class ArtifactStore:
                              "size_bytes": size, "sha256": info["sha256"]})
             return dict(info)
         except Exception as e:  # noqa: BLE001
+            if aid:
+                try:
+                    self._discard(aid)
+                except Exception:
+                    pass
             if events:
                 events.emit({"event": "download_failed", "session_id": session_id,
                              "page_id": page_id, "error": str(e)})
@@ -249,6 +298,10 @@ class ArtifactStore:
 
     # ---- 清理 ----
     def cleanup(self, *, ttl_days=None, max_bytes=None) -> dict:
+        with self._lock:
+            return self._cleanup_locked(ttl_days=ttl_days, max_bytes=max_bytes)
+
+    def _cleanup_locked(self, *, ttl_days=None, max_bytes=None) -> dict:
         idx = self._load()
         removed = []
         now = _now()

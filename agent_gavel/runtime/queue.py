@@ -73,8 +73,8 @@ class PageActor:
         if self._worker is not None:
             self._worker.cancel()
             try:
-                await self._worker
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                await asyncio.wait_for(self._worker, timeout=3)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):  # noqa: BLE001
                 pass
             self._worker = None
 

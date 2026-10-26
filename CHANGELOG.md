@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### 身份与产物一致性（阶段 2B）
+
+- 录制缓冲下沉到 runtime，按 **context** 归属；每步记录 `page_id`，共享容器下不再丢步。
+- `PageHandle` 只保留 `context_id`；页面不再伪造单一 session 归属。响应中的 `session_id`
+  表示本次调用所属会话，共享容器且无法唯一确定时省略。
+- `page_list` / `page_get` 增加 `creator_session_id`；`session_create` 增加 `shared_container`。
+- 页面解析改为显式作用域（`page_id` → `context_id` → 唯一有页面的 context）；
+  多个 context 有页面时报 `ambiguous_page`，不再静默选一页。
+- 新增 `context_busy`：同一 context（含跨 session 共享默认容器）上的两个 run 必须串行，
+  第二个明确失败而不是交错执行。
+- 默认容器按浏览器实例分槽；`Context` 删除 `refcount`，租约由 `session_ids` 集合表达。
+- `browser_status` 用 `active_pages`（每个 context 一项）取代全局 `active_page_id`。
+- 产物索引加锁；并发下载先预留 id，避免索引丢项。
+- 页面/context/actor 的关闭路径全部加超时，避免退出时无限等待。
+- 测试配置加入 `pytest-timeout`（单测 90s），不再出现整套用例卡死无法定位的情况。
+
 ### 多进程资源所有权（阶段 2A）
 
 - 新增单实例 daemon（`agent_gavel/daemon.py`）：唯一持有浏览器、session/context/page、

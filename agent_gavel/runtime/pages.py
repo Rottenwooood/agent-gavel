@@ -26,10 +26,6 @@ class PageHandle:
         self._max_responses = 200
 
     @property
-    def session_id(self):
-        return self.context.session.session_id
-
-    @property
     def context_id(self):
         return self.context.context_id
 
@@ -37,11 +33,14 @@ class PageHandle:
         info = {
             "page_id": self.page_id,
             "context_id": self.context_id,
-            "session_id": self.session_id,
+            "creator_session_id": self.context.creator_session_id,
             "url": self._safe_url(),
             "opener_page_id": self.opener_page_id,
             "page_status": self.status,
         }
+        lease = self.context.lease_session_id()
+        if lease:
+            info["session_id"] = lease
         try:
             info["closed"] = self.page.is_closed()
         except Exception:
@@ -55,8 +54,11 @@ class PageHandle:
             return None
 
     def _emit(self, event, **kw):
-        payload = {"event": event, "session_id": self.session_id,
-                   "context_id": self.context_id, "page_id": self.page_id}
+        payload = {"event": event, "context_id": self.context_id,
+                   "page_id": self.page_id}
+        lease = self.context.lease_session_id()
+        if lease:
+            payload["session_id"] = lease
         payload.update(kw)
         self.runtime.events.emit(payload)
 
@@ -80,8 +82,9 @@ class PageHandle:
                        suggested_filename=download.suggested_filename,
                        url=download.url)
             self.runtime.schedule(self.runtime.artifacts.capture_download(
-                download, session_id=self.session_id, page_id=self.page_id,
-                policies=self.runtime.policies, events=self.runtime.events))
+                download, session_id=self.context.lease_session_id(),
+                page_id=self.page_id, policies=self.runtime.policies,
+                events=self.runtime.events))
         except Exception:
             pass
 
@@ -185,24 +188,40 @@ class PageManager:
                              hint="用 page_open 打开，或 page_list 查看")
         return ph
 
-    def resolve(self, page_id=None):
-        """省略 page_id 时用 runtime.active_page_id，其次唯一 page。"""
+    def resolve(self, page_id=None, *, context_id=None):
+        """显式作用域：page_id > context_id > 唯一有页面的 context。"""
         if page_id:
             return self.get(page_id)
-        if self.runtime.active_page_id:
-            ph = self.runtime.pages.get(self.runtime.active_page_id)
-            if ph is not None and ph.status != "closed":
-                return ph
-        alive = [p for p in self.runtime.pages.values() if p.status != "closed"]
-        if len(alive) == 1:
-            return alive[0]
-        if not alive:
+        if context_id:
+            ctx = self.runtime.context_mgr.get(context_id)
+            return self._active_of(ctx)
+        contexts = [c for c in self.runtime.contexts.values() if c.page_ids]
+        if not contexts:
             raise GavelError("no_page", "当前没有打开的 page",
                              hint="先 page_open")
-        raise GavelError("ambiguous_page", "有多个 page，请显式指定 page_id",
-                         detail={"pages": [p.page_id for p in alive]})
+        if len(contexts) == 1:
+            return self._active_of(contexts[0])
+        raise GavelError(
+            "ambiguous_page", "有多个 context 持有页面，请指定 page_id 或 context_id",
+            detail={"contexts": [c.context_id for c in contexts],
+                    "pages": [p for c in contexts for p in c.page_ids]})
 
-    async def register(self, ctx, pw_page, opener_page_id=None):
+    def _active_of(self, ctx):
+        pid = ctx.active_page_id
+        if pid:
+            ph = self.runtime.pages.get(pid)
+            if ph is not None and ph.status != "closed":
+                return ph
+        alive = [self.runtime.pages[p] for p in ctx.page_ids
+                 if p in self.runtime.pages
+                 and self.runtime.pages[p].status != "closed"]
+        if len(alive) == 1:
+            return alive[0]
+        raise GavelError("no_page", f"context {ctx.context_id} 没有可用页面",
+                         hint="先 page_open")
+
+    async def register(self, ctx, pw_page, opener_page_id=None,
+                       *, activate=False):
         async with self._reg_lock:
             key = id(pw_page)
             existing = self._by_key.get(key)
@@ -222,9 +241,8 @@ class PageManager:
             self.runtime.pages[pid] = handle
             self._by_key[key] = handle
             ctx.page_ids.append(pid)
-            if ctx.active_page_id is None:
+            if activate or ctx.active_page_id is None:
                 ctx.active_page_id = pid
-            self.runtime.active_page_id = pid
             handle.bind()
             await handle.actor.start()
             handle._emit("page_created", url=handle._safe_url(),
@@ -233,7 +251,7 @@ class PageManager:
 
     async def open(self, ctx, url=None):
         pw_page = await ctx.browser_context.new_page()
-        handle = await self.register(ctx, pw_page)
+        handle = await self.register(ctx, pw_page, activate=True)
         if url:
             self.runtime.policies.check_domain(url)
             await handle.actor.submit(
@@ -250,7 +268,7 @@ class PageManager:
         await handle.actor.close("page_closed")
         if not already_closed:
             try:
-                await handle.page.close()
+                await asyncio.wait_for(handle.page.close(), timeout=5)
             except Exception:
                 pass
         handle.status = "closed"
@@ -259,6 +277,4 @@ class PageManager:
             ctx.page_ids.remove(page_id)
         if ctx.active_page_id == page_id:
             ctx.active_page_id = ctx.page_ids[-1] if ctx.page_ids else None
-        if self.runtime.active_page_id == page_id:
-            self.runtime.active_page_id = ctx.active_page_id
         return {"page_id": page_id, "closed": True}

@@ -7,7 +7,7 @@
 import asyncio
 from collections import defaultdict
 
-from ..workflows.recorder import Recorder
+from .recorder import Recorder
 from .artifacts import ArtifactStore
 from .browser_process import BrowserProcessManager
 from .contexts import ContextManager
@@ -40,7 +40,6 @@ class BrowserRuntime:
         self.context_mgr = ContextManager(self)
         self.page_mgr = PageManager(self)
 
-        self.active_page_id = None
         self._default_handle = None
         self._default_lock = asyncio.Lock()
         self._closed = False
@@ -94,7 +93,8 @@ class BrowserRuntime:
                 "pages": len(self.pages),
                 "processes": len(self.processes.list()),
             },
-            "active_page_id": self.active_page_id,
+            "active_pages": {cid: c.active_page_id
+                             for cid, c in self.contexts.items()},
             "events": self.events.stats(),
             "metrics": self.metrics.snapshot(),
             "domain_restricted": self.policies.domain_restricted,
@@ -104,10 +104,6 @@ class BrowserRuntime:
         }
 
     # ---- 生命周期 ----
-    def reset_active_if(self, page_id):
-        if self.active_page_id == page_id:
-            self.active_page_id = None
-
     async def shutdown(self):
         if self._closed:
             return

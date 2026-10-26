@@ -10,6 +10,7 @@
   注入进来），但**不写回 profile**（关掉即弃）。用于并行/多账号而不污染身份底座。
 """
 
+import asyncio
 from urllib.parse import urlparse
 
 from ..core.errors import GavelError
@@ -22,22 +23,45 @@ class Context:
     def __init__(self, context_id, session, browser_context,
                  container="default"):
         self.context_id = context_id
-        self.session = session
+        self.creator_session_id = session.session_id
+        self.browser_handle = session.handle
         self.browser_context = browser_context
         self.container = container          # default | isolated
         self.page_ids = []
         self.active_page_id = None
-        self.session_ids = [session.session_id]
-        self.refcount = 1
+        self.session_ids = {session.session_id}
+        self._run_owner = None
+        self._run_lock = asyncio.Lock()
+
+    def lease_session_id(self):
+        """只有一个租约时返回它；多个会话共享时返回 None。"""
+        if len(self.session_ids) == 1:
+            return next(iter(self.session_ids))
+        return None
+
+    async def acquire_run(self, run_id):
+        async with self._run_lock:
+            if self._run_owner is not None and self._run_owner != run_id:
+                raise GavelError(
+                    "context_busy",
+                    f"context {self.context_id} 正被 {self._run_owner} 占用",
+                    detail={"owner": self._run_owner},
+                    hint="同一容器上的 run 需串行；等它结束或换一个 context")
+            self._run_owner = run_id
+
+    def release_run(self, run_id):
+        if self._run_owner == run_id:
+            self._run_owner = None
 
     def to_dict(self):
         return {
             "context_id": self.context_id,
-            "session_id": self.session.session_id,
-            "session_ids": list(self.session_ids),
+            "creator_session_id": self.creator_session_id,
+            "session_ids": sorted(self.session_ids),
             "container": self.container,
             "page_ids": list(self.page_ids),
             "active_page_id": self.active_page_id,
+            "busy_owner": self._run_owner,
         }
 
 
@@ -45,8 +69,7 @@ class ContextManager:
     def __init__(self, runtime):
         self.runtime = runtime
         self._by_bc = {}          # id(browser_context) -> Context（复用默认容器）
-        self._default_ctx = None  # profile 默认容器对应的 Context
-        self._default_browser = None
+        self._defaults = {}       # id(browser) -> (browser, Context)
 
     def get(self, context_id):
         ctx = self.runtime.contexts.get(context_id)
@@ -107,18 +130,17 @@ class ContextManager:
 
         if container == "default":
             # 复用同一个 profile 默认容器（跨会话共享，读写直达 profile）
-            if self._default_ctx is not None and self._default_browser is browser:
-                existing = self._default_ctx
-                if session.session_id not in existing.session_ids:
-                    existing.session_ids.append(session.session_id)
-                    existing.refcount += 1
+            key = id(browser)
+            hit = self._defaults.get(key)
+            if hit is not None and hit[0] is browser:
+                existing = hit[1]
+                existing.session_ids.add(session.session_id)
                 if existing.context_id not in session.context_ids:
                     session.context_ids.append(existing.context_id)
                 return existing
             ctx = await self.adopt(session, default_bc, context_id=cid,
                                    container="default")
-            self._default_ctx = ctx
-            self._default_browser = browser
+            self._defaults[key] = (browser, ctx)
             return ctx
 
         # 隔离容器（或没有可用的默认容器）
@@ -134,8 +156,7 @@ class ContextManager:
         bc = await browser.new_context(**kw)
         ctx = await self.adopt(session, bc, context_id=cid,
                                container="isolated")
-        if container != "default":
-            await self._seed_from_profile(bc, default_bc)
+        await self._seed_from_profile(bc, default_bc)
         return ctx
 
     async def adopt(self, session, browser_context, *, context_id=None,
@@ -151,7 +172,7 @@ class ContextManager:
         browser_context.on("page", self._on_new_page(ctx))
         pages = browser_context.pages
         if pages:
-            await self.runtime.page_mgr.register(ctx, pages[0])
+            await self.runtime.page_mgr.register(ctx, pages[0], activate=True)
         else:
             await self.runtime.page_mgr.open(ctx)
         return ctx
@@ -168,7 +189,7 @@ class ContextManager:
                             and not rt.policies.is_domain_allowed(request.url):
                         rt.events.emit({
                             "event": "policy_blocked",
-                            "session_id": ctx.session.session_id,
+                            "session_id": ctx.lease_session_id(),
                             "context_id": ctx.context_id,
                             "url": request.url,
                             "host": (urlparse(request.url).hostname or "").lower(),
@@ -197,17 +218,16 @@ class ContextManager:
 
     async def close(self, context_id, session_id=None):
         ctx = self.get(context_id)
-        ctx.refcount -= 1
-        if session_id and session_id in ctx.session_ids:
-            ctx.session_ids.remove(session_id)
+        if session_id:
+            ctx.session_ids.discard(session_id)
         # 默认容器 = profile 本体：不关闭（保留窗口与磁盘身份），只解绑会话，便于复用与累积
         if ctx.container == "default":
             return {"context_id": context_id, "detached": True,
-                    "container": "default", "refcount": max(ctx.refcount, 0)}
+                    "container": "default", "leases": len(ctx.session_ids)}
         for pid in list(ctx.page_ids):
             await self.runtime.page_mgr.close(pid, already_closed=True)
         try:
-            await ctx.browser_context.close()
+            await asyncio.wait_for(ctx.browser_context.close(), timeout=5)
         except Exception:
             pass
         self.runtime.contexts.pop(context_id, None)
