@@ -38,8 +38,20 @@
 | I6 | 模板写路径只接受精确 id | AST 扫描：`loader.save` / `delete` / `record_run` 内部不得引用 `resolve_id` |
 | I7 | async 调用链禁止同步阻塞 I/O | AST 扫描 async 函数体 + 阻塞入口清单双向核对（见第 9 节） |
 | I8 | 包依赖单向 | 导入图检查：`runtime` 不得 import `workflows` / `backends` / `tools`；`core` 不得 import 其他包 |
+| I9 | 一个数据根在任意时刻只有一个运行时守护进程（daemon）持有浏览器与可变状态 | 进程模型检查：`flock(<数据根>/daemon.lock)`；任何 adapter 不得创建浏览器、不得持有注册表 |
+| I10 | 所有资源 id（session/context/page/run/artifact）只由 daemon 分配；跨 adapter 必须一致 | 集成测试：多个 adapter 并发 `page_list` / `browser_status` 看到同一组 id |
 
-### 2.1 I7 的完整含义
+### 2.1 进程模型的定义
+
+MCP 客户端（opencode 等）会为同一用户拉起**多个** agent-gavel 进程。这是环境事实，不是异常。因此进程模型必须显式定义，不能假设"只有一个 server"。
+
+- **daemon**：唯一持有浏览器、注册表、队列、事件、产物索引与所有锁的进程。
+- **adapter**：面向 MCP 客户端的 stdio 进程。不导入 Playwright、不持有任何运行时状态，只负责把工具调用转发给 daemon 并回传结果。
+- **串行化只发生在 daemon 内部**：PageActor 负责同页串行，session 锁负责 run 独占。因此不存在"跨进程动作交错"这一类别的问题。
+- **并行发生在 daemon 内部的 context/page 之间**；adapter 数量不影响浏览器数量。
+- **资源预算**：一个数据根一个 Chrome；context 与 page 是廉价并行单位；adapter 必须保持轻量（不得因导入工具模块而加载 Playwright）。
+
+### 2.2 I7 的完整含义
 
 "阻塞 I/O"包括但不限于：
 
@@ -59,8 +71,8 @@
 唯一合法方向：
 
 ```
-tools ──► workflows ──► backends ──► runtime ──► core
-   └──────────────────────► backends
+main(adapter) ──► remote ──(unix socket)──► daemon ──► tools ──► workflows ──► backends ──► runtime ──► core
+                                                        └──────────────────────► backends
 
 core = config / errors / actions / checks（基础词表，不依赖其他包）
 ```
@@ -69,6 +81,10 @@ core = config / errors / actions / checks（基础词表，不依赖其他包）
 
 ```
 agent_gavel/
+  main.py              # MCP stdio adapter：连接或拉起 daemon，转发工具调用
+  remote.py            # adapter 侧：daemon 客户端 + 按 daemon 返回的 schema 动态注册工具
+  daemon.py            # 单实例运行时：持有 runtime 与工具表，暴露本地 socket
+
   core/
     config.py          # 唯一 env 入口；全部为函数（惰性读取），不缓存模块常量
     errors.py          # GavelError / wrap_exception / STATUS_VALUES
@@ -156,6 +172,7 @@ agent_gavel/
 | 并发语义 | 同页串行、跨页并行；`session_busy` 语义不变 |
 | 安全 | 域名白名单覆盖 popup 与重定向；导出路径二次包含校验；文件白名单；下载大小上限 |
 | 资料副本 | `strict` / `default` / `full` 三档语义与剔除清单不变 |
+| 资源 id | session/context/page/run/artifact id 只由 daemon 分配并在所有 adapter 间一致 |
 | 文本等待 | `page_wait_for_text` 使用首个文本命中（`first`）是定义行为；strict 唯一性只约束 locator 解析，不约束文本等待 |
 
 ---
@@ -232,9 +249,45 @@ agent_gavel/
 - 用 `# noqa` 绕过 I7
 - 为旧路径保留第二条启动分支
 
-### 阶段 2：身份与产物一致性
+### 阶段 2：进程模型、身份与产物一致性
 
-**目的**：让 session / context / page 的归属不再有二义性，并修掉产物索引的并发丢项。
+**目的**：先解决"多个 MCP 进程共享一个浏览器"的结构性问题，再解决 session/context/page 的归属二义性，最后修掉产物索引的并发丢项。
+
+#### 2A. 进程模型：单 daemon + 多 adapter
+
+**背景**：MCP 客户端会为同一用户拉起多个 agent-gavel 进程。当前每个进程各自持有运行时并连到同一个 Chrome，导致注册表分裂、id 冲突、`session_busy` 失效、同页动作跨进程交错。这不是配置问题，必须在架构层解决。
+
+**改动**
+
+1. 新增 `agent_gavel/daemon.py`：
+   - 唯一持有 `BrowserRuntime`、工具注册表与本地 socket 服务的进程
+   - 启动时对 `<数据根>/daemon.lock` 取 `flock`；取不到即退出（单实例由内核保证）
+   - 监听 Unix socket `<数据根>/daemon.sock`，协议为逐行 JSON：`{"id", "tool", "args"}` → `{"id", "result"}` 或 `{"id", "error"}`
+   - 提供 `describe` 请求，返回工具名与 JSON Schema（供 adapter 注册）
+   - 进程内的工具调用与现在完全一致，串行化仍由 PageActor 与 session 锁负责
+2. 新增 `agent_gavel/remote.py`（adapter 侧，不得 import playwright / runtime / tools）：
+   - 连接 daemon；不存在时以 detached 方式拉起 `python -m agent_gavel.daemon`，等待 socket 就绪
+   - 向 daemon 请求工具清单，用 MCP 低层接口动态注册同名工具；每个 handler 只做转发
+   - daemon 断开时返回结构化错误 `daemon_unavailable`（含重连提示），不得静默降级为本地运行时
+3. `agent_gavel/main.py`：从"创建运行时"改为"启动 adapter"。
+4. 生命周期：
+   - adapter 退出不影响 daemon 与浏览器
+   - daemon 崩溃后 `flock` 由内核释放；下一个 adapter 调用时重新拉起
+   - daemon 空闲退出策略由 `browser_close` / 显式关闭决定，不做超时驱逐（避免正在执行的任务被误杀）
+5. 资源预算：
+   - 一个数据根一个 Chrome
+   - adapter 不得因导入工具模块而加载 Playwright；启动后常驻内存应显著小于 daemon
+   - `browser_status` 增加 `daemon_pid` 与 `adapters` 计数
+
+**验收（必须跨进程真实执行）**
+
+- 在同一父进程下启动 4 个 adapter：进程表中有 1 个 daemon、4 个 adapter，且只有 daemon 派生了 Chrome
+- 4 个 adapter 并发调用 `page_list` / `browser_status`：返回完全相同的 page id 集合与 daemon pid
+- 从两个不同 adapter 对同一 session 并发发起 `workflow_run`：一个执行，另一个得到 `session_busy`
+- 杀掉 daemon：下一次调用要么成功拉起新 daemon，要么返回 `daemon_unavailable` 并说明原因；不得出现两个 daemon 同时持有浏览器
+- 全过程中 `ps` 里该数据根的 Chrome 数量恒为 1
+
+#### 2B. 身份与产物
 
 **改动**
 
@@ -273,6 +326,8 @@ agent_gavel/
 
 - 以"最后打开的页面"作为隐式默认
 - 在工具层遍历运行时注册表推断归属
+- 让 adapter 持有浏览器、注册表或锁
+- 用跨进程文件锁去"协调"多个 runtime 共享一个浏览器
 
 ### 阶段 3：动作与断言词表
 
@@ -383,7 +438,7 @@ agent_gavel/
 
 **验收**
 
-- 八条不变量全部为绿，白名单为空
+- 十条不变量全部为绿，白名单为空
 - 契约快照除已声明的破坏性变更外无差异
 - 工具数量快照为 94
 - `ruff` 与 `mypy` 通过
@@ -453,6 +508,7 @@ pytest -q
 - `tests/test_vocabulary.py`：动作、读取类型、比较操作的三方一致性
 - `tests/test_contract_snapshot.py`：对外响应外形
 - `tests/test_identity.py`：资源归属与并发
+- `tests/test_multiprocess.py`：1 个 daemon + 4 个 adapter，id 一致、锁有效、只有一个 Chrome
 - 打包检查：wheel 中不得包含 `legacy/`；干净安装可导入
 
 各测试在对应阶段引入：阶段 0 建立不变量、词表骨架与契约快照；阶段 2 引入身份测试。未引入前不放入 CI 必跑列表。
@@ -469,7 +525,7 @@ pytest -q
 
 同时满足以下条件，才算收敛完成：
 
-1. 八条不变量全部由测试强制，白名单为空。
+1. 十条不变量全部由测试强制，白名单为空。
 2. 契约快照、词表测试、身份测试与既有测试全部通过。
 3. `core/actions.py` 与 `core/checks.py` 各只有一份定义，全仓库不存在第二份动作或断言词表。
 4. `runtime` 不依赖上层；`tools` 不含业务分支。
@@ -478,6 +534,7 @@ pytest -q
 7. 浏览器关闭期间，其他调用不被阻塞（有测试证明）。
 8. 对外响应均经 `envelope`，`status` 取值受限，包含 `operation_id` 与 `elapsed_ms`。
 9. `README`、`CHANGELOG`、`docs/tech-plan.md` 与实现一致。
+10. 进程模型达标：一个数据根只有一个 daemon、一个 Chrome；adapter 不持有浏览器与注册表。
 
 ---
 
@@ -491,6 +548,7 @@ pytest -q
 | 参数化助手（自动提示可参数化字段） | 不做；参数化由录制入口显式传入 |
 | 模板社区征集 | 冻结，仅保持格式不变 |
 | 并行步骤组 | 不做 |
+| 多个 runtime 共享同一浏览器 | 不支持；adapter 必须转发给 daemon，禁止用跨进程文件锁协调多个 runtime |
 | 测试覆盖率指标 | 不追求；只保留契约、不变量、身份、词表四类测试 |
 | 推翻重写 | 不做；按阶段增量收敛，每阶段保持行为可用 |
 
