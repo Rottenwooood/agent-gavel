@@ -134,6 +134,7 @@ agent_gavel/
     artifact_tools.py
     profile_tools.py
     workflow_tools.py
+    daemon_tools.py
     diagnostics_tools.py
 ```
 

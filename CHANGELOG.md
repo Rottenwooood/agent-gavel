@@ -12,7 +12,8 @@
 - 后端拆分为 `locator` / `reader` / `jsrender` / `frames` / `util`，`__init__` 只保留编排。
 - 工具按资源拆分：`session_tools` / `context_tools` / `page_lifecycle`，`browser_tools` 只留浏览器。
 - 宽泛 `except Exception: pass` 全部标注 `silent-ok`，并加入不变量测试。
-- 工具数量快照 94；新增/删除必须显式更新。
+- 新增 `daemon_shutdown`（需 confirm，运行中需 force），停止后下一次调用自动拉起新 daemon。
+- 工具数量快照 95；新增/删除必须显式更新。
 - 加入 `ruff`（E/F/I/B/SIM/ASYNC）与 `mypy`，CI 增加 lint/format/type 检查。
 
 ### 动作与断言词表（阶段 3）

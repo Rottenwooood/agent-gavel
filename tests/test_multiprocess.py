@@ -218,3 +218,49 @@ async def test_daemon_crash_recovery(data_dir, webapp_server):
         assert nav2["status"] == "ok", nav2
         final = await _rpc(session, "browser_status")
         assert len(final["os_browsers"]) == 1, final
+
+
+async def test_daemon_shutdown_and_restart(data_dir, webapp_server):
+    env = _env(data_dir)
+    async with contextlib.AsyncExitStack() as stack:
+        read, write = await stack.enter_async_context(stdio_client(_params(env)))
+        session = await stack.enter_async_context(ClientSession(read, write))
+        await session.initialize()
+
+        created = await _rpc(session, "session_create")
+        assert created["status"] == "ok", created
+        before = await _rpc(session, "browser_status")
+        pid1 = before["daemon_pid"]
+
+        shut = await _rpc(session, "daemon_shutdown", {"confirm": True})
+        assert shut["status"] == "ok" and shut["stopping"] is True, shut
+
+        # 旧 daemon 退出后 daemon.json 应消失
+        info = data_dir / "daemon.json"
+        for _ in range(150):
+            if not info.exists():
+                break
+            await asyncio.sleep(0.1)
+        assert not info.exists(), "daemon 未停止"
+
+        status = None
+        for _ in range(120):
+            try:
+                candidate = await _rpc(session, "browser_status")
+            except Exception:
+                candidate = None
+            if candidate and candidate.get("daemon_pid") != pid1:
+                status = candidate
+                break
+            await asyncio.sleep(0.25)
+        assert status is not None and status.get("status") == "ok", status
+        assert status["daemon_pid"] != pid1
+
+        created2 = await _rpc(session, "session_create")
+        assert created2["status"] == "ok", created2
+        nav = await _rpc(
+            session,
+            "page_navigate",
+            {"page_id": created2["page_id"], "url": f"{webapp_server}/basic.html"},
+        )
+        assert nav["status"] == "ok", nav

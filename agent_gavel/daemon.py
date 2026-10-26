@@ -96,6 +96,7 @@ async def _dispatch(registry, schemas, name, args, adapter_count):
 async def _serve(paths, token, registry, schemas, stop):
     state = {"adapters": 0}
     tasks = set()
+    writers = set()
 
     async def reply(req, writer, write_lock, adapter_count):
         rid = req.get("id")
@@ -141,6 +142,7 @@ async def _serve(paths, token, registry, schemas, stop):
 
     async def handle(reader, writer):
         state["adapters"] += 1
+        writers.add(writer)
         write_lock = asyncio.Lock()
         try:
             while True:
@@ -156,6 +158,7 @@ async def _serve(paths, token, registry, schemas, stop):
                 task.add_done_callback(tasks.discard)
         finally:
             state["adapters"] -= 1
+            writers.discard(writer)
             try:
                 writer.close()
                 await writer.wait_closed()
@@ -185,7 +188,16 @@ async def _serve(paths, token, registry, schemas, stop):
     await stop.wait()
 
     server.close()
-    await server.wait_closed()
+    # 主动断开 adapter，否则 wait_closed 会一直等现存连接
+    for writer in list(writers):
+        try:
+            writer.close()
+        except Exception:
+            pass  # silent-ok: 单条连接关闭失败不影响整体退出
+    try:
+        await asyncio.wait_for(server.wait_closed(), timeout=2)
+    except Exception:
+        pass  # silent-ok: 已有连接关闭失败不影响退出
     for task in list(tasks):
         task.cancel()
     if tasks:
@@ -211,6 +223,11 @@ async def _run(lock_fd):
     register_runtime_tools(registry)
     schemas = await _tool_schemas()
     token = secrets.token_hex(16)
+
+    from .runtime import get_runtime
+
+    runtime = get_runtime()
+    runtime.shutdown_hook = lambda: loop.call_later(0.5, stop.set)
 
     try:
         await _serve(paths, token, registry, schemas, stop)

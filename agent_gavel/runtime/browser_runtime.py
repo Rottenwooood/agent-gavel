@@ -43,6 +43,7 @@ class BrowserRuntime:
         self._default_handle = None
         self._default_lock = asyncio.Lock()
         self._closed = False
+        self.shutdown_hook = None
 
     # ---- id ----
     def next_id(self, prefix: str) -> str:
