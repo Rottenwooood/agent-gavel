@@ -13,9 +13,9 @@ from collections import deque
 
 class EventBus:
     def __init__(self, maxlen: int = 500):
-        self._buf = deque(maxlen=maxlen)
+        self._buf: deque = deque(maxlen=maxlen)
         self._dropped = 0
-        self._waiters = []  # list[(predicate, future)]
+        self._waiters: list = []  # list[(predicate, future)]
 
     def emit(self, event: dict):
         ev = dict(event)
@@ -33,19 +33,17 @@ class EventBus:
                         fut.set_result(ev)
                         continue
                 except Exception:
-                    pass
+                    pass  # silent-ok: best-effort，失败不影响主流程
                 remaining.append((pred, fut))
             self._waiters = remaining
         return ev
 
     def recent(self, kinds=None, limit: int = 100):
-        items = [e for e in self._buf
-                 if not kinds or e.get("event") in kinds]
+        items = [e for e in self._buf if not kinds or e.get("event") in kinds]
         return items[-limit:]
 
     def stats(self):
-        return {"buffered": len(self._buf), "dropped": self._dropped,
-                "waiters": len(self._waiters)}
+        return {"buffered": len(self._buf), "dropped": self._dropped, "waiters": len(self._waiters)}
 
     async def wait_for(self, predicate, timeout: float, since: float = None):
         """等待第一个满足 predicate 的事件；超时返回 None。
@@ -60,7 +58,7 @@ class EventBus:
                 if predicate(e):
                     return e
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
         loop = asyncio.get_running_loop()
         fut = loop.create_future()
         self._waiters.append((predicate, fut))

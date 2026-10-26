@@ -16,8 +16,7 @@ class Tracer:
         return context_id in self.active
 
     async def start(self, context):
-        await context.browser_context.tracing.start(
-            screenshots=True, snapshots=True, sources=True)
+        await context.browser_context.tracing.start(screenshots=True, snapshots=True, sources=True)
         self.active.add(context.context_id)
 
     async def stop(self, context, path):
@@ -42,8 +41,7 @@ class NetworkRecorder:
     def stop(self, context_id, limit=1000):
         items = list(self._records.get(context_id, []))[-limit:]
         self._enabled.discard(context_id)
-        return {"context_id": context_id, "enabled": False,
-                "records": items, "count": len(items)}
+        return {"context_id": context_id, "enabled": False, "records": items, "count": len(items)}
 
     def record(self, context_id, entry):
         if context_id not in self._enabled:
@@ -53,4 +51,4 @@ class NetworkRecorder:
         entry.setdefault("ts", time.time())
         buf.append(entry)
         if len(buf) > self.maxlen:
-            del buf[:len(buf) - self.maxlen]
+            del buf[: len(buf) - self.maxlen]

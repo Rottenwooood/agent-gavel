@@ -13,11 +13,14 @@ from .common import guard
 def register_profile_tools(mcp):
     @mcp.tool()
     @guard
-    async def browser_profile_copy(source: str = None, name: str = None,
-                                   tier: str = "default",
-                                   include_history: bool = True,
-                                   include_extensions: bool = False,
-                                   force: bool = False):
+    async def browser_profile_copy(
+        source: str = None,
+        name: str = None,
+        tier: str = "default",
+        include_history: bool = True,
+        include_extensions: bool = False,
+        force: bool = False,
+    ):
         """从用户 Chrome 资料目录复制一份新副本。
 
         ⚠ **隐私敏感：调用前必须先向用户说明并取得明确同意。** 该操作会把用户真实
@@ -35,16 +38,24 @@ def register_profile_tools(mcp):
         源浏览器必须没在跑（否则报 profile_source_locked；force 可强行但可能不一致）。
         """
         return await asyncio.to_thread(
-            profiles.copy_profile, source=source, name=name, tier=tier,
+            profiles.copy_profile,
+            source=source,
+            name=name,
+            tier=tier,
             include_history=include_history,
-            include_extensions=include_extensions, force=force)
+            include_extensions=include_extensions,
+            force=force,
+        )
 
     @mcp.tool()
     @guard
     async def browser_profile_list():
         """列出所有资料副本 + 哪个是当前使用的（只读，不涉及隐私外传）。"""
-        return {"status": "ok", "active": profiles.active_name(),
-                "items": await asyncio.to_thread(profiles.list_profiles)}
+        return {
+            "status": "ok",
+            "active": profiles.active_name(),
+            "items": await asyncio.to_thread(profiles.list_profiles),
+        }
 
     @mcp.tool()
     @guard
@@ -55,8 +66,12 @@ def register_profile_tools(mcp):
         """
         items = {p["name"] for p in profiles.list_profiles()}
         if name not in items:
-            return {"status": "error", "reason": "profile_not_found",
-                    "error": f"副本不存在：{name}", "items": sorted(items)}
+            return {
+                "status": "error",
+                "reason": "profile_not_found",
+                "error": f"副本不存在：{name}",
+                "items": sorted(items),
+            }
         profiles.set_active(name)
         return {"status": "ok", "active": name}
 

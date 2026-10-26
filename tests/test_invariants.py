@@ -7,13 +7,17 @@
 import ast
 import pathlib
 
+from agent_gavel.core.errors import STATUS_VALUES
+
 PKG = pathlib.Path(__file__).resolve().parents[1] / "agent_gavel"
 
 
 def _modules():
     for p in sorted(PKG.rglob("*.py")):
-        yield p.relative_to(PKG).as_posix(), ast.parse(
-            p.read_text(encoding="utf-8"), filename=str(p))
+        yield (
+            p.relative_to(PKG).as_posix(),
+            ast.parse(p.read_text(encoding="utf-8"), filename=str(p)),
+        )
 
 
 def _assigned_names(tree):
@@ -63,8 +67,16 @@ def test_i1_env_only_in_config():
 
 # 阶段 3/4 结束时清零。
 PAGE_FIRST_WHITELIST = {
-    "retry_on_nav_race", "resolve", "page_scroll", "read", "text",
-    "snapshot", "explore", "find_text", "page_meta", "screenshot",
+    "retry_on_nav_race",
+    "resolve",
+    "page_scroll",
+    "read",
+    "text",
+    "snapshot",
+    "explore",
+    "find_text",
+    "page_meta",
+    "screenshot",
 }
 
 
@@ -79,8 +91,9 @@ def test_i2_backend_takes_handle():
                     continue
                 if fn.name.startswith("_"):
                     continue
-                if any(isinstance(d, ast.Name) and d.id == "staticmethod"
-                       for d in fn.decorator_list):
+                if any(
+                    isinstance(d, ast.Name) and d.id == "staticmethod" for d in fn.decorator_list
+                ):
                     continue
                 args = [a.arg for a in fn.args.args]
                 if len(args) >= 2 and args[1] == "page":
@@ -121,9 +134,8 @@ def test_i3_i4_vocabulary_single_owner():
 
 # ---------------- I5：对外 status 取值受限 ----------------
 
-STATUS_VALUES = {"ok", "pass", "fail", "ambiguous", "error", "blocked"}
 # 阶段 4 归一，清零。
-STATUS_WHITELIST = {("page_tools.py", "no_match")}
+STATUS_WHITELIST = set()
 
 
 def test_i5_status_values():
@@ -134,7 +146,7 @@ def test_i5_status_values():
         for n in ast.walk(tree):
             if not isinstance(n, ast.Dict):
                 continue
-            for k, v in zip(n.keys, n.values):
+            for k, v in zip(n.keys, n.values, strict=False):
                 if not (isinstance(k, ast.Constant) and k.value == "status"):
                     continue
                 if not (isinstance(v, ast.Constant) and isinstance(v.value, str)):
@@ -161,8 +173,11 @@ def test_i6_loader_write_paths_exact():
             continue
         if fn.name not in ("save", "delete", "record_run"):
             continue
-        called = {c.func.id for c in ast.walk(fn)
-                  if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)}
+        called = {
+            c.func.id
+            for c in ast.walk(fn)
+            if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+        }
         for name in called & {"get", "resolve_id"}:
             if (fn.name, name) not in WRITE_PATH_WHITELIST:
                 bad.append((fn.name, name))
@@ -170,6 +185,7 @@ def test_i6_loader_write_paths_exact():
 
 
 # ---------------- I7：async 函数内不得直接阻塞 ----------------
+
 
 def _dotted(node):
     parts = []
@@ -182,9 +198,14 @@ def _dotted(node):
 
 
 BLOCKING_CALLS = {
-    "time.sleep", "subprocess.run", "subprocess.call",
-    "urllib.request.urlopen", "os.walk", "shutil.copytree",
-    "shutil.copy2", "shutil.move",
+    "time.sleep",
+    "subprocess.run",
+    "subprocess.call",
+    "urllib.request.urlopen",
+    "os.walk",
+    "shutil.copytree",
+    "shutil.copy2",
+    "shutil.move",
 }
 
 # 阶段 1 已清零。
@@ -229,8 +250,7 @@ def test_i7_blocking_inventory_is_wrapped():
         tree = ast.parse((PKG / rel).read_text(encoding="utf-8"))
         wrapped = False
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call)
-                    and _dotted(node.func) == "asyncio.to_thread"):
+            if not (isinstance(node, ast.Call) and _dotted(node.func) == "asyncio.to_thread"):
                 continue
             if not node.args:
                 continue
@@ -293,3 +313,26 @@ def test_i9_adapter_does_not_own_runtime():
                     if any(x in alias.name for x in forbidden):
                         bad.append((rel, alias.name))
     assert not bad, f"adapter 导入了运行时依赖：{bad}"
+
+
+def test_silent_except_annotated():
+    """宽泛异常不得静默：pass 行必须带 silent-ok 说明。"""
+    bad = []
+    for rel, tree in _modules():
+        lines = (PKG / rel).read_text(encoding="utf-8").splitlines()
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.ExceptHandler)
+                and node.body
+                and isinstance(node.body[0], ast.Pass)
+            ):
+                continue
+            t = node.type
+            broad = t is None or (
+                isinstance(t, ast.Name) and t.id in ("Exception", "BaseException")
+            )
+            if not broad:
+                continue
+            if "silent-ok" not in lines[node.body[0].lineno - 1]:
+                bad.append((rel, node.lineno))
+    assert not bad, f"未标注的静默异常：{bad}"

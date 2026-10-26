@@ -28,16 +28,17 @@ async def test_contract_main_flow(gavel_tools, webapp_server):
     assert n["final_url"].endswith("/basic.html")
     assert n["title"] == "Basic Page"
 
-    f = await T["locator_fill"](page_id=pid,
-                                target={"by": "css", "value": "#text-input"},
-                                value="contract")
+    f = await T["locator_fill"](
+        page_id=pid, target={"by": "css", "value": "#text-input"}, value="contract"
+    )
     _shape(f, "page_id", "execution")
     assert f["status"] == "ok"
 
     c = await T["locator_click"](
-        page_id=pid, target={"by": "css", "value": "#btn"},
-        assertions={"out": {"read": "text", "selector": "#out",
-                            "op": "eq", "value": "clicked"}})
+        page_id=pid,
+        target={"by": "css", "value": "#btn"},
+        assertions={"out": {"read": "text", "selector": "#out", "op": "eq", "value": "clicked"}},
+    )
     _shape(c, "assertions")
     assert c["status"] == "pass", c
     assert c["assertions"][0]["passed"] is True
@@ -47,18 +48,24 @@ async def test_contract_main_flow(gavel_tools, webapp_server):
     assert e["status"] == "pass", e
 
     tmpl = {
-        "template_id": "contract_flow", "site": "contract", "desc": "contract",
+        "template_id": "contract_flow",
+        "site": "contract",
+        "desc": "contract",
         "steps": [
-            {"id": "go", "action": {"type": "navigate",
-                                    "url": f"{base}/basic.html"}},
-            {"id": "fill", "action": {"type": "fill",
-                                      "target": {"by": "css",
-                                                 "value": "#text-input"},
-                                      "value": "$QUERY"}},
-            {"id": "click", "action": {"type": "click",
-                                       "target": {"by": "css", "value": "#btn"}},
-             "checkpoint": {"type": "text_eq", "selector": "#out",
-                            "value": "clicked"}},
+            {"id": "go", "action": {"type": "navigate", "url": f"{base}/basic.html"}},
+            {
+                "id": "fill",
+                "action": {
+                    "type": "fill",
+                    "target": {"by": "css", "value": "#text-input"},
+                    "value": "$QUERY",
+                },
+            },
+            {
+                "id": "click",
+                "action": {"type": "click", "target": {"by": "css", "value": "#btn"}},
+                "checkpoint": {"type": "text_eq", "selector": "#out", "value": "clicked"},
+            },
         ],
     }
     sv = await T["workflow_save"](template=tmpl)
@@ -67,16 +74,17 @@ async def test_contract_main_flow(gavel_tools, webapp_server):
     _shape(va, "valid")
     assert va["valid"] is True, va
 
-    run = await T["workflow_run"](name_or_id="contract_flow",
-                                  params={"QUERY": "world"}, session_id=sid)
-    _shape(run, "run_id", "steps_completed", "steps_total",
-           "checkpoints_passed", "elapsed_ms")
+    run = await T["workflow_run"](
+        name_or_id="contract_flow", params={"QUERY": "world"}, session_id=sid
+    )
+    _shape(run, "run_id", "steps_completed", "steps_total", "checkpoints_passed", "elapsed_ms")
     assert run["status"] == "pass", run
     assert run["steps_completed"] == 3
     assert run["checkpoints_passed"] == 1
 
-    rd = await T["page_read"](page_id=pid, page_features={
-        "v": "document.querySelector('#text-input').value"})
+    rd = await T["page_read"](
+        page_id=pid, page_features={"v": "document.querySelector('#text-input').value"}
+    )
     assert rd["features"]["v"] == "world"
 
     art = await T["artifact_list"]()
@@ -93,8 +101,7 @@ async def test_contract_errors(gavel_tools, webapp_server):
     pid, sid = s["page_id"], s["session_id"]
     await T["page_navigate"](page_id=pid, url=f"{base}/basic.html")
 
-    nf = await T["locator_click"](page_id=pid,
-                                  target={"by": "css", "value": "#does-not-exist"})
+    nf = await T["locator_click"](page_id=pid, target={"by": "css", "value": "#does-not-exist"})
     _shape(nf, "reason", "error", "retryable")
     assert nf["status"] == "error"
     assert nf["reason"] == "locator_not_found"
@@ -102,13 +109,11 @@ async def test_contract_errors(gavel_tools, webapp_server):
 
     tmpl = {
         "template_id": "contract_precondition",
-        "steps": [{"id": "a", "action": {"type": "navigate",
-                                         "url": f"{base}/basic.html"}}],
+        "steps": [{"id": "a", "action": {"type": "navigate", "url": f"{base}/basic.html"}}],
         "preconditions": [{"type": "selector_exists", "selector": "#missing"}],
     }
     await T["workflow_save"](template=tmpl)
-    run = await T["workflow_run"](name_or_id="contract_precondition",
-                                  session_id=sid)
+    run = await T["workflow_run"](name_or_id="contract_precondition", session_id=sid)
     _shape(run, "reason", "failed_preconditions")
     assert run["status"] == "blocked"
     assert run["reason"] == "precondition_failed"
@@ -122,11 +127,15 @@ async def test_contract_session_busy(gavel_tools, webapp_server):
     tmpl = {
         "template_id": "contract_slow",
         "steps": [
-            {"id": "go", "action": {"type": "navigate",
-                                    "url": f"{base}/basic.html"}},
-            {"id": "w", "action": {"type": "wait_for_selector",
-                                   "selector": "#never-appears",
-                                   "timeout_s": 3}},
+            {"id": "go", "action": {"type": "navigate", "url": f"{base}/basic.html"}},
+            {
+                "id": "w",
+                "action": {
+                    "type": "wait_for_selector",
+                    "selector": "#never-appears",
+                    "timeout_s": 3,
+                },
+            },
         ],
     }
     await T["workflow_save"](template=tmpl)

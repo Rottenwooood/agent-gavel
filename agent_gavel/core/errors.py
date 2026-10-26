@@ -9,7 +9,7 @@ import logging
 import traceback
 import uuid
 
-STATUS_VALUES = frozenset({"ok", "pass", "fail", "ambiguous", "error", "blocked"})
+STATUS_VALUES = frozenset({"ok", "pass", "fail", "ambiguous", "error", "blocked", "cancelled"})
 
 _log = logging.getLogger("agent_gavel")
 
@@ -17,8 +17,16 @@ _log = logging.getLogger("agent_gavel")
 class GavelError(Exception):
     """agent-gavel 的统一错误类型。"""
 
-    def __init__(self, code: str, message: str, *, detail=None, hint=None,
-                 retryable: bool = False, trace_id: str = None):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        detail=None,
+        hint=None,
+        retryable: bool = False,
+        trace_id: str = None,
+    ):
         super().__init__(message)
         self.code = code
         self.message = message
@@ -53,6 +61,9 @@ def wrap_exception(e: Exception) -> GavelError:
     trace_id = uuid.uuid4().hex[:12]
     stack = "".join(traceback.format_exception(type(e), e, e.__traceback__))
     _log.error("internal error [%s]\n%s", trace_id, stack[-4000:])
-    return GavelError("internal", f"{type(e).__name__}: {e}",
-                      trace_id=trace_id,
-                      hint="带 trace_id 反馈；服务端日志里有完整堆栈")
+    return GavelError(
+        "internal",
+        f"{type(e).__name__}: {e}",
+        trace_id=trace_id,
+        hint="带 trace_id 反馈；服务端日志里有完整堆栈",
+    )

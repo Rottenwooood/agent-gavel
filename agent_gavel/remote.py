@@ -32,8 +32,12 @@ def _spawn_daemon():
     with open(log_dir / "daemon.log", "ab", buffering=0) as log:
         subprocess.Popen(
             [sys.executable, "-m", DAEMON_MODULE],
-            stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-            start_new_session=True, close_fds=True)
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+            close_fds=True,
+        )
 
 
 class DaemonClient:
@@ -56,10 +60,12 @@ class DaemonClient:
         self._token = info.get("token")
         if info.get("port"):
             reader, writer = await asyncio.open_connection(
-                "127.0.0.1", int(info["port"]), limit=64 * 1024 * 1024)
+                "127.0.0.1", int(info["port"]), limit=64 * 1024 * 1024
+            )
         else:
             reader, writer = await asyncio.open_unix_connection(
-                info["socket"], limit=64 * 1024 * 1024)
+                info["socket"], limit=64 * 1024 * 1024
+            )
         self._reader, self._writer = reader, writer
         self._pump = asyncio.create_task(self._read_loop(reader, writer))
 
@@ -77,7 +83,7 @@ class DaemonClient:
                 if fut is not None and not fut.done():
                     fut.set_result(msg)
         except Exception:
-            pass
+            pass  # silent-ok: best-effort，失败不影响主流程
         finally:
             if self._writer is writer:
                 self._drop()
@@ -90,12 +96,15 @@ class DaemonClient:
             try:
                 writer.close()
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
 
     def _fail_pending(self):
-        err = GavelError("daemon_unavailable", "daemon 连接已断开",
-                         retryable=True,
-                         hint="重试即可；adapter 会重新拉起或连接 daemon")
+        err = GavelError(
+            "daemon_unavailable",
+            "daemon 连接已断开",
+            retryable=True,
+            hint="重试即可；adapter 会重新拉起或连接 daemon",
+        )
         for fut in list(self._pending.values()):
             if not fut.done():
                 fut.set_exception(err)
@@ -110,7 +119,7 @@ class DaemonClient:
                 await asyncio.wait_for(self._attach(), timeout=1.0)
                 return
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
             _spawn_daemon()
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
@@ -120,9 +129,11 @@ class DaemonClient:
                 except Exception:
                     await asyncio.sleep(0.1)
             raise GavelError(
-                "daemon_unavailable", "daemon 未能在限定时间内启动",
+                "daemon_unavailable",
+                "daemon 未能在限定时间内启动",
                 retryable=True,
-                hint=f"查看 {config.data_dir() / 'logs' / 'daemon.log'}")
+                hint=f"查看 {config.data_dir() / 'logs' / 'daemon.log'}",
+            )
 
     async def call(self, tool, args=None):
         if self._writer is None:
@@ -131,17 +142,16 @@ class DaemonClient:
         rid = self._seq
         fut = asyncio.get_running_loop().create_future()
         self._pending[rid] = fut
-        payload = json.dumps({"id": rid, "token": self._token,
-                              "tool": tool, "args": args or {}},
-                             ensure_ascii=False)
+        payload = json.dumps(
+            {"id": rid, "token": self._token, "tool": tool, "args": args or {}}, ensure_ascii=False
+        )
         try:
             self._writer.write((payload + "\n").encode())
             await self._writer.drain()
         except Exception as e:
             self._pending.pop(rid, None)
             self._drop()
-            raise GavelError("daemon_unavailable", f"daemon 写入失败：{e}",
-                             retryable=True) from e
+            raise GavelError("daemon_unavailable", f"daemon 写入失败：{e}", retryable=True) from e
         msg = await fut
         if "error" in msg:
             return msg["error"], True
@@ -156,6 +166,7 @@ class DaemonClient:
 def _version():
     try:
         from importlib.metadata import version
+
         return version("agent-gavel")
     except Exception:
         return ""
@@ -169,26 +180,26 @@ async def _serve(client, tools):
 
     async def on_call_tool(context, params):
         try:
-            result, is_error = await client.call(params.name,
-                                                 params.arguments or {})
+            result, is_error = await client.call(params.name, params.arguments or {})
         except GavelError as e:
             result, is_error = e.to_dict(), True
         except Exception as e:  # noqa: BLE001
             result, is_error = wrap_exception(e).to_dict(), True
         return types.CallToolResult(
-            content=[types.TextContent(
-                type="text",
-                text=json.dumps(result, ensure_ascii=False, default=str))],
+            content=[
+                types.TextContent(
+                    type="text", text=json.dumps(result, ensure_ascii=False, default=str)
+                )
+            ],
             structured_content=result if isinstance(result, dict) else None,
             is_error=is_error,
         )
 
-    server = Server("agent-gavel", version=_version(),
-                    on_list_tools=on_list_tools,
-                    on_call_tool=on_call_tool)
+    server = Server(
+        "agent-gavel", version=_version(), on_list_tools=on_list_tools, on_call_tool=on_call_tool
+    )
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream,
-                         server.create_initialization_options())
+        await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 async def run():
@@ -198,8 +209,7 @@ async def run():
     try:
         desc, is_error = await client.call("__describe__")
         if is_error:
-            raise GavelError("daemon_unavailable", str(desc),
-                             hint="查看 daemon.log")
+            raise GavelError("daemon_unavailable", str(desc), hint="查看 daemon.log")
         await _serve(client, desc["tools"])
     finally:
         await client.close()

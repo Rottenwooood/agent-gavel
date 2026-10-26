@@ -1,5 +1,8 @@
 # agent-gavel 技术方案（Playwright Runtime 重建）
 
+> 本文是早期设计背景，不再作为实现约束；不变量、阶段计划与门禁以
+> `docs/architecture.md` 为准。
+
 > **文档地位**：本文档是 agent-gavel 下一阶段开发的**长程基准**。实现遇到本文未覆盖的分支时，先回到本文更新，再改代码；不允许悄悄偏离。
 >
 > **来源**：由 `docs/agent-gavel-discussion.md`（设计讨论稿）收敛而来。讨论稿回答"为什么做、做成什么样"，本文回答"每个模块怎么落地"。两者冲突时以本文为准（本文更具体），但产品的价值主张以讨论稿为准。
@@ -711,7 +714,7 @@ browser_launch  browser_status  browser_close
 session_create  session_list  session_get  session_reset  session_close
 session_export_state  session_import_state
 context_create  context_close
-page_open  page_list  page_get  page_focus  page_close  page_select
+page_open  page_list  page_get  page_close  page_select
 page_wait  page_reload  page_go_back  page_go_forward
 ```
 
@@ -730,7 +733,7 @@ expect
 
 ```
 locator_check  locator_uncheck  locator_select  locator_drag  locator_upload
-locator_set_files  page_handle_dialog
+page_handle_dialog
 page_wait_for_response  page_wait_for_download  page_wait_for_popup  page_wait_for_event
 download_list  download_get  download_save  download_read_text  download_delete
 artifact_list  artifact_get  artifact_export  artifact_cleanup
@@ -742,7 +745,7 @@ context_cookies_get  context_cookies_set  context_set_headers  context_set_permi
 ```
 workflow_save  workflow_validate  workflow_publish  workflow_list  workflow_get
 workflow_run  workflow_pause  workflow_resume  workflow_cancel
-workflow_record_start  workflow_record_stop  workflow_replay  workflow_stats
+workflow_record_start  workflow_record_stop  workflow_stats
 trace_start  trace_stop  trace_get
 network_start  network_stop  console_get  page_errors  performance_metrics
 ```

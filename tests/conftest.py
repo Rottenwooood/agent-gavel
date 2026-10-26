@@ -13,24 +13,25 @@ import pytest_asyncio
 os.environ.setdefault("AGENT_GAVEL_HEADLESS", "1")
 
 # 测试用独立的运行数据根，避免写进用户 ~/.config/agent-gavel
-os.environ.setdefault("AGENT_GAVEL_DATA_DIR",
-                      tempfile.mkdtemp(prefix="agent-gavel-test-data-"))
+os.environ.setdefault("AGENT_GAVEL_DATA_DIR", tempfile.mkdtemp(prefix="agent-gavel-test-data-"))
 
 # 隔离工作流模板目录，避免测试写进真实 ~/.config/agent-gavel/workflows/。
 # 注意：不要改 XDG_CONFIG_HOME——Chrome 会读它，指向空目录会导致后续外网导航
 # net::ERR_NETWORK_CHANGED/超时（已实测）。
-os.environ["AGENT_GAVEL_WORKFLOWS_DIR"] = tempfile.mkdtemp(
-    prefix="agent-gavel-test-workflows-")
+os.environ["AGENT_GAVEL_WORKFLOWS_DIR"] = tempfile.mkdtemp(prefix="agent-gavel-test-workflows-")
 
 # 测试用独立的浏览器持久 profile，避免污染用户 ~/.config/agent-gavel/browser-profile
-os.environ.setdefault("AGENT_GAVEL_BROWSER_PROFILE",
-                      tempfile.mkdtemp(prefix="agent-gavel-test-profile-"))
+os.environ.setdefault(
+    "AGENT_GAVEL_BROWSER_PROFILE", tempfile.mkdtemp(prefix="agent-gavel-test-profile-")
+)
 # 资料副本目录也隔离到临时目录
-os.environ.setdefault("AGENT_GAVEL_BROWSER_PROFILES",
-                      tempfile.mkdtemp(prefix="agent-gavel-test-profiles-"))
+os.environ.setdefault(
+    "AGENT_GAVEL_BROWSER_PROFILES", tempfile.mkdtemp(prefix="agent-gavel-test-profiles-")
+)
 
-from agent_gavel.runtime import reset_runtime, shutdown_runtime  # noqa: E402
 from webapp_server import start_server  # noqa: E402
+
+from agent_gavel.runtime import reset_runtime  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -51,10 +52,10 @@ async def runtime():
     yield rt
 
 
-
 def _kill_test_chrome():
     """杀掉用测试资料目录启动的 Chrome（含未登记的残留）。"""
     import signal
+
     profile = os.environ.get("AGENT_GAVEL_BROWSER_PROFILE")
     if not profile or not os.path.isdir("/proc"):
         return
@@ -74,12 +75,14 @@ def _kill_test_chrome():
                 pass
 
 
-import atexit
+import atexit  # noqa: E402
+
 atexit.register(_kill_test_chrome)
 
 
 def pytest_sessionfinish(session, exitstatus):
     from agent_gavel.runtime import browser_runtime
+
     rt = browser_runtime._RUNTIME
     if rt is not None:
         rt.processes.kill_all_sync()
@@ -96,6 +99,7 @@ class FakeMCP:
         def deco(fn):
             self.tools[fn.__name__] = fn
             return fn
+
         return deco
 
 
@@ -103,6 +107,7 @@ class FakeMCP:
 def gavel_tools(runtime):
     """注册全部 runtime 工具，返回 {name: callable}。"""
     from agent_gavel.tools import register_runtime_tools
+
     m = FakeMCP()
     register_runtime_tools(m)
     return m.tools
@@ -113,6 +118,5 @@ async def page(gavel_tools, webapp_server):
     """建 session + 打开 basic.html，返回 (tools, page_id, base_url)。"""
     r = await gavel_tools["session_create"]()
     pid = r["page_id"]
-    await gavel_tools["page_navigate"](page_id=pid,
-                                       url=f"{webapp_server}/basic.html")
+    await gavel_tools["page_navigate"](page_id=pid, url=f"{webapp_server}/basic.html")
     return gavel_tools, pid, webapp_server

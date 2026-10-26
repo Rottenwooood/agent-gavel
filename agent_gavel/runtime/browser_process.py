@@ -26,6 +26,7 @@ from playwright.async_api import async_playwright
 from ..core import config
 from ..core.errors import GavelError
 
+
 def _default_channel():
     return config.chrome_channel()
 
@@ -37,8 +38,8 @@ def _find_chrome_binary():
 
 def _default_profile_dir():
     from .profiles import active_profile_dir, default_profile_dir
-    return config.browser_profile_override() or active_profile_dir() \
-        or default_profile_dir()
+
+    return config.browser_profile_override() or active_profile_dir() or default_profile_dir()
 
 
 def _launch_args():
@@ -51,8 +52,11 @@ def _launch_args():
     """
     # --keep-alive-for-test：关闭最后一个标签页时不退出浏览器进程。
     # 自动化场景下"关标签"不等于"关浏览器"，否则复用连接会拿到已退出的进程。
-    args = ["--no-first-run", "--disable-blink-features=AutomationControlled",
-            "--keep-alive-for-test"]
+    args = [
+        "--no-first-run",
+        "--disable-blink-features=AutomationControlled",
+        "--keep-alive-for-test",
+    ]
     if sys.platform.startswith("linux"):
         args += ["--no-sandbox", "--disable-dev-shm-usage"]
     if config.disable_gpu():
@@ -65,8 +69,9 @@ def _launch_args():
 
 def _chrome_version(binary):
     try:
-        out = subprocess.run([binary, "--version"], capture_output=True,
-                             text=True, timeout=5).stdout
+        out = subprocess.run(
+            [binary, "--version"], capture_output=True, text=True, timeout=5
+        ).stdout
     except Exception:
         return None
     found = re.search(r"(\d+\.\d+\.\d+\.\d+)", out or "")
@@ -82,8 +87,10 @@ def _desktop_user_agent(version):
         platform = "Macintosh; Intel Mac OS X 10_15_7"
     else:
         platform = "X11; Linux x86_64"
-    return ("Mozilla/5.0 (" + platform + ") AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/" + v + " Safari/537.36")
+    return (
+        "Mozilla/5.0 (" + platform + ") AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/" + v + " Safari/537.36"
+    )
 
 
 def _free_port() -> int:
@@ -100,17 +107,20 @@ async def _kill_tree(pid, grace_s=3.0):
     if sys.platform.startswith("win"):
         try:
             await asyncio.to_thread(
-                subprocess.run, ["taskkill", "/T", "/PID", str(pid)],
-                capture_output=True, timeout=5)
+                subprocess.run, ["taskkill", "/T", "/PID", str(pid)], capture_output=True, timeout=5
+            )
             for _ in range(int(grace_s * 10)):
                 if not _pid_alive(pid):
                     return
                 await asyncio.sleep(0.1)
             await asyncio.to_thread(
-                subprocess.run, ["taskkill", "/F", "/T", "/PID", str(pid)],
-                capture_output=True, timeout=5)
+                subprocess.run,
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True,
+                timeout=5,
+            )
         except Exception:
-            pass
+            pass  # silent-ok: best-effort，失败不影响主流程
         return
     try:
         os.killpg(pid, signal.SIGTERM)  # 优雅退出，让 Chrome 落盘
@@ -123,7 +133,7 @@ async def _kill_tree(pid, grace_s=3.0):
     try:
         os.killpg(pid, signal.SIGKILL)
     except Exception:
-        pass
+        pass  # silent-ok: best-effort，失败不影响主流程
 
 
 def _pid_alive(pid):
@@ -154,8 +164,7 @@ class _Reused:
 
 def _cdp_ready(port):
     try:
-        with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/json/version", timeout=1) as r:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/json/version", timeout=1) as r:
             json.loads(r.read())
             return True
     except Exception:
@@ -174,16 +183,17 @@ def _managed_pids(udd):
         parts = _proc_cmdline(pid)
         if not parts or "chrome" not in os.path.basename(parts[0]).lower():
             continue
-        if (f"--user-data-dir={udd}" in parts
-                and "--disable-blink-features=AutomationControlled" in parts
-                and "--remote-allow-origins=*" in parts):
+        if (
+            f"--user-data-dir={udd}" in parts
+            and "--disable-blink-features=AutomationControlled" in parts
+            and "--remote-allow-origins=*" in parts
+        ):
             pids.append(int(pid))
     return pids
 
 
 def _singleton_paths(udd):
-    return [os.path.join(udd, n) for n in
-            ("SingletonLock", "SingletonCookie", "SingletonSocket")]
+    return [os.path.join(udd, n) for n in ("SingletonLock", "SingletonCookie", "SingletonSocket")]
 
 
 def _clear_singletons(udd):
@@ -211,7 +221,7 @@ def _write_state(udd, pid, port):
         with open(_state_path(udd), "w", encoding="utf-8") as f:
             json.dump({"pid": int(pid), "port": int(port), "at": time.time()}, f)
     except Exception:
-        pass
+        pass  # silent-ok: best-effort，失败不影响主流程
 
 
 def _clear_state(udd):
@@ -224,8 +234,13 @@ def _clear_state(udd):
 def _reuse_existing(udd):
     """复用：优先读状态文件（MCP 重启后仍能重连），再退回 /proc 扫描。"""
     st = _read_state(udd)
-    if st and st.get("pid") and st.get("port") \
-            and _pid_alive(int(st["pid"])) and _cdp_ready(int(st["port"])):
+    if (
+        st
+        and st.get("pid")
+        and st.get("port")
+        and _pid_alive(int(st["pid"]))
+        and _cdp_ready(int(st["port"]))
+    ):
         return int(st["pid"]), int(st["port"])
     pdir = "/proc"
     if not os.path.isdir(pdir):
@@ -266,8 +281,16 @@ async def _reconcile(udd):
 
 
 class BrowserHandle:
-    def __init__(self, process_id, *, browser=None, persistent_context=None,
-                 mode="shared", opts=None, owned_pid=None):
+    def __init__(
+        self,
+        process_id,
+        *,
+        browser=None,
+        persistent_context=None,
+        mode="shared",
+        opts=None,
+        owned_pid=None,
+    ):
         self.process_id = process_id
         self.browser = browser
         self.persistent_context = persistent_context
@@ -292,12 +315,16 @@ class BrowserHandle:
         return True
 
     def to_dict(self):
-        info = {"process_id": self.process_id, "mode": self.mode,
-                "pid": self.pid, "alive": self.alive,
-                "headless": self.opts.get("headless"),
-                "channel": self.opts.get("channel"),
-                "user_data_dir": self.opts.get("user_data_dir"),
-                "proxy": bool(self.opts.get("proxy"))}
+        info = {
+            "process_id": self.process_id,
+            "mode": self.mode,
+            "pid": self.pid,
+            "alive": self.alive,
+            "headless": self.opts.get("headless"),
+            "channel": self.opts.get("channel"),
+            "user_data_dir": self.opts.get("user_data_dir"),
+            "proxy": bool(self.opts.get("proxy")),
+        }
         if self.opts.get("mode_resolved"):
             info["mode_resolved"] = self.opts["mode_resolved"]
             info["mode_warning"] = self.opts.get("mode_warning")
@@ -318,7 +345,7 @@ class BrowserProcessManager:
 
     @property
     def devices(self):
-        return (self._pw.devices if self._pw is not None else {})
+        return self._pw.devices if self._pw is not None else {}
 
     def _next_id(self):
         self._n += 1
@@ -342,8 +369,11 @@ class BrowserProcessManager:
     async def _spawn_managed(self, udd, port, headless, extra_args=None):
         binary = _find_chrome_binary()
         if not binary:
-            raise GavelError("chrome_env", "找不到 Chrome/Chromium 可执行文件",
-                             hint="安装 Chrome，或设 AGENT_GAVEL_CHROME_BIN")
+            raise GavelError(
+                "chrome_env",
+                "找不到 Chrome/Chromium 可执行文件",
+                hint="安装 Chrome，或设 AGENT_GAVEL_CHROME_BIN",
+            )
         os.makedirs(udd, exist_ok=True)
         # 启动前对账：能复用就复用（状态文件优先，重启后也能重连）；否则清掉遗留 + 删单例锁
         ex = await _reconcile(udd)
@@ -353,21 +383,25 @@ class BrowserProcessManager:
         args = [binary, *_launch_args()]
         if extra_args:
             args += list(extra_args)
-        args += [f"--user-data-dir={udd}", f"--remote-debugging-port={port}",
-                 "--remote-allow-origins=*", "--no-default-browser-check"]
+        args += [
+            f"--user-data-dir={udd}",
+            f"--remote-debugging-port={port}",
+            "--remote-allow-origins=*",
+            "--no-default-browser-check",
+        ]
         if headless:
             args += ["--headless=new", "--window-size=1920,1080"]
             # 默认持久容器无法事后改 UA，只能在启动参数里给桌面 UA。
             version = await asyncio.to_thread(_chrome_version, binary)
             args.append(f"--user-agent={_desktop_user_agent(version)}")
         args.append("about:blank")
-        logf = open(os.path.join(udd, "chrome.log"), "ab")
+        logf = await asyncio.to_thread(open, os.path.join(udd, "chrome.log"), "ab")
         kwargs = {"stdout": logf, "stderr": logf}
         if sys.platform.startswith("win"):
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             kwargs["start_new_session"] = True
-        proc = subprocess.Popen(args, **kwargs)
+        proc = await asyncio.to_thread(subprocess.Popen, args, **kwargs)
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             if await asyncio.to_thread(_cdp_ready, port):
@@ -377,14 +411,19 @@ class BrowserProcessManager:
         await _kill_tree(proc.pid)
         _clear_singletons(udd)
         raise GavelError(
-            "chrome_env", "自起 Chrome 的调试端口未就绪",
+            "chrome_env",
+            "自起 Chrome 的调试端口未就绪",
             detail={"user_data_dir": udd},
             hint="资料目录可能被其它 Chrome 占用；本项目已尝试清理自己的残留进程与单例锁，"
-                 "仍失败请确认没有手动/外部 Chrome 在用同一 user_data_dir")
+            "仍失败请确认没有手动/外部 Chrome 在用同一 user_data_dir",
+        )
 
     async def _connect(self, pw, port_or_url):
-        url = port_or_url if str(port_or_url).startswith("http") \
+        url = (
+            port_or_url
+            if str(port_or_url).startswith("http")
             else f"http://127.0.0.1:{port_or_url}"
+        )
         return await pw.chromium.connect_over_cdp(url)
 
     # ---- playwright：Playwright 直接 launch ----
@@ -407,7 +446,8 @@ class BrowserProcessManager:
         try:
             if persistent_dir is not None:
                 return await pw.chromium.launch_persistent_context(
-                    persistent_dir, accept_downloads=True, **alt)
+                    persistent_dir, accept_downloads=True, **alt
+                )
             return await pw.chromium.launch(**alt)
         except Exception as e1:  # noqa: BLE001
             if "channel" not in alt:
@@ -416,13 +456,16 @@ class BrowserProcessManager:
             try:
                 if persistent_dir is not None:
                     return await pw.chromium.launch_persistent_context(
-                        persistent_dir, accept_downloads=True, **alt)
+                        persistent_dir, accept_downloads=True, **alt
+                    )
                 return await pw.chromium.launch(**alt)
             except Exception as e2:  # noqa: BLE001
                 raise GavelError(
-                    "chrome_env", f"浏览器启动失败（系统 Chrome 与自带 chromium 均失败）：{e2}",
+                    "chrome_env",
+                    f"浏览器启动失败（系统 Chrome 与自带 chromium 均失败）：{e2}",
                     detail={"chrome_error": str(e1)},
-                    hint="装 Chrome，或执行 `playwright install chromium`") from e2
+                    hint="装 Chrome，或执行 `playwright install chromium`",
+                ) from e2
 
     # ---- 对外 ----
     async def launch(self, **opts):
@@ -437,19 +480,21 @@ class BrowserProcessManager:
             pw = await self._ensure_pw()
             opts = dict(opts)
             endpoint = opts.pop("cdp_endpoint", None) or config.cdp_endpoint()
-            requested = (opts.pop("browser_mode", None)
-                         or config.browser_mode()).strip().lower()
+            requested = (opts.pop("browser_mode", None) or config.browser_mode()).strip().lower()
             notes = {}
 
             if endpoint:
                 browser = await self._connect(pw, endpoint)
                 ctx = None
                 if persistent_dir:
-                    ctx = browser.contexts[0] if browser.contexts \
-                        else await browser.new_context()
-                h = BrowserHandle(self._next_id(), browser=browser,
-                                  persistent_context=ctx, mode="attach",
-                                  opts=opts)
+                    ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
+                h = BrowserHandle(
+                    self._next_id(),
+                    browser=browser,
+                    persistent_context=ctx,
+                    mode="attach",
+                    opts=opts,
+                )
                 self._handles[h.process_id] = h
                 return h
 
@@ -464,15 +509,13 @@ class BrowserProcessManager:
                 reason = "no_chrome_binary"
             if requested == "managed" and reason:
                 notes["mode_resolved"] = "playwright"
-                notes["mode_warning"] = \
-                    f"managed 模式不适用（{reason}），已改用 playwright"
+                notes["mode_warning"] = f"managed 模式不适用（{reason}），已改用 playwright"
 
             if reason:
                 kw, headless = self._launch_kwargs(opts)
                 if persistent_dir:
                     os.makedirs(persistent_dir, exist_ok=True)
-                    ctx = await self._launch_with_fallback(
-                        pw, kw, persistent_dir=persistent_dir)
+                    ctx = await self._launch_with_fallback(pw, kw, persistent_dir=persistent_dir)
                     browser = ctx.browser
                     mode = "persistent"
                 else:
@@ -486,9 +529,13 @@ class BrowserProcessManager:
                     ua = await self._headless_default_ua(browser)
                     if ua:
                         opts["default_user_agent"] = ua
-                h = BrowserHandle(self._next_id(), browser=browser,
-                                  persistent_context=ctx, mode=mode,
-                                  opts={**opts, **notes})
+                h = BrowserHandle(
+                    self._next_id(),
+                    browser=browser,
+                    persistent_context=ctx,
+                    mode=mode,
+                    opts={**opts, **notes},
+                )
                 self._handles[h.process_id] = h
                 return h
 
@@ -499,25 +546,37 @@ class BrowserProcessManager:
             browser = await self._connect(pw, port)
             ctx = None
             if persistent_dir:
-                ctx = browser.contexts[0] if browser.contexts \
-                    else await browser.new_context()
+                ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
             opts["headless"] = headless
             opts["user_data_dir"] = udd
             if headless:
                 ua = await self._headless_default_ua(browser)
                 if ua:
                     opts["default_user_agent"] = ua
-            h = BrowserHandle(self._next_id(), browser=browser,
-                              persistent_context=ctx, mode="managed",
-                              opts={**opts, **notes}, owned_pid=proc.pid)
+            h = BrowserHandle(
+                self._next_id(),
+                browser=browser,
+                persistent_context=ctx,
+                mode="managed",
+                opts={**opts, **notes},
+                owned_pid=proc.pid,
+            )
             self._handles[h.process_id] = h
             return h
 
     def get(self, process_id):
         return self._handles.get(process_id)
 
-    def matches(self, handle, *, headless=None, channel=None, proxy=None,
-                browser_mode=None, cdp_endpoint=None):
+    def matches(
+        self,
+        handle,
+        *,
+        headless=None,
+        channel=None,
+        proxy=None,
+        browser_mode=None,
+        cdp_endpoint=None,
+    ):
         """已有浏览器与请求参数是否一致（None 表示不限定）。"""
         if handle is None or not handle.alive:
             return False
@@ -528,11 +587,10 @@ class BrowserProcessManager:
             return False
         if channel is not None and opts.get("channel") != channel:
             return False
-        attach = ((browser_mode or config.browser_mode()).strip().lower()
-                  == "attach" or bool(cdp_endpoint or config.cdp_endpoint()))
-        if attach and handle.mode != "attach":
-            return False
-        return True
+        attach = (browser_mode or config.browser_mode()).strip().lower() == "attach" or bool(
+            cdp_endpoint or config.cdp_endpoint()
+        )
+        return not (attach and handle.mode != "attach")
 
     def list(self):
         return [h.to_dict() for h in self._handles.values()]
@@ -544,13 +602,15 @@ class BrowserProcessManager:
                 continue
             try:
                 if sys.platform.startswith("win"):
-                    subprocess.run(["taskkill", "/F", "/T", "/PID",
-                                    str(handle.owned_pid)],
-                                   capture_output=True, timeout=5)
+                    subprocess.run(
+                        ["taskkill", "/F", "/T", "/PID", str(handle.owned_pid)],
+                        capture_output=True,
+                        timeout=5,
+                    )
                 else:
                     os.killpg(handle.owned_pid, signal.SIGKILL)
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
 
     def os_browsers(self):
         """OS 里真实存在、用我们资料目录的 Chrome（含 MCP 重启后丢失登记的孤儿）。"""
@@ -561,25 +621,24 @@ class BrowserProcessManager:
                 udds.add(u)
         try:
             from .profiles import active_profile_dir, default_profile_dir
+
             for u in (active_profile_dir(), default_profile_dir()):
                 if u:
                     udds.add(u)
         except Exception:
-            pass
+            pass  # silent-ok: best-effort，失败不影响主流程
         registered = {h.owned_pid for h in self._handles.values() if h.owned_pid}
         out = []
         seen = set()
         for u in udds:
             for pid in _managed_pids(u):
-                out.append({"pid": pid, "user_data_dir": u,
-                            "registered": pid in registered})
+                out.append({"pid": pid, "user_data_dir": u, "registered": pid in registered})
                 seen.add(pid)
             st = _read_state(u)
             if st and st.get("pid"):
                 pid = int(st["pid"])
                 if pid not in seen and _pid_alive(pid):
-                    out.append({"pid": pid, "user_data_dir": u,
-                                "registered": pid in registered})
+                    out.append({"pid": pid, "user_data_dir": u, "registered": pid in registered})
         return out
 
     async def close(self, handle):
@@ -594,10 +653,11 @@ class BrowserProcessManager:
             if handle.browser is not None:
                 try:
                     cdp = await asyncio.wait_for(
-                        handle.browser.new_browser_cdp_session(), timeout=3)
+                        handle.browser.new_browser_cdp_session(), timeout=3
+                    )
                     await asyncio.wait_for(cdp.send("Browser.close"), timeout=3)
                 except Exception:
-                    pass
+                    pass  # silent-ok: best-effort，失败不影响主流程
             for _ in range(50):
                 if not _pid_alive(handle.owned_pid):
                     break
@@ -606,7 +666,7 @@ class BrowserProcessManager:
                 if handle.browser is not None:
                     await asyncio.wait_for(handle.browser.close(), timeout=3)
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
             await _kill_tree(handle.owned_pid, grace_s=3.0)
             udd = handle.opts.get("user_data_dir")
             if udd:
@@ -619,7 +679,7 @@ class BrowserProcessManager:
             elif handle.browser is not None:
                 await asyncio.wait_for(handle.browser.close(), timeout=5)
         except Exception:
-            pass
+            pass  # silent-ok: best-effort，失败不影响主流程
 
     async def stop_all(self):
         for handle in list(self._handles.values()):
@@ -628,5 +688,5 @@ class BrowserProcessManager:
             try:
                 await asyncio.wait_for(self._pw.stop(), timeout=5)
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
             self._pw = None

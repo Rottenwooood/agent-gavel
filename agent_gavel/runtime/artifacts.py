@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import shutil
+import tempfile
 import threading
 import time
 
@@ -74,19 +75,42 @@ class ArtifactStore:
             self._save()
 
     # ---- 写入 ----
-    def save_bytes(self, data: bytes, *, filename=None, kind="file",
-                   mime_type=None, source_url=None, session_id=None,
-                   page_id=None, meta=None) -> dict:
+    def save_bytes(
+        self,
+        data: bytes,
+        *,
+        filename=None,
+        kind="file",
+        mime_type=None,
+        source_url=None,
+        session_id=None,
+        page_id=None,
+        meta=None,
+    ) -> dict:
         with self._lock:
-            return self._save_bytes_locked(data, filename=filename, kind=kind,
-                                           mime_type=mime_type,
-                                           source_url=source_url,
-                                           session_id=session_id,
-                                           page_id=page_id, meta=meta)
+            return self._save_bytes_locked(
+                data,
+                filename=filename,
+                kind=kind,
+                mime_type=mime_type,
+                source_url=source_url,
+                session_id=session_id,
+                page_id=page_id,
+                meta=meta,
+            )
 
-    def _save_bytes_locked(self, data, *, filename=None, kind="file",
-                           mime_type=None, source_url=None, session_id=None,
-                           page_id=None, meta=None) -> dict:
+    def _save_bytes_locked(
+        self,
+        data,
+        *,
+        filename=None,
+        kind="file",
+        mime_type=None,
+        source_url=None,
+        session_id=None,
+        page_id=None,
+        meta=None,
+    ) -> dict:
         aid = self._next_id()
         dest = os.path.join(self.root, aid)
         with open(dest, "wb") as f:
@@ -110,14 +134,15 @@ class ArtifactStore:
         self._save()
         return dict(info)
 
-    def register_file(self, src_path: str, *, filename=None, kind="file",
-                      move=True, **kw) -> dict:
+    def register_file(self, src_path: str, *, filename=None, kind="file", move=True, **kw) -> dict:
         with self._lock:
-            return self._register_file_locked(src_path, filename=filename,
-                                              kind=kind, move=move, **kw)
+            return self._register_file_locked(
+                src_path, filename=filename, kind=kind, move=move, **kw
+            )
 
-    def _register_file_locked(self, src_path, *, filename=None, kind="file",
-                              move=True, **kw) -> dict:
+    def _register_file_locked(
+        self, src_path, *, filename=None, kind="file", move=True, **kw
+    ) -> dict:
         if not os.path.isfile(src_path):
             raise GavelError("artifact_missing", f"文件不存在：{src_path}")
         aid = self._next_id()
@@ -151,8 +176,7 @@ class ArtifactStore:
         with self._lock:
             info = self._load().get(artifact_id)
             if not info or info.get("pending"):
-                raise GavelError("artifact_not_found",
-                                 f"未知 artifact：{artifact_id}")
+                raise GavelError("artifact_not_found", f"未知 artifact：{artifact_id}")
             return dict(info)
 
     def list(self, *, kind=None, run_id=None, session_id=None) -> list:
@@ -186,23 +210,30 @@ class ArtifactStore:
             raise GavelError("bad_filename", f"非法文件名：{name!r}")
         return base
 
-    def export(self, artifact_id: str, dest_dir: str, filename=None,
-               *, policies=None, path_visibility: str = "hidden") -> dict:
+    def export(
+        self,
+        artifact_id: str,
+        dest_dir: str,
+        filename=None,
+        *,
+        policies=None,
+        path_visibility: str = "hidden",
+    ) -> dict:
         info = self.get(artifact_id)
         if not dest_dir:
             raise GavelError("bad_args", "需要 dest_dir")
         if policies is not None:
             policies.check_local_path(dest_dir, purpose="导出")
         os.makedirs(dest_dir, exist_ok=True)
-        name = self._safe_filename(
-            filename or info.get("suggested_filename") or artifact_id)
+        name = self._safe_filename(filename or info.get("suggested_filename") or artifact_id)
         dest = os.path.join(dest_dir, name)
         # 二次包含校验：净化后的最终路径必须仍落在 dest_dir 内
         root = os.path.realpath(dest_dir)
         parent = os.path.realpath(os.path.dirname(dest))
         if not (parent == root or parent.startswith(root + os.sep)):
-            raise GavelError("policy_blocked", f"导出路径越出目标目录：{name}",
-                             detail={"dest_dir": dest_dir})
+            raise GavelError(
+                "policy_blocked", f"导出路径越出目标目录：{name}", detail={"dest_dir": dest_dir}
+            )
         base, ext = os.path.splitext(dest)
         i = 1
         while os.path.exists(dest):
@@ -210,8 +241,12 @@ class ArtifactStore:
             i += 1
         shutil.copy2(info["path"], dest)
         # 默认不回传绝对路径（对齐 artifact_get 的隐藏原则）
-        out = {"artifact_id": artifact_id, "filename": os.path.basename(dest),
-               "exported": True, "size_bytes": info.get("size_bytes")}
+        out = {
+            "artifact_id": artifact_id,
+            "filename": os.path.basename(dest),
+            "exported": True,
+            "size_bytes": info.get("size_bytes"),
+        }
         if path_visibility == "user_visible":
             out["exported_to"] = dest
         return out
@@ -220,34 +255,46 @@ class ArtifactStore:
         with self._lock:
             idx = self._load()
             if artifact_id not in idx:
-                raise GavelError("artifact_not_found",
-                                 f"未知 artifact：{artifact_id}")
+                raise GavelError("artifact_not_found", f"未知 artifact：{artifact_id}")
             self._remove(artifact_id, idx)
             self._save()
             return {"artifact_id": artifact_id, "deleted": True}
 
     # ---- 下载捕获（page.on("download") 调用）----
-    async def capture_download(self, download, *, session_id=None, page_id=None,
-                               policies=None, events=None):
+    async def capture_download(
+        self, download, *, session_id=None, page_id=None, policies=None, events=None
+    ):
         aid = None
         try:
             failure = await download.failure()
             if failure:
                 if events:
-                    events.emit({"event": "download_failed", "session_id": session_id,
-                                 "page_id": page_id, "error": failure,
-                                 "suggested_filename": download.suggested_filename})
+                    events.emit(
+                        {
+                            "event": "download_failed",
+                            "session_id": session_id,
+                            "page_id": page_id,
+                            "error": failure,
+                            "suggested_filename": download.suggested_filename,
+                        }
+                    )
                 return None
             src = await download.path()
-            size = os.path.getsize(src)
+            size = await asyncio.to_thread(os.path.getsize, src)
             if policies is not None:
                 try:
                     policies.check_download_size(size)
                 except GavelError as e:
                     if events:
-                        events.emit({"event": "download_rejected",
-                                     "session_id": session_id, "page_id": page_id,
-                                     "error": e.message, "size_bytes": size})
+                        events.emit(
+                            {
+                                "event": "download_rejected",
+                                "session_id": session_id,
+                                "page_id": page_id,
+                                "error": e.message,
+                                "size_bytes": size,
+                            }
+                        )
                     return None
             aid = self._reserve()
             dest = os.path.join(self.root, aid)
@@ -268,20 +315,33 @@ class ArtifactStore:
             }
             self._finalize(aid, info)
             if events:
-                events.emit({"event": "download_completed", "session_id": session_id,
-                             "page_id": page_id, "artifact_id": aid,
-                             "suggested_filename": filename,
-                             "size_bytes": size, "sha256": info["sha256"]})
+                events.emit(
+                    {
+                        "event": "download_completed",
+                        "session_id": session_id,
+                        "page_id": page_id,
+                        "artifact_id": aid,
+                        "suggested_filename": filename,
+                        "size_bytes": size,
+                        "sha256": info["sha256"],
+                    }
+                )
             return dict(info)
         except Exception as e:  # noqa: BLE001
             if aid:
                 try:
                     self._discard(aid)
                 except Exception:
-                    pass
+                    pass  # silent-ok: best-effort，失败不影响主流程
             if events:
-                events.emit({"event": "download_failed", "session_id": session_id,
-                             "page_id": page_id, "error": str(e)})
+                events.emit(
+                    {
+                        "event": "download_failed",
+                        "session_id": session_id,
+                        "page_id": page_id,
+                        "error": str(e),
+                    }
+                )
             return None
 
     # ---- 文本抽取 ----
@@ -291,10 +351,19 @@ class ArtifactStore:
             data = f.read()
         text, kind = extract_text(data, info.get("mime_type"))
         if text is None:
-            return {"artifact_id": artifact_id, "extracted": False,
-                    "kind": kind, "hint": "该类型不支持文本抽取"}
-        return {"artifact_id": artifact_id, "extracted": True, "kind": kind,
-                "text": text, "chars": len(text)}
+            return {
+                "artifact_id": artifact_id,
+                "extracted": False,
+                "kind": kind,
+                "hint": "该类型不支持文本抽取",
+            }
+        return {
+            "artifact_id": artifact_id,
+            "extracted": True,
+            "kind": kind,
+            "text": text,
+            "chars": len(text),
+        }
 
     # ---- 清理 ----
     def cleanup(self, *, ttl_days=None, max_bytes=None) -> dict:
@@ -335,6 +404,7 @@ class ArtifactStore:
 
 # ---------------- 模块级工具：哈希 / MIME / 文本抽取 ----------------
 
+
 def _sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -346,17 +416,22 @@ def _sha256(path):
 def _guess_mime(path, filename=None):
     name = (filename or path or "").lower()
     ext = os.path.splitext(name)[1]
-    table = {".pdf": "application/pdf",
-             ".docx": "application/vnd.openxmlformats-officedocument."
-                      "wordprocessingml.document",
-             ".doc": "application/msword",
-             ".xlsx": "application/vnd.openxmlformats-officedocument."
-                      "spreadsheetml.sheet",
-             ".xls": "application/vnd.ms-excel",
-             ".csv": "text/csv", ".txt": "text/plain",
-             ".json": "application/json", ".xml": "application/xml",
-             ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-             ".gif": "image/gif", ".zip": "application/zip"}
+    table = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".doc": "application/msword",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".xls": "application/vnd.ms-excel",
+        ".csv": "text/csv",
+        ".txt": "text/plain",
+        ".json": "application/json",
+        ".xml": "application/xml",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".zip": "application/zip",
+    }
     if ext in table:
         return table[ext]
     try:
@@ -369,17 +444,19 @@ def _guess_mime(path, filename=None):
         if head[:4] == b"\xd0\xcf\x11\xe0":
             return "application/msword"
     except Exception:
-        pass
+        pass  # silent-ok: best-effort，失败不影响主流程
     return "application/octet-stream"
 
 
 def extract_text(data: bytes, content_type=None):
     """按类型抽取文本，返回 (text|None, kind)。"""
     import io
+
     ct = (content_type or "").lower()
     if data[:4] == b"%PDF" or "pdf" in ct:
         try:
             from pypdf import PdfReader
+
             reader = PdfReader(io.BytesIO(data))
             return "\n".join((p.extract_text() or "") for p in reader.pages), "pdf"
         except Exception as e:  # noqa: BLE001
@@ -387,6 +464,7 @@ def extract_text(data: bytes, content_type=None):
     if data[:2] == b"PK" or "wordprocessingml" in ct or "officedocument" in ct:
         try:
             from docx import Document
+
             d = Document(io.BytesIO(data))
             parts = [p.text for p in d.paragraphs]
             for t in d.tables:
@@ -401,13 +479,14 @@ def extract_text(data: bytes, content_type=None):
         try:
             return data.decode("utf-8", errors="replace"), "text"
         except Exception:
-            pass
+            pass  # silent-ok: best-effort，失败不影响主流程
     return None, ct or "unknown"
 
 
 def _extract_legacy_doc(data):
     """老 .doc（OLE）：soffice → antiword → catdoc。"""
     import subprocess
+
     with tempfile.NamedTemporaryFile(suffix=".doc", delete=False) as f:
         f.write(data)
         path = f.name
@@ -417,16 +496,26 @@ def _extract_legacy_doc(data):
             outdir = tempfile.mkdtemp()
             profile = tempfile.mkdtemp()
             try:
-                subprocess.run([soffice, "--headless",
-                                f"-env:UserInstallation=file://{profile}",
-                                "--convert-to", "txt:Text", "--outdir", outdir, path],
-                               capture_output=True, timeout=60)
+                subprocess.run(
+                    [
+                        soffice,
+                        "--headless",
+                        f"-env:UserInstallation=file://{profile}",
+                        "--convert-to",
+                        "txt:Text",
+                        "--outdir",
+                        outdir,
+                        path,
+                    ],
+                    capture_output=True,
+                    timeout=60,
+                )
                 out = os.path.join(outdir, os.path.splitext(os.path.basename(path))[0] + ".txt")
                 if os.path.isfile(out):
                     with open(out, encoding="utf-8", errors="replace") as fh:
                         return fh.read(), "doc"
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
         for tool in ("antiword", "catdoc"):
             exe = shutil.which(tool)
             if not exe:
@@ -436,7 +525,7 @@ def _extract_legacy_doc(data):
                 if r.returncode == 0 and r.stdout:
                     return r.stdout.decode("utf-8", errors="replace"), "doc"
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
         return None, "doc-unsupported"
     finally:
         try:

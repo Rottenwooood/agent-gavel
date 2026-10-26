@@ -24,8 +24,7 @@ class Recorder:
     def start(self, context_id=None, page_id=None, keep_all=False):
         self.recording = Recording(context_id, page_id, keep_all)
         self.active = True
-        return {"context_id": context_id, "page_id": page_id,
-                "keep_all": keep_all, "steps": 0}
+        return {"context_id": context_id, "page_id": page_id, "keep_all": keep_all, "steps": 0}
 
     def stop(self):
         rec = self.recording
@@ -33,13 +32,11 @@ class Recorder:
         self.recording = None
         return rec
 
-    def record(self, handle, action, url_before=None, url_after=None,
-               checkpoint=None):
+    def record(self, handle, action, url_before=None, url_after=None, checkpoint=None):
         """动作成功后调用；只录同一 context 的动作。"""
         if not self.active or self.recording is None:
             return
-        if self.recording.context_id \
-                and handle.context_id != self.recording.context_id:
+        if self.recording.context_id and handle.context_id != self.recording.context_id:
             return
         atype = action.get("type")
         if not self.recording.keep_all and atype in _NOISE:
@@ -47,8 +44,11 @@ class Recorder:
 
         steps = self.recording.steps
         last = steps[-1] if steps else None
-        same_target = (last and last["action"].get("type") == atype
-                       and last["action"].get("target") == action.get("target"))
+        same_target = (
+            last
+            and last["action"].get("type") == atype
+            and last["action"].get("target") == action.get("target")
+        )
         if same_target:
             if atype in _MERGE:
                 # 同一目标的连续输入只保留最后一次结果
@@ -60,8 +60,12 @@ class Recorder:
             if checkpoint is None and action == last["action"]:
                 return  # 完全重复的动作直接丢弃
 
-        step = {"action": action, "page_id": handle.page_id,
-                "url_before": url_before, "url_after": url_after}
+        step = {
+            "action": action,
+            "page_id": handle.page_id,
+            "url_before": url_before,
+            "url_after": url_after,
+        }
         if checkpoint:
             step["checkpoint"] = checkpoint
         steps.append(step)

@@ -17,6 +17,11 @@ jobs:
         run: uv sync
       - name: Install Chromium (+ system deps)
         run: uv run playwright install --with-deps chromium
+      - name: Lint / format / types
+        run: |
+          uv run ruff check agent_gavel tests
+          uv run ruff format --check agent_gavel tests
+          uv run mypy agent_gavel
       - name: Functional + security + real-task tests
         run: uv run pytest -q
         env:

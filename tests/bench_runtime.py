@@ -29,7 +29,7 @@ async def main(n=30):
     print(format_report(report))
     os.makedirs("logs", exist_ok=True)
     out = os.path.join("logs", f"bench-{time.strftime('%Y%m%d-%H%M%S')}.json")
-    with open(out, "w", encoding="utf-8") as f:
+    with open(out, "w", encoding="utf-8") as f:  # noqa: ASYNC230
         json.dump(report, f, ensure_ascii=False, indent=2)
     print(f"\n报告已写入 {out}")
     return report

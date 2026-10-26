@@ -16,13 +16,14 @@ from ..core.checks import from_checkpoint
 from ..core.errors import GavelError
 from . import schema as _schema
 
+
 class RunState:
     def __init__(self, run_id, template_id):
         self.run_id = run_id
         self.template_id = template_id
         self.status = "running"
         self.pause_event = asyncio.Event()
-        self.pause_event.set()          # set = 未暂停
+        self.pause_event.set()  # set = 未暂停
         self.cancelled = False
         self.step_results = []
         self.result = None
@@ -33,11 +34,19 @@ class Runner:
         self.runtime = runtime
         self.backend = backend
 
-    async def run(self, template, params, *, session_id=None,
-                  verbosity="summary", run_id=None, confirm=False,
-                  wait_s=6.0, page_id=None):
+    async def run(
+        self,
+        template,
+        params,
+        *,
+        session_id=None,
+        verbosity="summary",
+        run_id=None,
+        confirm=False,
+        wait_s=6.0,
+        page_id=None,
+    ):
         rt = self.runtime
-        be = self.backend
         run_id = run_id or rt.next_id("run")
         t0 = time.perf_counter()
 
@@ -72,10 +81,14 @@ class Runner:
                 return res
             arts_before = {a["artifact_id"] for a in rt.artifacts.list()}
             steps = _schema.substitute(template.get("steps", []), params)
-            ctx = {"template": template, "page": page, "params": params,
-                   "wait_s": wait_s, "confirm": confirm}
-            return await self._execute_steps(state, steps, ctx, arts_before,
-                                             verbosity, t0)
+            ctx = {
+                "template": template,
+                "page": page,
+                "params": params,
+                "wait_s": wait_s,
+                "confirm": confirm,
+            }
+            return await self._execute_steps(state, steps, ctx, arts_before, verbosity, t0)
         finally:
             if page_ctx is not None:
                 page_ctx.release_run(run_id)
@@ -85,15 +98,16 @@ class Runner:
                 try:
                     await rt.session_mgr.close(session.session_id)
                 except Exception:
-                    pass
+                    pass  # silent-ok: best-effort，失败不影响主流程
 
     @staticmethod
     def _record_run(template_id, status):
         try:
             from . import loader
+
             loader.record_run(template_id, status)
         except Exception:
-            pass
+            pass  # silent-ok: best-effort，失败不影响主流程
 
     # ---- 会话/页面 ----
     async def _resolve_session(self, session_id):
@@ -105,15 +119,21 @@ class Runner:
         if not rt.sessions:
             s = await rt.session_mgr.create(mode="ephemeral")
             return s, True
-        raise GavelError("session_ambiguous", "有多个 session，请指定 session_id",
-                         detail={"sessions": list(rt.sessions)})
+        raise GavelError(
+            "session_ambiguous",
+            "有多个 session，请指定 session_id",
+            detail={"sessions": list(rt.sessions)},
+        )
 
     async def _resolve_page(self, session, page_id=None):
         rt = self.runtime
         if page_id:
             return rt.page_mgr.get(page_id)
-        contexts = [rt.contexts[c] for c in session.context_ids
-                    if c in rt.contexts and rt.contexts[c].page_ids]
+        contexts = [
+            rt.contexts[c]
+            for c in session.context_ids
+            if c in rt.contexts and rt.contexts[c].page_ids
+        ]
         if not contexts:
             ctx = await rt.context_mgr.create(session, {})
             return rt.page_mgr.resolve(None, context_id=ctx.context_id)
@@ -121,13 +141,13 @@ class Runner:
             raise GavelError(
                 "ambiguous_page",
                 "该会话有多个 context 持有页面，请指定 page_id",
-                detail={"contexts": [c.context_id for c in contexts]})
+                detail={"contexts": [c.context_id for c in contexts]},
+            )
         return rt.page_mgr.resolve(None, context_id=contexts[0].context_id)
 
     # ---- 主循环 ----
-    async def _execute_steps(self, state, steps, ctx, arts_before, verbosity,
-                             t0):
-        rt, be, page = self.runtime, self.backend, ctx["page"]
+    async def _execute_steps(self, state, steps, ctx, arts_before, verbosity, t0):
+        rt, page = self.runtime, ctx["page"]
         template = ctx["template"]
         checkpoints_passed = 0
         failed = None
@@ -147,9 +167,9 @@ class Runner:
                 state.status = "running"
 
             if step.get("requires_confirmation") and not ctx["confirm"]:
-                state.step_results.append({
-                    "step_id": step["id"], "status": "blocked",
-                    "reason": "requires_confirmation"})
+                state.step_results.append(
+                    {"step_id": step["id"], "status": "blocked", "reason": "requires_confirmation"}
+                )
                 failed = ("blocked", idx, "requires_confirmation")
                 break
 
@@ -178,10 +198,15 @@ class Runner:
 
         # 汇总
         arts_after = rt.artifacts.list()
-        artifacts = [{"artifact_id": a["artifact_id"],
-                      "suggested_filename": a.get("suggested_filename"),
-                      "kind": a.get("kind")}
-                     for a in arts_after if a["artifact_id"] not in arts_before]
+        artifacts = [
+            {
+                "artifact_id": a["artifact_id"],
+                "suggested_filename": a.get("suggested_filename"),
+                "kind": a.get("kind"),
+            }
+            for a in arts_after
+            if a["artifact_id"] not in arts_before
+        ]
         if cancelled:
             status = "cancelled"
         elif failed:
@@ -195,8 +220,7 @@ class Runner:
             "run_id": state.run_id,
             "template_id": template.get("template_id"),
             "version": template.get("version"),
-            "steps_completed": sum(1 for s in state.step_results
-                                   if s["status"] in ("pass", "ok")),
+            "steps_completed": sum(1 for s in state.step_results if s["status"] in ("pass", "ok")),
             "steps_total": len(steps),
             "checkpoints_passed": checkpoints_passed,
             "artifacts": artifacts,
@@ -221,8 +245,7 @@ class Runner:
         atype = act["type"]
         wait_s = ctx.get("wait_s", 6.0)
         checks = from_checkpoint(step.get("checkpoint"))
-        before = await be.page_signature(page, target=act.get("target")) \
-            if checks else None
+        before = await be.page_signature(page, target=act.get("target")) if checks else None
         started = time.perf_counter()
         entry = {"step_id": step["id"], "action_type": atype}
         try:
@@ -250,9 +273,9 @@ class Runner:
             return entry
         entry["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
         if checks and atype != "expect":
-            ev = await be.evaluate_checks(page, checks,
-                                          before_sig=before, wait_s=wait_s,
-                                          target=act.get("target"))
+            ev = await be.evaluate_checks(
+                page, checks, before_sig=before, wait_s=wait_s, target=act.get("target")
+            )
             entry["status"] = ev["status"]
             entry["assertions"] = ev["assertions"]
             entry["checkpoint_passed"] = ev["status"] == "pass"
@@ -285,74 +308,110 @@ class Runner:
         rt.policies.check_domain(act["url"])
         return await page.actor.submit(
             "navigate",
-            lambda: be.goto(page, act["url"],
-                            wait_until=act.get("wait_until", "domcontentloaded"),
-                            timeout_s=act.get("timeout_s", 30)))
+            lambda: be.goto(
+                page,
+                act["url"],
+                wait_until=act.get("wait_until", "domcontentloaded"),
+                timeout_s=act.get("timeout_s", 30),
+            ),
+        )
 
     async def _do_wait_selector(self, page, act):
         be = self.backend
         return await page.actor.submit(
             "wait_for_selector",
-            lambda: be.wait_for_selector(page, act["selector"],
-                                         state=act.get("state", "visible"),
-                                         timeout_s=act.get("timeout_s", 30)))
+            lambda: be.wait_for_selector(
+                page,
+                act["selector"],
+                state=act.get("state", "visible"),
+                timeout_s=act.get("timeout_s", 30),
+            ),
+        )
 
     async def _do_wait_url(self, page, act):
         be = self.backend
         return await page.actor.submit(
             "wait_for_url",
-            lambda: be.wait_for_url(page, act["url"],
-                                    timeout_s=act.get("timeout_s", 30)))
+            lambda: be.wait_for_url(page, act["url"], timeout_s=act.get("timeout_s", 30)),
+        )
 
     async def _do_wait_text(self, page, act):
         be = self.backend
         return await page.actor.submit(
             "wait_for_text",
-            lambda: be.wait_for_text(page, act["text"],
-                                     timeout_s=act.get("timeout_s", 30),
-                                     selector=act.get("selector")))
+            lambda: be.wait_for_text(
+                page, act["text"], timeout_s=act.get("timeout_s", 30), selector=act.get("selector")
+            ),
+        )
 
     async def _do_expect(self, page, act):
         ev = await self.backend.evaluate_checks(
-            page, act.get("checks") or act,
-            wait_s=act.get("wait_s", 6.0))
-        return {"action": "expect", "status": ev["status"],
-                "assertions": ev.get("assertions"), "diff": ev.get("diff")}
+            page, act.get("checks") or act, wait_s=act.get("wait_s", 6.0)
+        )
+        return {
+            "action": "expect",
+            "status": ev["status"],
+            "assertions": ev.get("assertions"),
+            "diff": ev.get("diff"),
+        }
 
     async def _do_screenshot(self, page, act):
         be, rt = self.backend, self.runtime
         res = await page.actor.submit(
-            "screenshot",
-            lambda: be.screenshot(page.page, full_page=bool(act.get("full_page"))))
+            "screenshot", lambda: be.screenshot(page.page, full_page=bool(act.get("full_page")))
+        )
         info = await asyncio.to_thread(
-            rt.artifacts.save_bytes, res["data"],
-            filename=f"{page.page_id}.png", kind="screenshot",
-            mime_type="image/png", page_id=page.page_id,
-            session_id=page.context.lease_session_id())
+            rt.artifacts.save_bytes,
+            res["data"],
+            filename=f"{page.page_id}.png",
+            kind="screenshot",
+            mime_type="image/png",
+            page_id=page.page_id,
+            session_id=page.context.lease_session_id(),
+        )
         return {"action": "screenshot", "artifact_id": info["artifact_id"]}
 
     async def _do_pdf(self, page, act):
         be, rt = self.backend, self.runtime
         res = await page.actor.submit("pdf", lambda: be.pdf(page))
         info = await asyncio.to_thread(
-            rt.artifacts.save_bytes, res["data"],
-            filename=f"{page.page_id}.pdf", kind="pdf",
-            mime_type="application/pdf", page_id=page.page_id,
-            session_id=page.context.lease_session_id())
+            rt.artifacts.save_bytes,
+            res["data"],
+            filename=f"{page.page_id}.pdf",
+            kind="pdf",
+            mime_type="application/pdf",
+            page_id=page.page_id,
+            session_id=page.context.lease_session_id(),
+        )
         return {"action": "pdf", "artifact_id": info["artifact_id"]}
 
     async def _do_target(self, page, act):
         be = self.backend
         atype = act["type"]
-        kw = {k: act[k] for k in
-              ("button", "count", "force", "value", "text", "keys",
-               "select_by", "files", "destination", "delay_ms")
-              if k in act}
+        kw = {
+            k: act[k]
+            for k in (
+                "button",
+                "count",
+                "force",
+                "value",
+                "text",
+                "keys",
+                "select_by",
+                "files",
+                "destination",
+                "delay_ms",
+            )
+            if k in act
+        }
         if atype == "type" and "value" not in kw and act.get("text") is not None:
             kw["value"] = act["text"]
         return await page.actor.submit(
-            atype, lambda: be.act(page, act.get("target"), atype,
-                                  timeout_s=act.get("timeout_s", 30), **kw))
+            atype,
+            lambda: be.act(
+                page, act.get("target"), atype, timeout_s=act.get("timeout_s", 30), **kw
+            ),
+        )
 
     @staticmethod
     def _retry_allowed(step, res):
@@ -368,10 +427,7 @@ class Runner:
             return False
         if step.get("safe_to_retry") and step.get("idempotent"):
             return True
-        if res.get("reason") == "locator_not_found" \
-                and not step.get("retry_explicit"):
-            return True
-        return False
+        return res.get("reason") == "locator_not_found" and not step.get("retry_explicit")
 
     # ---- B1 安全重试 ----
     async def _try_safe_retry(self, page, step, res, ctx):
@@ -408,7 +464,6 @@ class Runner:
             if v:
                 needles.append(str(v))
         val = target.get("value")
-        by = target.get("by")
         if val:
             needles.append(str(val))  # 原文（css "#search" 可命中 "#search-btn"）
             for tok in re.findall(r"[A-Za-z0-9\u4e00-\u9fff]{3,}", str(val)):
@@ -425,8 +480,7 @@ class Runner:
         """候选元素与线索的匹配分：文本全等 > 文本包含 > id/name/aria > 锚点 >
         placeholder。避免"输入框 placeholder 含关键词"抢过真正的按钮。"""
         text = (el.get("text") or "").strip().lower()
-        ident = " ".join(str(el.get(f) or "") for f in
-                         ("id", "name", "aria", "role")).lower()
+        ident = " ".join(str(el.get(f) or "") for f in ("id", "name", "aria", "role")).lower()
         ph = (el.get("placeholder") or "").lower()
         anc = str((el.get("anchor") or {}).get("value", "")).lower()
         score = 0
@@ -497,5 +551,3 @@ class Runner:
             out["repaired_target"] = new_target
             return out
         return None
-
-

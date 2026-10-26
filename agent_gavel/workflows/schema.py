@@ -7,7 +7,6 @@ import copy
 import re
 
 from ..core import actions as action_specs
-from ..core.errors import GavelError
 
 SCHEMA_VERSION = 2
 
@@ -32,8 +31,7 @@ def substitute(obj, params):
         if isinstance(x, list):
             return [rec(v) for v in x]
         if isinstance(x, str):
-            return _VAR_RE.sub(
-                lambda m: str(params.get(m.group(1), m.group(0))), x)
+            return _VAR_RE.sub(lambda m: str(params.get(m.group(1), m.group(0))), x)
         return x
 
     return rec(obj)
@@ -65,8 +63,10 @@ def norm_parameters(template):
     if isinstance(raw, dict):
         for name, spec in raw.items():
             if isinstance(spec, dict):
-                out[name] = {"type": spec.get("type", "string"),
-                             "sensitive": bool(spec.get("sensitive"))}
+                out[name] = {
+                    "type": spec.get("type", "string"),
+                    "sensitive": bool(spec.get("sensitive")),
+                }
             else:
                 out[name] = {"type": "string", "sensitive": bool(spec)}
     elif isinstance(raw, list):
@@ -88,8 +88,7 @@ def validate(template):
     if not tid:
         errors.append("缺少 template_id")
     elif not _ID_RE.match(str(tid)):
-        errors.append("template_id 只允许小写字母/数字/下划线"
-                      f"（收到 {tid!r}）")
+        errors.append(f"template_id 只允许小写字母/数字/下划线（收到 {tid!r}）")
     steps = t.get("steps")
     if not isinstance(steps, list) or not steps:
         errors.append("steps 必须是非空数组")
@@ -109,8 +108,7 @@ def validate(template):
             continue
         sp = action_specs.spec(atype)
         # 归一：type/fill 用 text 传值的一律落到 value（避免"没输入却报成功"）
-        if atype in ("type", "fill") and "value" not in act \
-                and act.get("text") is not None:
+        if atype in ("type", "fill") and "value" not in act and act.get("text") is not None:
             act["value"] = act["text"]
         if sp.target_required and not act.get("target"):
             errors.append(f"steps[{i}] action={atype} 缺少 target")
@@ -131,12 +129,10 @@ def validate(template):
         inherent = sp.idempotent and not side
         step["idempotent"] = bool(st.get("idempotent", inherent))
         step["safe_to_retry"] = bool(st.get("safe_to_retry", inherent))
-        step["requires_confirmation"] = bool(
-            st.get("requires_confirmation", side))
+        step["requires_confirmation"] = bool(st.get("requires_confirmation", side))
         step["retry_explicit"] = explicit
         if side:
-            warnings.append(f"steps[{i}]（{step['id']}）疑似副作用动作，"
-                            f"标记为需确认/不可自动重试")
+            warnings.append(f"steps[{i}]（{step['id']}）疑似副作用动作，标记为需确认/不可自动重试")
         norm_steps.append(step)
     t["steps"] = norm_steps
     t["parameters"] = norm_parameters(t)
@@ -145,10 +141,10 @@ def validate(template):
     t.setdefault("backend_requirements", ["semantic"])
     t.setdefault("preconditions", [])
     t.setdefault("outputs", [])
-    t.setdefault("failure_policy", {"retry": "safe_only",
-                                    "repair": "explore_local_step"})
-    t.setdefault("stats", {"success_count": 0, "fail_count": 0,
-                           "last_status": None, "last_at": None})
+    t.setdefault("failure_policy", {"retry": "safe_only", "repair": "explore_local_step"})
+    t.setdefault(
+        "stats", {"success_count": 0, "fail_count": 0, "last_status": None, "last_at": None}
+    )
     t.setdefault("version", 1)
     # 模板元数据（面向分享/社区）：目标、登录前提、作者/许可、兼容范围、
     # 验证时间、已知限制、状态机。
@@ -161,8 +157,7 @@ def validate(template):
     t.setdefault("known_limits", "")
     t.setdefault("status", "draft")
     if t["status"] not in TEMPLATE_STATUSES:
-        errors.append(f"status 非法：{t['status']!r}，取 "
-                      f"{sorted(TEMPLATE_STATUSES)}")
+        errors.append(f"status 非法：{t['status']!r}，取 {sorted(TEMPLATE_STATUSES)}")
     if errors:
         return None, errors, warnings
     return t, [], warnings

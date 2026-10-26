@@ -28,15 +28,12 @@ async def test_recording_follows_context(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
     a = await T["session_create"]()
     b = await T["session_create"]()
-    await T["page_navigate"](page_id=b["page_id"],
-                             url=f"{base}/basic.html")
-    await T["workflow_record_start"](session_id=b["session_id"],
-                                     page_id=b["page_id"])
-    await T["locator_fill"](page_id=b["page_id"],
-                            target={"by": "css", "value": "#text-input"},
-                            value="identity")
-    stop = await T["workflow_record_stop"](site="identity", name="rec",
-                                           desc="identity")
+    await T["page_navigate"](page_id=b["page_id"], url=f"{base}/basic.html")
+    await T["workflow_record_start"](session_id=b["session_id"], page_id=b["page_id"])
+    await T["locator_fill"](
+        page_id=b["page_id"], target={"by": "css", "value": "#text-input"}, value="identity"
+    )
+    stop = await T["workflow_record_stop"](site="identity", name="rec", desc="identity")
     assert stop["recorded_steps"] == 1, stop
     await T["workflow_delete"](template_id=stop["template_id"])
 
@@ -52,19 +49,22 @@ async def test_shared_context_run_is_exclusive(gavel_tools, webapp_server):
     tmpl = {
         "template_id": "identity_busy",
         "steps": [
-            {"id": "go", "action": {"type": "navigate",
-                                    "url": f"{base}/basic.html"}},
-            {"id": "w", "action": {"type": "wait_for_selector",
-                                   "selector": "#never-appears",
-                                   "timeout_s": 3}},
+            {"id": "go", "action": {"type": "navigate", "url": f"{base}/basic.html"}},
+            {
+                "id": "w",
+                "action": {
+                    "type": "wait_for_selector",
+                    "selector": "#never-appears",
+                    "timeout_s": 3,
+                },
+            },
         ],
     }
     await T["workflow_save"](template=tmpl)
     r1, r2 = await asyncio.gather(
-        T["workflow_run"](name_or_id="identity_busy",
-                          session_id=a["session_id"]),
-        T["workflow_run"](name_or_id="identity_busy",
-                          session_id=b["session_id"]))
+        T["workflow_run"](name_or_id="identity_busy", session_id=a["session_id"]),
+        T["workflow_run"](name_or_id="identity_busy", session_id=b["session_id"]),
+    )
     reasons = {r1.get("reason"), r2.get("reason")}
     assert "context_busy" in reasons, (r1, r2)
 
@@ -83,8 +83,7 @@ async def test_page_resolution_is_explicit(gavel_tools, webapp_server):
     ambiguous = await T["page_navigate"](url=f"{base}/basic.html")
     assert ambiguous["status"] == "error"
     assert ambiguous["reason"] == "ambiguous_page"
-    assert set(ambiguous["detail"]["contexts"]) >= {
-        a["context_id"], second["context_id"]}
+    assert set(ambiguous["detail"]["contexts"]) >= {a["context_id"], second["context_id"]}
 
     await T["context_close"](context_id=second["context_id"])
     await T["session_close"](session_id=a["session_id"])

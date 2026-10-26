@@ -4,8 +4,13 @@ from agent_gavel.backends.playwright.actions import TARGET_HANDLERS
 from agent_gavel.core.actions import ACTIONS, spec
 
 TARGETLESS = {
-    "navigate", "wait_for_selector", "wait_for_url", "wait_for_text",
-    "expect", "screenshot", "pdf",
+    "navigate",
+    "wait_for_selector",
+    "wait_for_url",
+    "wait_for_text",
+    "expect",
+    "screenshot",
+    "pdf",
 }
 
 
@@ -30,8 +35,8 @@ def test_retry_scope_matches_classification():
 
 # ---------------- 断言词表 ----------------
 
-from agent_gavel.backends.playwright.assertion import (  # noqa: E402
-    COMPARATORS, READERS, render_js)
+from agent_gavel.backends.playwright.assertion import COMPARATORS, READERS  # noqa: E402
+from agent_gavel.backends.playwright.jsrender import render_js  # noqa: E402
 from agent_gavel.core.checks import OPS, READ_KINDS, Check, from_checkpoint  # noqa: E402
 
 
@@ -44,20 +49,30 @@ def test_every_read_and_op_can_render_js():
     selectors = {"text", "value", "count", "html", "attr"}
     for read in READ_KINDS:
         check = Check(
-            name=read, read=read, op="eq", expected="x",
+            name=read,
+            read=read,
+            op="eq",
+            expected="x",
             selector="#x" if read in selectors else None,
             attr="a" if read == "attr" else None,
-            expr="1" if read == "expr" else None)
+            expr="1" if read == "expr" else None,
+        )
         assert render_js(check) is not None, read
     for op in OPS:
         expected = 1 if op.startswith("count") or op in ("gt", "lt", "gte", "lte") else "x"
-        check = Check(name="c", read="text", op=op, expected=expected,
-                      selector="#x")
+        check = Check(name="c", read="text", op=op, expected=expected, selector="#x")
         assert render_js(check) is not None, op
 
 
 def test_checkpoint_forms():
-    assert from_checkpoint({"type": "text_contains", "value": "ok",
-                            "selector": "#s"})[0].read == "text"
+    assert (
+        from_checkpoint({"type": "text_contains", "value": "ok", "selector": "#s"})[0].read
+        == "text"
+    )
     assert from_checkpoint({"type": "url_contains", "value": "x"})[0].read == "url"
     assert from_checkpoint({"checks": {"title_contains": "x"}})[0].op == "contains"
+
+
+async def test_tool_count_snapshot(gavel_tools):
+    """工具面是契约的一部分：新增/删除必须显式更新快照。"""
+    assert len(gavel_tools) == 94

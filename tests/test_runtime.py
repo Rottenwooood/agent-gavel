@@ -9,7 +9,7 @@ import time
 import pytest
 
 from agent_gavel.core.errors import GavelError
-from agent_gavel.tools.browser_tools import register_browser_tools
+from agent_gavel.tools import register_runtime_tools
 
 
 class FakeMCP:
@@ -22,6 +22,7 @@ class FakeMCP:
         def deco(fn):
             self.tools[fn.__name__] = fn
             return fn
+
         return deco
 
 
@@ -33,19 +34,34 @@ async def _open(rt, url=None, container="isolated"):
 
 
 EXPECTED_TOOLS = {
-    "browser_launch", "browser_status", "browser_close",
-    "session_create", "session_list", "session_get", "session_reset",
-    "session_close", "session_export_state", "session_import_state",
-    "context_create", "context_close",
-    "page_open", "page_list", "page_get", "page_focus", "page_close",
-    "page_select", "page_wait", "page_reload", "page_go_back", "page_go_forward",
+    "browser_launch",
+    "browser_status",
+    "browser_close",
+    "session_create",
+    "session_list",
+    "session_get",
+    "session_reset",
+    "session_close",
+    "session_export_state",
+    "session_import_state",
+    "context_create",
+    "context_close",
+    "page_open",
+    "page_list",
+    "page_get",
+    "page_close",
+    "page_select",
+    "page_wait",
+    "page_reload",
+    "page_go_back",
+    "page_go_forward",
 }
 
 
 async def test_mcp_tools_registered(runtime):
     mcp = FakeMCP()
-    register_browser_tools(mcp)
-    assert EXPECTED_TOOLS <= set(mcp.tools)
+    register_runtime_tools(mcp)
+    assert set(mcp.tools) >= EXPECTED_TOOLS
     r = await mcp.tools["browser_status"]()
     assert r["status"] == "ok"
     assert "counts" in r
@@ -87,6 +103,7 @@ async def test_same_page_serialized(runtime):
             order.append(i)
             await asyncio.sleep(0.001)
             return i
+
         return await handle.actor.submit(f"op_{i}", fn)
 
     results = await asyncio.gather(*[call(i) for i in range(10)])
@@ -102,6 +119,7 @@ async def test_cross_page_parallel(runtime):
         async def fn():
             await asyncio.sleep(0.3)
             return True
+
         return await handle.actor.submit("slow", fn)
 
     t0 = time.perf_counter()
@@ -127,8 +145,7 @@ async def test_cancel(runtime):
         await asyncio.sleep(0.5)
         return 1
 
-    task = asyncio.ensure_future(
-        handle.actor.submit("a", fn, operation_id="opX"))
+    task = asyncio.ensure_future(handle.actor.submit("a", fn, operation_id="opX"))
     await asyncio.sleep(0.05)
     assert handle.actor.cancel("opX") is True
     with pytest.raises(GavelError) as ei:
@@ -168,8 +185,7 @@ async def test_no_leak_1000_ops(runtime):
     async def fn():
         counter["n"] += 1
 
-    await asyncio.gather(*[handle.actor.submit(f"op_{i}", fn)
-                           for i in range(1000)])
+    await asyncio.gather(*[handle.actor.submit(f"op_{i}", fn) for i in range(1000)])
     assert counter["n"] == 1000
     assert handle.actor.pending == 0
     # _open 建了初始页 + 显式 open 的页，共 2；跑 1000 次不新增
@@ -181,10 +197,10 @@ async def test_ephemeral_sessions_container_policy(runtime, gavel_tools):
     a = await gavel_tools["session_create"]()
     b = await gavel_tools["session_create"]()
     assert a["process_id"] == b["process_id"]
-    assert a["context_id"] == b["context_id"]     # 默认都复用 profile 默认容器
+    assert a["context_id"] == b["context_id"]  # 默认都复用 profile 默认容器
     i1 = await gavel_tools["session_create"](container="isolated")
     i2 = await gavel_tools["session_create"](container="isolated")
-    assert i1["context_id"] != i2["context_id"]   # 隔离容器各自独立
+    assert i1["context_id"] != i2["context_id"]  # 隔离容器各自独立
     assert i1["context_id"] != a["context_id"]
 
 
@@ -220,10 +236,9 @@ async def test_crash_recovery_threshold(runtime):
 
 async def test_mcp_page_open_url_and_list(runtime, webapp_server):
     mcp = FakeMCP()
-    register_browser_tools(mcp)
+    register_runtime_tools(mcp)
     r = await mcp.tools["session_create"]()
-    r2 = await mcp.tools["page_open"](
-        context_id=r["context_id"], url=f"{webapp_server}/basic.html")
+    r2 = await mcp.tools["page_open"](context_id=r["context_id"], url=f"{webapp_server}/basic.html")
     assert r2["status"] == "ok"
     assert "basic.html" in (r2["url"] or "")
     listing = await mcp.tools["page_list"]()

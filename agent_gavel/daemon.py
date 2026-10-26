@@ -31,6 +31,7 @@ class _Registry:
         def decorator(fn):
             self.tools[fn.__name__] = fn
             return fn
+
         return decorator
 
 
@@ -49,9 +50,11 @@ def _acquire_lock(path):
     try:
         if os.name == "nt":
             import msvcrt
+
             msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
         else:
             import fcntl
+
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as e:
         os.close(fd)
@@ -65,10 +68,10 @@ def _acquire_lock(path):
 
 async def _tool_schemas():
     from mcp.server.mcpserver import MCPServer
+
     server = MCPServer("agent-gavel")
     register_runtime_tools(server)
-    return [t.model_dump(by_alias=True, exclude_none=True)
-            for t in await server.list_tools()]
+    return [t.model_dump(by_alias=True, exclude_none=True) for t in await server.list_tools()]
 
 
 async def _dispatch(registry, schemas, name, args, adapter_count):
@@ -78,8 +81,11 @@ async def _dispatch(registry, schemas, name, args, adapter_count):
         return {"status": "ok", "daemon_pid": os.getpid()}
     fn = registry.tools.get(name)
     if fn is None:
-        return {"status": "error", "reason": "unknown_tool",
-                "error": f"daemon 没有这个工具：{name}"}
+        return {
+            "status": "error",
+            "reason": "unknown_tool",
+            "error": f"daemon 没有这个工具：{name}",
+        }
     result = await fn(**(args or {}))
     if name == "browser_status" and isinstance(result, dict):
         result["daemon_pid"] = os.getpid()
@@ -94,19 +100,31 @@ async def _serve(paths, token, registry, schemas, stop):
     async def reply(req, writer, write_lock, adapter_count):
         rid = req.get("id")
         if req.get("token") != token:
-            data = (json.dumps({"id": rid, "error": {
-                "status": "error", "reason": "unauthorized",
-                "error": "daemon token 不匹配"}}, ensure_ascii=False) + "\n").encode()
+            data = (
+                json.dumps(
+                    {
+                        "id": rid,
+                        "error": {
+                            "status": "error",
+                            "reason": "unauthorized",
+                            "error": "daemon token 不匹配",
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            ).encode()
             async with write_lock:
                 writer.write(data)
                 try:
                     await writer.drain()
                 except Exception:
-                    pass
+                    pass  # silent-ok: best-effort，失败不影响主流程
             return
         try:
-            result = await _dispatch(registry, schemas, req.get("tool"),
-                                     req.get("args"), adapter_count)
+            result = await _dispatch(
+                registry, schemas, req.get("tool"), req.get("args"), adapter_count
+            )
             out = {"id": rid, "result": result}
         except Exception as e:  # noqa: BLE001
             out = {"id": rid, "error": wrap_exception(e).to_dict()}
@@ -116,7 +134,7 @@ async def _serve(paths, token, registry, schemas, stop):
             try:
                 await writer.drain()
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
 
     def adapter_count():
         return state["adapters"]
@@ -133,8 +151,7 @@ async def _serve(paths, token, registry, schemas, stop):
                     req = json.loads(line)
                 except Exception:
                     continue
-                task = asyncio.create_task(
-                    reply(req, writer, write_lock, adapter_count))
+                task = asyncio.create_task(reply(req, writer, write_lock, adapter_count))
                 tasks.add(task)
                 task.add_done_callback(tasks.discard)
         finally:
@@ -143,23 +160,24 @@ async def _serve(paths, token, registry, schemas, stop):
                 writer.close()
                 await writer.wait_closed()
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
 
     transport = {}
     if os.name == "nt":
-        server = await asyncio.start_server(handle, "127.0.0.1", 0,
-                                            limit=64 * 1024 * 1024)
+        server = await asyncio.start_server(handle, "127.0.0.1", 0, limit=64 * 1024 * 1024)
         transport["port"] = server.sockets[0].getsockname()[1]
     else:
         sock_path = paths["sock"]
-        if os.path.exists(sock_path):
+        if await asyncio.to_thread(os.path.exists, sock_path):
             os.unlink(sock_path)
         server = await asyncio.start_unix_server(
-            handle, path=str(sock_path), limit=64 * 1024 * 1024)
+            handle, path=str(sock_path), limit=64 * 1024 * 1024
+        )
         os.chmod(sock_path, 0o600)
         transport["socket"] = str(sock_path)
-    paths["info"].write_text(json.dumps({
-        "pid": os.getpid(), "token": token, **transport}), encoding="utf-8")
+    paths["info"].write_text(
+        json.dumps({"pid": os.getpid(), "token": token, **transport}), encoding="utf-8"
+    )
     try:
         os.chmod(paths["info"], 0o600)
     except OSError:
@@ -199,9 +217,10 @@ async def _run(lock_fd):
     finally:
         try:
             from .runtime import shutdown_runtime
+
             await asyncio.wait_for(shutdown_runtime(), timeout=8)
         except Exception:
-            pass
+            pass  # silent-ok: best-effort，失败不影响主流程
         try:
             paths["info"].unlink()
         except OSError:
@@ -218,9 +237,10 @@ def main():
     if sys.platform.startswith("linux"):
         try:
             import ctypes
+
             ctypes.CDLL("libc.so.6").prctl(1, 0, 0, 0, 0)
         except Exception:
-            pass
+            pass  # silent-ok: best-effort，失败不影响主流程
     lock_fd = _acquire_lock(_paths()["lock"])
     if lock_fd is None:
         return

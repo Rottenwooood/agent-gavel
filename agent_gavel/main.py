@@ -21,10 +21,11 @@ def _set_pdeathsig():
         return
     try:
         import ctypes
+
         libc = ctypes.CDLL("libc.so.6", use_errno=True)
         libc.prctl(1, signal.SIGTERM, 0, 0, 0)
     except Exception:
-        pass
+        pass  # silent-ok: best-effort，失败不影响主流程
 
 
 def _start_parent_watchdog():
@@ -42,7 +43,7 @@ def _start_parent_watchdog():
                 if not psutil.pid_exists(_PARENT_PID):
                     os._exit(0)
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
 
     threading.Thread(target=_watch, daemon=True).start()
 
@@ -51,11 +52,12 @@ def main():
     _set_pdeathsig()
     _start_parent_watchdog()
     import asyncio
+
     try:
         asyncio.run(remote.run())
     except Exception as e:  # noqa: BLE001
         print(f"agent-gavel: {e}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from e
 
 
 if __name__ == "__main__":

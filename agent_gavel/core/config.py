@@ -14,8 +14,7 @@ from pathlib import Path
 
 _TRUE = ("1", "true", "yes", "on")
 
-_CHROME_NAMES = ("google-chrome", "google-chrome-stable", "chromium",
-                 "chromium-browser")
+_CHROME_NAMES = ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser")
 
 
 def _env(name, default=None):
@@ -29,9 +28,9 @@ def _flag(name):
 
 # ---------------- 目录 ----------------
 
+
 def data_dir() -> Path:
-    return Path(_env("AGENT_GAVEL_DATA_DIR")
-                or Path.home() / ".config" / "agent-gavel")
+    return Path(_env("AGENT_GAVEL_DATA_DIR") or Path.home() / ".config" / "agent-gavel")
 
 
 def profile_dir() -> Path:
@@ -41,14 +40,12 @@ def profile_dir() -> Path:
 
 def browser_profiles_root() -> Path:
     """资料副本存放目录。"""
-    return Path(_env("AGENT_GAVEL_BROWSER_PROFILES")
-                or data_dir() / "browser-profiles")
+    return Path(_env("AGENT_GAVEL_BROWSER_PROFILES") or data_dir() / "browser-profiles")
 
 
 def default_browser_profile() -> Path:
     """没有任何副本时，C1 使用的可累计资料目录。"""
-    return Path(_env("AGENT_GAVEL_BROWSER_PROFILE")
-                or data_dir() / "browser-profile")
+    return Path(_env("AGENT_GAVEL_BROWSER_PROFILE") or data_dir() / "browser-profile")
 
 
 def browser_profile_override():
@@ -67,11 +64,14 @@ def workflows_dir() -> Path:
 
 
 def artifacts_dir() -> Path:
-    return Path(_env("AGENT_GAVEL_ARTIFACT_DIR")
-                or Path(tempfile.gettempdir()) / "agent-gavel" / "artifacts")
+    return Path(
+        _env("AGENT_GAVEL_ARTIFACT_DIR")
+        or Path(tempfile.gettempdir()) / "agent-gavel" / "artifacts"
+    )
 
 
 # ---------------- 浏览器 ----------------
+
 
 def headless() -> bool:
     return _flag("AGENT_GAVEL_HEADLESS")
@@ -103,8 +103,9 @@ def chrome_bin():
         for name in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
             base = _env(name)
             if base:
-                candidates.append(os.path.join(
-                    base, "Google", "Chrome", "Application", "chrome.exe"))
+                candidates.append(
+                    os.path.join(base, "Google", "Chrome", "Application", "chrome.exe")
+                )
         candidates += [shutil.which(n) for n in ("chrome.exe", "msedge.exe")]
         for c in candidates:
             if c and os.path.isfile(c):
@@ -121,8 +122,11 @@ def chrome_channel():
     """Playwright 模式的 channel：显式配置优先，否则按系统已装的浏览器推断。"""
     if "AGENT_GAVEL_CHROME_CHANNEL" in os.environ:
         return os.environ["AGENT_GAVEL_CHROME_CHANNEL"].strip() or None
-    names = (("google-chrome", "google-chrome-stable")
-             if not sys.platform.startswith("win") else ("chrome.exe",))
+    names = (
+        ("google-chrome", "google-chrome-stable")
+        if not sys.platform.startswith("win")
+        else ("chrome.exe",)
+    )
     if any(shutil.which(n) for n in names):
         return "chrome"
     if any(shutil.which(n) for n in ("chromium", "chromium-browser", "chrome")):
@@ -139,17 +143,19 @@ def chrome_user_data_dir():
         base = _env("LOCALAPPDATA") or ""
         return os.path.join(base, "Google", "Chrome", "User Data")
     if sys.platform == "darwin":
-        return os.path.expanduser(
-            "~/Library/Application Support/Google/Chrome")
-    for path in (os.path.expanduser("~/.config/google-chrome"),
-                 os.path.expanduser("~/.config/chromium"),
-                 os.path.expanduser("~/.config/google-chrome-beta")):
+        return os.path.expanduser("~/Library/Application Support/Google/Chrome")
+    for path in (
+        os.path.expanduser("~/.config/google-chrome"),
+        os.path.expanduser("~/.config/chromium"),
+        os.path.expanduser("~/.config/google-chrome-beta"),
+    ):
         if os.path.isdir(path):
             return path
     return os.path.expanduser("~/.config/google-chrome")
 
 
 # ---------------- 策略与配额 ----------------
+
 
 def _csv(name):
     raw = (_env(name) or "").strip()

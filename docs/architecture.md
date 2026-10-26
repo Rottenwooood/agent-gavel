@@ -108,10 +108,13 @@ agent_gavel/
   backends/playwright/
     __init__.py        # 编排：导航、等待、截图、PDF
     actions.py         # 每个动作一个函数，签名统一 (backend, handle, action)
-    locator.py         # target 解析
-    reader.py          # read / snapshot / explore / anchor
-    assertion.py       # 从 Check IR 生成 Python 求值与 JS 谓词
+    locator.py         # target 归一、strict 解析、候选样例
+    reader.py          # read / snapshot / explore / anchor / screenshot
+    assertion.py       # Check IR 的 Python 读取与三态求值
+    jsrender.py        # Check IR 的浏览器侧谓词
     signature.py       # 页面签名与 diff
+    frames.py          # iframe 作用域
+    util.py            # 内部小工具
 
   workflows/
     schema.py          # 模板结构校验（读 core/actions.py）

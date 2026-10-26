@@ -3,24 +3,11 @@
 import re
 import time
 
-from ...core.checks import READ_KINDS, OPS, Check, parse
+from ...core.checks import Check, parse, read_kind
 from ...core.errors import GavelError
 from .frames import frame_root
+from .jsrender import predicate
 from .signature import diff_summary, page_signature
-
-
-def _read_kind(check):
-    read = check.read
-    if read is None:
-        if check.name in READ_KINDS:
-            read = check.name
-        elif check.expr is not None:
-            read = "expr"
-        elif check.attr:
-            read = "attr"
-        elif check.selector:
-            read = "text"
-    return read
 
 
 async def _read_url(page, check, root):
@@ -41,8 +28,7 @@ async def _read_count(page, check, root):
 
 async def _read_text(page, check, root):
     if not check.selector:
-        return await page.evaluate(
-            "() => document.body ? document.body.innerText : ''")
+        return await page.evaluate("() => document.body ? document.body.innerText : ''")
     loc = root.locator(check.selector).first
     try:
         return (await loc.inner_text()).strip()
@@ -55,8 +41,7 @@ async def _read_value(page, check, root):
 
 
 async def _read_attr(page, check, root):
-    return await root.locator(check.selector or "").first.get_attribute(
-        check.attr or "")
+    return await root.locator(check.selector or "").first.get_attribute(check.attr or "")
 
 
 async def _read_html(page, check, root):
@@ -79,12 +64,13 @@ async def read_value(page, check):
     root = frame_root(page, check.frame)
     if check.op in ("exists", "not_exists"):
         return await root.locator(check.selector or "").count()
-    read = _read_kind(check)
+    read = read_kind(check)
     if read not in READERS:
         raise GavelError(
-            "bad_check", f"无法判断该 check 要读什么：{check.to_dict()}",
-            hint="用 read/name 指定 url|title|text|value|count|expr|attr|html，"
-                 "或给 selector")
+            "bad_check",
+            f"无法判断该 check 要读什么：{check.to_dict()}",
+            hint="用 read/name 指定 url|title|text|value|count|expr|attr|html，或给 selector",
+        )
     return await READERS[read](page, check, root)
 
 
@@ -161,89 +147,6 @@ def compare(op, actual, expected):
         return False
 
 
-def _js_quote(value):
-    import json
-    return json.dumps(value)
-
-
-def _js_value(check, selector):
-    read = _read_kind(check)
-    if check.op in ("exists", "not_exists"):
-        read = "count"
-    if read == "url":
-        return "location.href"
-    if read == "title":
-        return "document.title"
-    if read == "expr":
-        if check.expr is None:
-            return None
-        return "(" + check.expr + ")"
-    if read == "count":
-        return f"document.querySelectorAll({_js_quote(selector or '')}).length"
-    if not selector and read != "text":
-        return None
-    if read == "value":
-        return f"(__q({_js_quote(selector or '')})?__q({_js_quote(selector or '')}).value:null)"
-    if read == "attr":
-        return (f"(__q({_js_quote(selector or '')})?"
-                f"__q({_js_quote(selector or '')}).getAttribute("
-                f"{_js_quote(check.attr or '')}):null)")
-    if read == "html":
-        return (f"(__q({_js_quote(selector or '')})?"
-                f"__q({_js_quote(selector or '')}).innerHTML:null)")
-    if not selector:
-        return "(document.body?document.body.innerText:'')"
-    return (f"((__q({_js_quote(selector)})&&(__q({_js_quote(selector)}).innerText"
-            f"||__q({_js_quote(selector)}).textContent))||'').trim()")
-
-
-def _js_compare(op, actual, expected):
-    if op == "exists":
-        return f"(({actual})||0) > 0"
-    if op == "not_exists":
-        return f"(({actual})||0) === 0"
-    if op == "eq":
-        return f"({actual}) === {expected}"
-    if op == "neq":
-        return f"({actual}) !== {expected}"
-    if op == "contains":
-        return f"String({actual}).indexOf(String({expected})) !== -1"
-    if op == "not_contains":
-        return f"String({actual}).indexOf(String({expected})) === -1"
-    if op == "regex":
-        return f"new RegExp(String({expected})).test(String({actual}))"
-    if op in ("gt", "lt", "gte", "lte"):
-        sym = {"gt": ">", "lt": "<", "gte": ">=", "lte": "<="}[op]
-        return f"({actual}) {sym} {expected}"
-    if op == "count_eq":
-        return f"({actual}) === {expected}"
-    if op == "count_gte":
-        return f"({actual}) >= {expected}"
-    if op == "count_gt":
-        return f"({actual}) > {expected}"
-    return None
-
-
-def render_js(check):
-    """单条 Check 的浏览器侧谓词；不支持时返回 None（调用方退回轮询）。"""
-    if check.frame:
-        return None
-    expr = _js_value(check, check.selector)
-    if expr is None:
-        return None
-    expected = _js_quote(check.expected)
-    return _js_compare(check.op, expr, expected)
-
-
-def predicate(checks):
-    parts = [render_js(check) for check in checks]
-    if not parts or any(part is None for part in parts):
-        return None
-    body = " && ".join(f"({part})" for part in parts)
-    return ("() => { const __q=s=>s?document.querySelector(s):null; "
-            f"return ({body}); }}")
-
-
 async def _run_checks(page, checks):
     results = []
     for check in checks:
@@ -251,20 +154,35 @@ async def _run_checks(page, checks):
         try:
             actual = await read_value(page, check)
             passed = compare(check.op, actual, check.expected)
-            results.append({"name": name, "op": check.op,
-                            "expected": check.expected, "actual": actual,
-                            "passed": passed})
+            results.append(
+                {
+                    "name": name,
+                    "op": check.op,
+                    "expected": check.expected,
+                    "actual": actual,
+                    "passed": passed,
+                }
+            )
         except Exception as e:  # noqa: BLE001
-            results.append({"name": name, "op": check.op,
-                            "expected": check.expected, "actual": None,
-                            "passed": False, "error": str(e)})
+            results.append(
+                {
+                    "name": name,
+                    "op": check.op,
+                    "expected": check.expected,
+                    "actual": None,
+                    "passed": False,
+                    "error": str(e),
+                }
+            )
     return results
 
 
-async def evaluate(backend, handle, checks, before_sig=None,
-                   wait_s=0.0, interval=0.1, target=None):
-    parsed = checks if isinstance(checks, list) and \
-        all(isinstance(c, Check) for c in checks) else parse(checks)
+async def evaluate(backend, handle, checks, before_sig=None, wait_s=0.0, interval=0.1, target=None):
+    parsed = (
+        checks
+        if isinstance(checks, list) and all(isinstance(c, Check) for c in checks)
+        else parse(checks)
+    )
     if not parsed:
         return {"status": "pass", "assertions": []}
 
@@ -277,7 +195,7 @@ async def evaluate(backend, handle, checks, before_sig=None,
             try:
                 await page.wait_for_function(pred, timeout=int(remaining * 1000))
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
 
     last = None
     while True:
@@ -299,4 +217,5 @@ async def evaluate(backend, handle, checks, before_sig=None,
 
 async def _sleep(seconds):
     import asyncio
+
     await asyncio.sleep(seconds)

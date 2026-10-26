@@ -2,7 +2,6 @@
 
 import difflib
 
-
 _SIG_BODY = r"""
   function __sig(root){
     const MAX=6000;
@@ -34,29 +33,30 @@ _SIG_BODY = r"""
   }
 """
 _SIG_PAGE_JS = "() => {" + _SIG_BODY + " return __sig(document.body); }"
-_SIG_SCOPE_JS = ("el => {" + _SIG_BODY +
-                 " let root=null; let n=el;"
-                 " while(n&&n!==document.body&&n.parentElement){"
-                 "   if(/^(FORM|MAIN|SECTION|ARTICLE|DIV|UL|OL|TABLE|NAV)$/.test(n.tagName)){root=n;break;}"
-                 "   n=n.parentElement; }"
-                 " if(!root) root=el.parentElement||el;"
-                 " return __sig(root); }")
+_SIG_SCOPE_JS = (
+    "el => {" + _SIG_BODY + " let root=null; let n=el;"
+    " while(n&&n!==document.body&&n.parentElement){"
+    "   if(/^(FORM|MAIN|SECTION|ARTICLE|DIV|UL|OL|TABLE|NAV)$/.test(n.tagName)){root=n;break;}"
+    "   n=n.parentElement; }"
+    " if(!root) root=el.parentElement||el;"
+    " return __sig(root); }"
+)
 
 
 async def page_signature(backend, handle, target=None):
-        """动作前后快照：作用域内逐节点结构签名（tag#id.class+属性+值+叶子文本），
-        含地址/标题两行头。给了 target 就取"目标最近的容器"作用域（更细、
-        噪音更少），否则整页 body。返回 dict，供 diff_summary 比较。"""
-        if target:
-            try:
-                loc = (await backend.resolve(handle.page, target)).first
-                return await loc.evaluate(_SIG_SCOPE_JS)
-            except Exception:
-                pass
+    """动作前后快照：作用域内逐节点结构签名（tag#id.class+属性+值+叶子文本），
+    含地址/标题两行头。给了 target 就取"目标最近的容器"作用域（更细、
+    噪音更少），否则整页 body。返回 dict，供 diff_summary 比较。"""
+    if target:
         try:
-            return await handle.page.evaluate(_SIG_PAGE_JS)
+            loc = (await backend.resolve(handle.page, target)).first
+            return await loc.evaluate(_SIG_SCOPE_JS)
         except Exception:
-            return None
+            pass  # silent-ok: best-effort，失败不影响主流程
+    try:
+        return await handle.page.evaluate(_SIG_PAGE_JS)
+    except Exception:
+        return None
 
 
 def diff_summary(before, after):
@@ -77,10 +77,10 @@ def diff_summary(before, after):
     s_add, s_rem = [], []
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag in ("insert", "replace"):
-            added += (j2 - j1)
+            added += j2 - j1
             s_add += al[j1:j2]
         if tag in ("delete", "replace"):
-            removed += (i2 - i1)
+            removed += i2 - i1
             s_rem += bl[i1:i2]
     header_changed = bl[:2] != al[:2]
     body = bool(before.get("bodyScope")) or bool(after.get("bodyScope"))
@@ -89,11 +89,15 @@ def diff_summary(before, after):
         meaningful = True
     elif body:
         total = max(len(bl), len(al))
-        meaningful = n_changed >= 4 or (total > 0
-                                        and n_changed / total >= 0.02)
+        meaningful = n_changed >= 4 or (total > 0 and n_changed / total >= 0.02)
     else:
         meaningful = n_changed >= 1
-    return {"changed": n_changed > 0, "meaningful": meaningful,
-            "added": added, "removed": removed,
-            "scope": before.get("scope") or after.get("scope"),
-            "samples_added": s_add[:6], "samples_removed": s_rem[:6]}
+    return {
+        "changed": n_changed > 0,
+        "meaningful": meaningful,
+        "added": added,
+        "removed": removed,
+        "scope": before.get("scope") or after.get("scope"),
+        "samples_added": s_add[:6],
+        "samples_removed": s_rem[:6],
+    }

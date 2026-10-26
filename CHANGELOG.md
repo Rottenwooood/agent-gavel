@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### 统一响应与工具收敛（阶段 4）
+
+- 所有工具经 `guard` 统一封装：`status` 取值受限，自动补 `operation_id` 与 `elapsed_ms`。
+- 状态归一：`no_match` → `fail` + `reason`；`partial_error` → `ok` + `complete:false`。
+- 删除三个别名工具：`page_focus`、`locator_set_files`、`workflow_replay`（工具数 97 → 94）。
+- 后端拆分为 `locator` / `reader` / `jsrender` / `frames` / `util`，`__init__` 只保留编排。
+- 工具按资源拆分：`session_tools` / `context_tools` / `page_lifecycle`，`browser_tools` 只留浏览器。
+- 宽泛 `except Exception: pass` 全部标注 `silent-ok`，并加入不变量测试。
+- 工具数量快照 94；新增/删除必须显式更新。
+- 加入 `ruff`（E/F/I/B/SIM/ASYNC）与 `mypy`，CI 增加 lint/format/type 检查。
+
 ### 动作与断言词表（阶段 3）
 
 - 无头 managed 启动时通过 `--user-agent` 给默认持久容器设置桌面 UA，默认容器不再

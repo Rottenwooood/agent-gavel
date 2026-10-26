@@ -29,8 +29,11 @@ def _is_safe_id(name) -> bool:
 
 def _require_safe_id(name):
     if not _is_safe_id(name):
-        raise GavelError("bad_template_id", f"非法 template_id：{name!r}",
-                         hint="只允许小写字母/数字/下划线，如 bing_search")
+        raise GavelError(
+            "bad_template_id",
+            f"非法 template_id：{name!r}",
+            hint="只允许小写字母/数字/下划线，如 bing_search",
+        )
     return name
 
 
@@ -92,16 +95,20 @@ def migrate_old(old):
         if action == "navigate":
             act["url"] = st.get("url") or sels.get("url")
         if action == "press_enter":
-            act = {"type": "press", "keys": "Enter",
-                   "target": act.get("target")}
+            act = {"type": "press", "keys": "Enter", "target": act.get("target")}
         step = {"id": f"step{i + 1}", "action": act}
         if st.get("expected_feature"):
             step["checkpoint"] = {"checks": st["expected_feature"]}
         steps.append(step)
-    t = {"schema_version": _schema.SCHEMA_VERSION,
-         "template_id": slugify(old.get("site", "legacy")) + "_migrated",
-         "version": 1, "site": old.get("site", ""), "desc": old.get("desc", ""),
-         "parameters": old.get("params") or {}, "steps": steps}
+    t = {
+        "schema_version": _schema.SCHEMA_VERSION,
+        "template_id": slugify(old.get("site", "legacy")) + "_migrated",
+        "version": 1,
+        "site": old.get("site", ""),
+        "desc": old.get("desc", ""),
+        "parameters": old.get("params") or {},
+        "steps": steps,
+    }
     return _schema.validate(t)[0]
 
 
@@ -109,23 +116,29 @@ def resolve_id(name_or_id) -> str:
     """把用户给的名称解析成唯一 template_id；只读入口使用。"""
     if _is_safe_id(name_or_id) and os.path.isfile(_path_for(name_or_id)):
         return name_or_id
-    hits = {}
+    hits: dict = {}
     for t in _iter_templates():
         tid = t.get("template_id")
         if not tid:
             continue
-        if (tid == name_or_id or t.get("site") == name_or_id
-                or tid.endswith("_" + str(name_or_id))
-                or str(name_or_id) in tid):
+        if (
+            tid == name_or_id
+            or t.get("site") == name_or_id
+            or tid.endswith("_" + str(name_or_id))
+            or str(name_or_id) in tid
+        ):
             hits.setdefault(tid, True)
     if len(hits) == 1:
         return next(iter(hits))
     if len(hits) > 1:
-        raise GavelError("workflow_ambiguous",
-                         f"{name_or_id} 匹配多个模板：{sorted(hits)}",
-                         hint="用完整 template_id")
-    raise GavelError("workflow_not_found", f"未知 workflow：{name_or_id}",
-                     hint="用 workflow_list 查看")
+        raise GavelError(
+            "workflow_ambiguous",
+            f"{name_or_id} 匹配多个模板：{sorted(hits)}",
+            hint="用完整 template_id",
+        )
+    raise GavelError(
+        "workflow_not_found", f"未知 workflow：{name_or_id}", hint="用 workflow_list 查看"
+    )
 
 
 def get_exact(template_id):
@@ -133,8 +146,9 @@ def get_exact(template_id):
     _require_safe_id(template_id)
     path = _path_for(template_id)
     if not os.path.isfile(path):
-        raise GavelError("workflow_not_found", f"未知 workflow：{template_id}",
-                         hint="用 workflow_list 查看")
+        raise GavelError(
+            "workflow_not_found", f"未知 workflow：{template_id}", hint="用 workflow_list 查看"
+        )
     return _read(path), path
 
 
@@ -162,13 +176,18 @@ def save(template):
             template["stats"] = prev["stats"]
     else:
         template.setdefault("version", 1)
-        template.setdefault("stats", {"success_count": 0, "fail_count": 0,
-                                      "last_status": None, "last_at": None})
+        template.setdefault(
+            "stats", {"success_count": 0, "fail_count": 0, "last_status": None, "last_at": None}
+        )
     template["saved_at"] = datetime.datetime.now().isoformat(timespec="seconds")
     _write(path, template)
-    return {"file": f"{tid}.json", "template_id": tid,
-            "version": template["version"], "steps": len(template["steps"]),
-            "parameters": template.get("parameters", {})}
+    return {
+        "file": f"{tid}.json",
+        "template_id": tid,
+        "version": template["version"],
+        "steps": len(template["steps"]),
+        "parameters": template.get("parameters", {}),
+    }
 
 
 def list_workflows():
@@ -179,8 +198,10 @@ def list_workflows():
             continue
         stats = t.get("stats") or {}
         seen[tid] = {
-            "file": f"{tid}.json", "template_id": tid,
-            "site": t.get("site"), "desc": t.get("desc"),
+            "file": f"{tid}.json",
+            "template_id": tid,
+            "site": t.get("site"),
+            "desc": t.get("desc"),
             "version": t.get("version"),
             "steps": len(t.get("steps", [])),
             "parameters": t.get("parameters", {}),
@@ -214,8 +235,9 @@ def delete(template_id):
     _require_safe_id(template_id)
     path = _path_for(template_id)
     if not os.path.isfile(path):
-        raise GavelError("workflow_not_found", f"未知 workflow：{template_id}",
-                         hint="用 workflow_list 查看")
+        raise GavelError(
+            "workflow_not_found", f"未知 workflow：{template_id}", hint="用 workflow_list 查看"
+        )
     os.remove(path)
     return {"template_id": template_id, "deleted": True}
 
@@ -226,8 +248,9 @@ def record_run(template_id, status):
         t, path = get_exact(template_id)
     except GavelError:
         return None
-    stats = t.setdefault("stats", {"success_count": 0, "fail_count": 0,
-                                   "last_status": None, "last_at": None})
+    stats = t.setdefault(
+        "stats", {"success_count": 0, "fail_count": 0, "last_status": None, "last_at": None}
+    )
     if status == "pass":
         stats["success_count"] = stats.get("success_count", 0) + 1
     else:
@@ -239,8 +262,12 @@ def record_run(template_id, status):
 
 
 def stats():
-    return {w["template_id"]: {"success_count": w["success_count"],
-                               "fail_count": w["fail_count"],
-                               "last_status": w["last_status"],
-                               "version": w["version"]}
-            for w in list_workflows()}
+    return {
+        w["template_id"]: {
+            "success_count": w["success_count"],
+            "fail_count": w["fail_count"],
+            "last_status": w["last_status"],
+            "version": w["version"],
+        }
+        for w in list_workflows()
+    }

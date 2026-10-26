@@ -7,7 +7,6 @@
 import asyncio
 from collections import defaultdict
 
-from .recorder import Recorder
 from .artifacts import ArtifactStore
 from .browser_process import BrowserProcessManager
 from .contexts import ContextManager
@@ -15,7 +14,8 @@ from .events import EventBus
 from .metrics import MetricsRecorder
 from .pages import PageManager
 from .policies import PolicyManager
-from .sessions import Session, SessionManager
+from .recorder import Recorder
+from .sessions import SessionManager
 from .tracing import NetworkRecorder, Tracer
 
 
@@ -93,13 +93,14 @@ class BrowserRuntime:
                 "pages": len(self.pages),
                 "processes": len(self.processes.list()),
             },
-            "active_pages": {cid: c.active_page_id
-                             for cid, c in self.contexts.items()},
+            "active_pages": {cid: c.active_page_id for cid, c in self.contexts.items()},
             "events": self.events.stats(),
             "metrics": self.metrics.snapshot(),
             "domain_restricted": self.policies.domain_restricted,
-            "runs": {rid: {"status": r.status, "template_id": r.template_id}
-                     for rid, r in self.runs.items()},
+            "runs": {
+                rid: {"status": r.status, "template_id": r.template_id}
+                for rid, r in self.runs.items()
+            },
             "recording": self.recorder.active,
         }
 
@@ -113,19 +114,19 @@ class BrowserRuntime:
             try:
                 await self.page_mgr.close(pid)
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
         for sid in list(self.sessions):
             try:
                 await self.session_mgr.close(sid)
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
         for cid in list(self.contexts):
             ctx = self.contexts.get(cid)
             if ctx is not None and ctx.container != "default":
                 try:
                     await self.context_mgr.close(cid)
                 except Exception:
-                    pass
+                    pass  # silent-ok: best-effort，失败不影响主流程
         self.page_mgr.reset_state()
         self.context_mgr.reset_state()
         self.runs.clear()
@@ -135,7 +136,7 @@ class BrowserRuntime:
         try:
             self.recorder.stop()
         except Exception:
-            pass
+            pass  # silent-ok: best-effort，失败不影响主流程
 
     async def shutdown(self):
         if self._closed:
@@ -145,12 +146,12 @@ class BrowserRuntime:
             try:
                 await self.page_mgr.close(pid)
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
         for cid in list(self.contexts):
             try:
                 await self.context_mgr.close(cid)
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
         self.page_mgr.reset_state()
         self.context_mgr.reset_state()
         self.sessions.clear()
@@ -194,6 +195,6 @@ async def reset_runtime(keep_browser=False) -> BrowserRuntime:
                 return _RUNTIME
             await _RUNTIME.shutdown()
         except Exception:
-            pass
+            pass  # silent-ok: best-effort，失败不影响主流程
     _RUNTIME = BrowserRuntime()
     return _RUNTIME

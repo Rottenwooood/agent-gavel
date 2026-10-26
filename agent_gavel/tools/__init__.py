@@ -6,12 +6,18 @@ def register_runtime_tools(mcp):
     from .artifact_tools import register_artifact_tools
     from .assertion_tools import register_assertion_tools
     from .browser_tools import register_browser_tools
+    from .context_tools import register_context_tools
     from .diagnostics_tools import register_diagnostics_tools
+    from .page_lifecycle import register_page_lifecycle_tools
     from .page_tools import register_page_tools
     from .profile_tools import register_profile_tools
+    from .session_tools import register_session_tools
     from .workflow_tools import register_workflow_tools
 
     register_browser_tools(mcp)
+    register_session_tools(mcp)
+    register_context_tools(mcp)
+    register_page_lifecycle_tools(mcp)
     register_profile_tools(mcp)
     register_page_tools(mcp)
     register_action_tools(mcp)

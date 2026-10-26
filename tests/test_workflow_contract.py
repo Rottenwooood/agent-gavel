@@ -26,35 +26,46 @@ async def _session_on(tools, base, path="/basic.html"):
 
 # ---------------- #1 expect 失败 ----------------
 
+
 async def test_expect_failure_fails_workflow(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
     await _session_on(T, base)
-    tmpl = {"template_id": "ts_expect_fail", "site": "ts", "desc": "e",
-            "steps": [{"id": "e", "action": {
-                "type": "expect",
-                "checks": {"t": {"read": "title", "op": "eq",
-                                 "value": "NOPE"}},
-                "wait_s": 0.2}}]}
+    tmpl = {
+        "template_id": "ts_expect_fail",
+        "site": "ts",
+        "desc": "e",
+        "steps": [
+            {
+                "id": "e",
+                "action": {
+                    "type": "expect",
+                    "checks": {"t": {"read": "title", "op": "eq", "value": "NOPE"}},
+                    "wait_s": 0.2,
+                },
+            }
+        ],
+    }
     await T["workflow_save"](template=tmpl)
-    res = await T["workflow_run"](name_or_id="ts_expect_fail",
-                                  verbosity="steps")
+    res = await T["workflow_run"](name_or_id="ts_expect_fail", verbosity="steps")
     assert res["status"] == "fail", res
     assert res["steps"][0]["status"] == "fail", res
 
 
 # ---------------- #2 录制保留断言 ----------------
 
-async def test_record_keeps_assertions_as_checkpoint(gavel_tools,
-                                                     webapp_server):
+
+async def test_record_keeps_assertions_as_checkpoint(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
     _s, _c, pid = await _session_on(T, base)
     await T["workflow_record_start"](page_id=pid)
-    await T["locator_fill"](page_id=pid,
-                            target={"by": "css", "value": "#text-input"},
-                            value="Alice",
-                            assertions={"v": {"read": "value",
-                                              "selector": "#text-input",
-                                              "op": "eq", "value": "Alice"}})
+    await T["locator_fill"](
+        page_id=pid,
+        target={"by": "css", "value": "#text-input"},
+        value="Alice",
+        assertions={
+            "v": {"read": "value", "selector": "#text-input", "op": "eq", "value": "Alice"}
+        },
+    )
     stop = await T["workflow_record_stop"](site="ts", name="assert_rec")
     assert stop["status"] == "ok", stop
     got = await T["workflow_get"](name_or_id=stop["template_id"])
@@ -64,12 +75,12 @@ async def test_record_keeps_assertions_as_checkpoint(gavel_tools,
 
 # ---------------- #3 不删 hover/focus ----------------
 
+
 async def test_compile_keeps_hover(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
     _s, _c, pid = await _session_on(T, base)
     await T["workflow_record_start"](page_id=pid, keep_all=True)
-    await T["locator_hover"](page_id=pid,
-                             target={"by": "css", "value": "#btn"})
+    await T["locator_hover"](page_id=pid, target={"by": "css", "value": "#btn"})
     stop = await T["workflow_record_stop"](site="ts", name="hover_rec")
     got = await T["workflow_get"](name_or_id=stop["template_id"])
     types = [s["action"]["type"] for s in got["template"]["steps"]]
@@ -78,28 +89,46 @@ async def test_compile_keeps_hover(gavel_tools, webapp_server):
 
 # ---------------- #4 type(text=...) 真的输入 ----------------
 
+
 async def test_type_text_actually_types(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
     _s, _c, pid = await _session_on(T, base)
-    tmpl = {"template_id": "ts_type_text", "site": "ts", "desc": "t",
-            "steps": [{"id": "t", "action": {
-                "type": "type", "target": {"by": "css", "value": "#text-input"},
-                "text": "hello"}}]}
+    tmpl = {
+        "template_id": "ts_type_text",
+        "site": "ts",
+        "desc": "t",
+        "steps": [
+            {
+                "id": "t",
+                "action": {
+                    "type": "type",
+                    "target": {"by": "css", "value": "#text-input"},
+                    "text": "hello",
+                },
+            }
+        ],
+    }
     await T["workflow_save"](template=tmpl)
     res = await T["workflow_run"](name_or_id="ts_type_text")
     assert res["status"] == "pass", res
-    rd = await T["page_read"](page_id=pid, page_features={
-        "v": "document.querySelector('#text-input').value"})
+    rd = await T["page_read"](
+        page_id=pid, page_features={"v": "document.querySelector('#text-input').value"}
+    )
     assert rd["features"]["v"] == "hello", rd
 
 
 # ---------------- #5 截图步骤传对对象 ----------------
 
+
 async def test_workflow_screenshot_step(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
     await _session_on(T, base)
-    tmpl = {"template_id": "ts_shot", "site": "ts", "desc": "s",
-            "steps": [{"id": "s", "action": {"type": "screenshot"}}]}
+    tmpl = {
+        "template_id": "ts_shot",
+        "site": "ts",
+        "desc": "s",
+        "steps": [{"id": "s", "action": {"type": "screenshot"}}],
+    }
     await T["workflow_save"](template=tmpl)
     res = await T["workflow_run"](name_or_id="ts_shot")
     assert res["status"] == "pass", res
@@ -108,12 +137,17 @@ async def test_workflow_screenshot_step(gavel_tools, webapp_server):
 
 # ---------------- #6 template_id 路径穿越 ----------------
 
+
 async def test_bad_template_id_rejected(gavel_tools):
     T = gavel_tools
-    bad = await T["workflow_save"](template={
-        "template_id": "../escaped", "site": "x", "desc": "",
-        "steps": [{"id": "a", "action": {"type": "navigate",
-                                         "url": "https://e.com"}}]})
+    bad = await T["workflow_save"](
+        template={
+            "template_id": "../escaped",
+            "site": "x",
+            "desc": "",
+            "steps": [{"id": "a", "action": {"type": "navigate", "url": "https://e.com"}}],
+        }
+    )
     assert bad["status"] == "error" and bad["reason"] == "invalid_template", bad
     with pytest.raises(GavelError):
         loader.save({"template_id": "../escaped", "steps": []})
@@ -121,12 +155,12 @@ async def test_bad_template_id_rejected(gavel_tools):
 
 # ---------------- #8 参数替换前缀冲突 ----------------
 
+
 def test_substitute_no_prefix_conflict():
     assert S.substitute("$QUERY", {"QUERY": "hello"}) == "hello"
     # $QUERY 不得替换进 $QUERY_ID
     assert S.substitute("$QUERY_ID", {"QUERY": "hello"}) == "$QUERY_ID"
-    assert S.substitute("$QUERY_ID", {"QUERY": "hello",
-                                      "QUERY_ID": "7"}) == "7"
+    assert S.substitute("$QUERY_ID", {"QUERY": "hello", "QUERY_ID": "7"}) == "7"
     assert S.substitute("$QUERY x", {"QUERY": "hello"}) == "hello x"
     # params 里没有的变量保持原样（不静默清空）
     assert S.substitute("$MISSING", {"QUERY": "hello"}) == "$MISSING"
@@ -134,69 +168,102 @@ def test_substitute_no_prefix_conflict():
 
 # ---------------- 模板元数据（面向社区分享） ----------------
 
+
 def test_template_metadata_fields():
     nav = {"id": "a", "action": {"type": "navigate", "url": "https://e.com"}}
-    norm, errs, _ = S.validate({
-        "template_id": "ts_meta", "site": "x", "desc": "", "steps": [nav],
-        "task": "下载报表", "login_required": True, "author": "me",
-        "license": "MIT", "runtime": ">=0.3", "status": "verified",
-        "verified_at": "2026-10-02", "known_limits": "需登录"})
+    norm, errs, _ = S.validate(
+        {
+            "template_id": "ts_meta",
+            "site": "x",
+            "desc": "",
+            "steps": [nav],
+            "task": "下载报表",
+            "login_required": True,
+            "author": "me",
+            "license": "MIT",
+            "runtime": ">=0.3",
+            "status": "verified",
+            "verified_at": "2026-10-02",
+            "known_limits": "需登录",
+        }
+    )
     assert not errs, errs
     assert norm["task"] == "下载报表" and norm["login_required"] is True
     assert norm["status"] == "verified" and norm["author"] == "me"
     # 默认 draft
-    n2, e2, _ = S.validate({"template_id": "ts_meta2", "site": "x", "desc": "",
-                            "steps": [nav]})
+    n2, e2, _ = S.validate({"template_id": "ts_meta2", "site": "x", "desc": "", "steps": [nav]})
     assert not e2 and n2["status"] == "draft" and n2["login_required"] is False
     # 非法状态被拒
-    _n3, e3, _ = S.validate({"template_id": "ts_meta3", "site": "x", "desc": "",
-                             "status": "bogus", "steps": [nav]})
+    _n3, e3, _ = S.validate(
+        {"template_id": "ts_meta3", "site": "x", "desc": "", "status": "bogus", "steps": [nav]}
+    )
     assert e3
 
 
 # ---------------- 断言归一（单条字典/顶层op/扁平/expected） ----------------
 
+
 def test_normalize_checks_forms():
     from agent_gavel.core.checks import parse
+
     # 单条 check 字段形态
-    n = parse({"read": "text", "selector": "#h", "op": "eq",
-               "value": "READY"})
-    assert n[0].read == "text" and n[0].selector == "#h" \
-        and n[0].op == "eq" and n[0].expected == "READY"
+    n = parse({"read": "text", "selector": "#h", "op": "eq", "value": "READY"})
+    assert (
+        n[0].read == "text"
+        and n[0].selector == "#h"
+        and n[0].op == "eq"
+        and n[0].expected == "READY"
+    )
     # 顶层 op + 目标键
     n2 = parse({"title": "百度", "op": "contains"})
-    assert n2[0].name == "title" and n2[0].read == "title" \
-        and n2[0].expected == "百度" and n2[0].op == "contains"
+    assert (
+        n2[0].name == "title"
+        and n2[0].read == "title"
+        and n2[0].expected == "百度"
+        and n2[0].op == "contains"
+    )
     # 扁平写法
     n3 = parse({"url_contains": "x"})
-    assert n3[0].read == "url" and n3[0].op == "contains" \
-        and n3[0].expected == "x"
+    assert n3[0].read == "url" and n3[0].op == "contains" and n3[0].expected == "x"
     # expected 别名
     n4 = parse({"title": {"op": "contains", "expected": "百度"}})
     assert n4[0].expected == "百度" and n4[0].name == "title"
 
 
 def test_wait_for_text_action_schema():
-    tmpl = {"template_id": "ts_wft", "site": "ts", "desc": "",
-            "steps": [{"id": "w", "action": {"type": "wait_for_text",
-                                             "text": "READY"}}]}
+    tmpl = {
+        "template_id": "ts_wft",
+        "site": "ts",
+        "desc": "",
+        "steps": [{"id": "w", "action": {"type": "wait_for_text", "text": "READY"}}],
+    }
     norm, errs, _ = S.validate(tmpl)
     assert not errs and norm["steps"][0]["action"]["type"] == "wait_for_text"
-    _n, e, _ = S.validate({"template_id": "ts_wft2", "site": "ts", "desc": "",
-                           "steps": [{"id": "w",
-                                      "action": {"type": "wait_for_text"}}]})
+    _n, e, _ = S.validate(
+        {
+            "template_id": "ts_wft2",
+            "site": "ts",
+            "desc": "",
+            "steps": [{"id": "w", "action": {"type": "wait_for_text"}}],
+        }
+    )
     assert e  # 缺 text 报错
 
 
 def test_template_delete_and_name_completion():
     from agent_gavel.core.errors import GavelError
-    norm, errs, _ = S.validate({
-        "template_id": "taobao_search_probe", "site": "taobao", "desc": "",
-        "steps": [{"id": "a", "action": {"type": "navigate",
-                                         "url": "https://e.com"}}]})
+
+    norm, errs, _ = S.validate(
+        {
+            "template_id": "taobao_search_probe",
+            "site": "taobao",
+            "desc": "",
+            "steps": [{"id": "a", "action": {"type": "navigate", "url": "https://e.com"}}],
+        }
+    )
     assert not errs
     loader.save(norm)
-    got, _p = loader.load("search_probe")          # 无前缀名自动补全
+    got, _p = loader.load("search_probe")  # 无前缀名自动补全
     assert got["template_id"] == "taobao_search_probe"
     loader.delete(loader.resolve_id("taobao_search_probe"))
     with pytest.raises(GavelError):
@@ -205,14 +272,20 @@ def test_template_delete_and_name_completion():
 
 # ---------------- #7 幂等性按动作类型判定 ----------------
 
+
 def test_idempotency_defaults_by_action_type():
-    tmpl = {"template_id": "ts_idem", "site": "ts", "desc": "",
-            "steps": [
-                {"id": "c", "action": {"type": "click",
-                                       "target": {"by": "css", "value": "#btn"}}},
-                {"id": "f", "action": {"type": "fill",
-                                       "target": {"by": "css", "value": "#x"},
-                                       "value": "v"}}]}
+    tmpl = {
+        "template_id": "ts_idem",
+        "site": "ts",
+        "desc": "",
+        "steps": [
+            {"id": "c", "action": {"type": "click", "target": {"by": "css", "value": "#btn"}}},
+            {
+                "id": "f",
+                "action": {"type": "fill", "target": {"by": "css", "value": "#x"}, "value": "v"},
+            },
+        ],
+    }
     norm, errors, _ = S.validate(tmpl)
     assert not errors, errors
     by_id = {s["id"]: s for s in norm["steps"]}

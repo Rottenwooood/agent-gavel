@@ -17,8 +17,16 @@ def _same_target(a, b):
     return (a or {}).get("target") == (b or {}).get("target") and a.get("target")
 
 
-def compile(recorded_steps, *, template_id, site="", desc="",
-            parameterize=None, sensitive=None, auto_checkpoint=False):
+def compile(
+    recorded_steps,
+    *,
+    template_id,
+    site="",
+    desc="",
+    parameterize=None,
+    sensitive=None,
+    auto_checkpoint=False,
+):
     """recorded_steps: [{"action": {...}, "url_before", "url_after"}, ...]"""
     parameterize = parameterize or {}
     sensitive = set(sensitive or [])
@@ -36,15 +44,19 @@ def compile(recorded_steps, *, template_id, site="", desc="",
     while i < len(steps):
         cur = steps[i]
         act = dict(_action_of(cur))
-        if act.get("type") == "type" and i + 1 < len(steps) \
-                and _action_of(steps[i + 1]).get("type") == "type" \
-                and _same_target(act, _action_of(steps[i + 1])):
+        if (
+            act.get("type") == "type"
+            and i + 1 < len(steps)
+            and _action_of(steps[i + 1]).get("type") == "type"
+            and _same_target(act, _action_of(steps[i + 1]))
+        ):
             text = _text_of(act) + _text_of(_action_of(steps[i + 1]))
             nxt = steps[i + 1]
-            cur = {"action": {"type": "fill", "target": act.get("target"),
-                              "value": text},
-                   "url_before": cur.get("url_before"),
-                   "url_after": nxt.get("url_after")}
+            cur = {
+                "action": {"type": "fill", "target": act.get("target"), "value": text},
+                "url_before": cur.get("url_before"),
+                "url_after": nxt.get("url_after"),
+            }
             i += 2
         else:
             i += 1
@@ -54,8 +66,10 @@ def compile(recorded_steps, *, template_id, site="", desc="",
     # 3) 参数化 + 4) 敏感标记
     params = {}
     for name in parameterize:
-        params[name] = {"type": "string",
-                        "sensitive": name in sensitive or name.upper() in sensitive}
+        params[name] = {
+            "type": "string",
+            "sensitive": name in sensitive or name.upper() in sensitive,
+        }
 
     def _param_value(v):
         for name, actual in parameterize.items():
@@ -76,8 +90,12 @@ def compile(recorded_steps, *, template_id, site="", desc="",
         # 5) 保留录制时用过的断言（checkpoint）；没有则按 url 变化补 url_contains
         if st.get("checkpoint"):
             step["checkpoint"] = st["checkpoint"]
-        elif auto_checkpoint and st.get("url_before") and st.get("url_after") \
-                and st["url_before"] != st["url_after"]:
+        elif (
+            auto_checkpoint
+            and st.get("url_before")
+            and st.get("url_after")
+            and st["url_before"] != st["url_after"]
+        ):
             p = urlparse(st["url_after"])
             token = (p.path or "").rstrip("/").split("/")[-1] or p.netloc
             if token:
@@ -95,8 +113,7 @@ def compile(recorded_steps, *, template_id, site="", desc="",
         "backend_requirements": ["semantic"],
         "preconditions": [],
         "outputs": [],
-        "failure_policy": {"retry": "safe_only",
-                           "repair": "explore_local_step"},
+        "failure_policy": {"retry": "safe_only", "repair": "explore_local_step"},
         "task": desc,
         "login_required": False,
         "author": "",

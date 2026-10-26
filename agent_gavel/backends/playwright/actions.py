@@ -8,18 +8,24 @@ from ...core.errors import GavelError
 
 
 def _done(handle, action, url_before, *, wait_navigation=False, timeout_s=30.0):
-    result = {"action": action, "action_completed": True,
-              "url_before": url_before, "url_after": handle.page.url}
+    result = {
+        "action": action,
+        "action_completed": True,
+        "url_before": url_before,
+        "url_after": handle.page.url,
+    }
     return result
 
 
 async def do_click(backend, handle, target, *, timeout_s=30.0, **kw):
     loc = await backend.resolve(handle.page, target)
     url_before = handle.page.url
-    await loc.click(button=kw.get("button", "left"),
-                    click_count=kw.get("count", 1),
-                    timeout=timeout_s * 1000,
-                    force=kw.get("force", False))
+    await loc.click(
+        button=kw.get("button", "left"),
+        click_count=kw.get("count", 1),
+        timeout=timeout_s * 1000,
+        force=kw.get("force", False),
+    )
     return _done(handle, "click", url_before)
 
 
@@ -49,10 +55,9 @@ async def do_press(backend, handle, target, *, timeout_s=30.0, **kw):
     result = _done(handle, "press", url_before)
     if kw.get("wait_navigation"):
         try:
-            await handle.page.wait_for_load_state(
-                "domcontentloaded", timeout=timeout_s * 1000)
+            await handle.page.wait_for_load_state("domcontentloaded", timeout=timeout_s * 1000)
         except Exception:
-            pass
+            pass  # silent-ok: best-effort，失败不影响主流程
         result["url_after"] = handle.page.url
     return result
 

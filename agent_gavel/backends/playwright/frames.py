@@ -6,6 +6,6 @@ def frame_root(page, frame):
     if not frame:
         return page
     root = page
-    for item in (frame if isinstance(frame, list) else [frame]):
+    for item in frame if isinstance(frame, list) else [frame]:
         root = root.frame_locator(item)
     return root

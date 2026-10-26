@@ -66,50 +66,95 @@ def default_source():
 # ---------------- 复制选择 ----------------
 
 _CACHE_DIRS = {
-    "Default/Cache", "Default/Code Cache", "Default/GPUCache",
-    "Default/DawnCache", "Default/DawnGraphiteCache",
-    "Default/DawnWebGPUCache", "Default/GrShaderCache",
-    "Default/ShaderCache", "Default/Service Worker/CacheStorage",
-    "Default/Service Worker/ScriptCache", "GraphiteDawnCache",
-    "component_crx_cache", "extensions_crx_cache", "Crash Reports",
-    "Crashpad", "Segmentation Platform", "Shared Dictionary",
-    "optimization_guide_hint_cache_store", "Safe Browsing",
-    "BrowserMetrics", "MEIPreload",
+    "Default/Cache",
+    "Default/Code Cache",
+    "Default/GPUCache",
+    "Default/DawnCache",
+    "Default/DawnGraphiteCache",
+    "Default/DawnWebGPUCache",
+    "Default/GrShaderCache",
+    "Default/ShaderCache",
+    "Default/Service Worker/CacheStorage",
+    "Default/Service Worker/ScriptCache",
+    "GraphiteDawnCache",
+    "component_crx_cache",
+    "extensions_crx_cache",
+    "Crash Reports",
+    "Crashpad",
+    "Segmentation Platform",
+    "Shared Dictionary",
+    "optimization_guide_hint_cache_store",
+    "Safe Browsing",
+    "BrowserMetrics",
+    "MEIPreload",
 }
-_CACHE_FILES = {"BrowserMetrics-spare.pma", "SingletonLock", "SingletonCookie",
-                "SingletonSocket", "lockfile", "Local State.bak"}
+_CACHE_FILES = {
+    "BrowserMetrics-spare.pma",
+    "SingletonLock",
+    "SingletonCookie",
+    "SingletonSocket",
+    "lockfile",
+    "Local State.bak",
+}
 
 _PRIVACY_FILES = {
-    "Default/Login Data", "Default/Login Data-journal",
-    "Default/Login Data For Account", "Default/Web Data",
-    "Default/Web Data-journal", "Default/Account Web Data",
-    "Default/Account Web Data-journal", "Default/Sync Data",
-    "Default/Platform Notifications", "Default/GCM Store",
-    "Default/Account Tracker", "Default/Visited Links",
-    "Default/Media History", "Default/Media History-journal",
-    "Default/Network/Trust Tokens", "Default/Network/Trust Tokens-journal",
-    "Default/Network/Reporting and NEL", "Default/Network/SCT Auditing",
-    "Default/Sessions", "Current Session", "Current Tabs",
-    "Last Session", "Last Tabs",
+    "Default/Login Data",
+    "Default/Login Data-journal",
+    "Default/Login Data For Account",
+    "Default/Web Data",
+    "Default/Web Data-journal",
+    "Default/Account Web Data",
+    "Default/Account Web Data-journal",
+    "Default/Sync Data",
+    "Default/Platform Notifications",
+    "Default/GCM Store",
+    "Default/Account Tracker",
+    "Default/Visited Links",
+    "Default/Media History",
+    "Default/Media History-journal",
+    "Default/Network/Trust Tokens",
+    "Default/Network/Trust Tokens-journal",
+    "Default/Network/Reporting and NEL",
+    "Default/Network/SCT Auditing",
+    "Default/Sessions",
+    "Current Session",
+    "Current Tabs",
+    "Last Session",
+    "Last Tabs",
 }
 _PRIVACY_PREFIX = (
-    "Default/GCM Store", "Default/Platform Notifications",
-    "Default/Sync Data", "Safe Browsing", "Default/Safe Browsing",
+    "Default/GCM Store",
+    "Default/Platform Notifications",
+    "Default/Sync Data",
+    "Safe Browsing",
+    "Default/Safe Browsing",
 )
 
 _CRED_DIRS = {
-    "Default/Local Storage", "Default/IndexedDB", "Default/Service Worker",
-    "Default/Session Storage", "Default/databases", "Default/File System",
-    "Default/WebStorage", "Default/Shared Dictionary",
+    "Default/Local Storage",
+    "Default/IndexedDB",
+    "Default/Service Worker",
+    "Default/Session Storage",
+    "Default/databases",
+    "Default/File System",
+    "Default/WebStorage",
+    "Default/Shared Dictionary",
 }
-_CRED_FILES = {"Default/Cookies", "Default/Cookies-journal",
-               "Default/Network/Cookies", "Default/Network/Cookies-journal"}
+_CRED_FILES = {
+    "Default/Cookies",
+    "Default/Cookies-journal",
+    "Default/Network/Cookies",
+    "Default/Network/Cookies-journal",
+}
 _HISTORY_FILES = {"Default/History", "Default/History-journal"}
 
 _EXT_DIRS = {
-    "Default/Extensions", "Default/Extension State",
-    "Default/Local Extension Settings", "Default/Managed Extension Settings",
-    "Default/Extension Rules", "Default/Extension Scripts",
+    "Default/Extensions",
+    "Default/Extension State",
+    "Default/Local Extension Settings",
+    "Default/Managed Extension Settings",
+    "Default/Extension Rules",
+    "Default/Extension Scripts",
     "Default/Extension Activity",
 }
 
@@ -153,34 +198,44 @@ def _sanitize_json(path, drop_keys):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
     except Exception:
-        pass
+        pass  # silent-ok: best-effort，失败不影响主流程
 
 
-def copy_profile(*, source=None, name=None, tier="default",
-                 include_history=True, include_extensions=False,
-                 force=False) -> dict:
+def copy_profile(
+    *,
+    source=None,
+    name=None,
+    tier="default",
+    include_history=True,
+    include_extensions=False,
+    force=False,
+) -> dict:
     """从用户资料目录复制一份新副本；无副本时自动设为当前。"""
     if tier not in _TIERS:
         raise GavelError("bad_args", f"tier 取 {list(_TIERS)}")
     source = source or default_source()
     if not os.path.isdir(source):
-        raise GavelError("profile_source_missing",
-                         f"用户资料目录不存在：{source}",
-                         hint="用 AGENT_GAVEL_CHROME_USER_DATA 指定")
+        raise GavelError(
+            "profile_source_missing",
+            f"用户资料目录不存在：{source}",
+            hint="用 AGENT_GAVEL_CHROME_USER_DATA 指定",
+        )
     if os.path.exists(os.path.join(source, "SingletonLock")) and not force:
-        raise GavelError("profile_source_locked",
-                         f"用户资料目录正被占用：{source}",
-                         hint="先关掉用户的 Chrome 再复制（force 可强行，但可能不一致）")
+        raise GavelError(
+            "profile_source_locked",
+            f"用户资料目录正被占用：{source}",
+            hint="先关掉用户的 Chrome 再复制（force 可强行，但可能不一致）",
+        )
     if name is None:
         name = "snap-" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     if not _safe_name(name):
-        raise GavelError("bad_args", f"副本名非法：{name!r}",
-                         hint="只允许字母/数字/._-")
+        raise GavelError("bad_args", f"副本名非法：{name!r}", hint="只允许字母/数字/._-")
     root = profiles_root()
     dest = os.path.join(root, name)
     if os.path.exists(dest):
-        raise GavelError("profile_exists", f"副本已存在：{name}",
-                         hint="换一个 name，或先 browser_profile_delete")
+        raise GavelError(
+            "profile_exists", f"副本已存在：{name}", hint="换一个 name，或先 browser_profile_delete"
+        )
     os.makedirs(dest, exist_ok=True)
 
     copied = skipped = 0
@@ -191,16 +246,24 @@ def copy_profile(*, source=None, name=None, tier="default",
         keep = []
         for d in dirs:
             rel = f"{rel_dir}/{d}" if rel_dir else d
-            if _skip(rel, tier=tier, include_history=include_history,
-                     include_extensions=include_extensions):
+            if _skip(
+                rel,
+                tier=tier,
+                include_history=include_history,
+                include_extensions=include_extensions,
+            ):
                 skipped += 1
             else:
                 keep.append(d)
         dirs[:] = keep
         for fn in files:
             rel = f"{rel_dir}/{fn}" if rel_dir else fn
-            if _skip(rel, tier=tier, include_history=include_history,
-                     include_extensions=include_extensions):
+            if _skip(
+                rel,
+                tier=tier,
+                include_history=include_history,
+                include_extensions=include_extensions,
+            ):
                 skipped += 1
                 continue
             src = os.path.join(cur, fn)
@@ -213,21 +276,40 @@ def copy_profile(*, source=None, name=None, tier="default",
                 skipped += 1
 
     # 清洗会绑定账号/设备的字段（保留 cookies 解密所需的 os_crypt）
-    _sanitize_json(os.path.join(dest, "Local State"),
-                   drop_keys={"user_experience_metrics", "uninstall_metrics",
-                              "google.services", "signin", "sync", "gaia",
-                              "account_info", "account_tracker_service_last_update"})
-    _sanitize_json(os.path.join(dest, "Default", "Preferences"),
-                   drop_keys={"account_info", "sync", "signin", "google"})
-    _sanitize_json(os.path.join(dest, "Default", "Secure Preferences"),
-                   drop_keys={"account_info", "sync", "signin", "google"})
+    _sanitize_json(
+        os.path.join(dest, "Local State"),
+        drop_keys={
+            "user_experience_metrics",
+            "uninstall_metrics",
+            "google.services",
+            "signin",
+            "sync",
+            "gaia",
+            "account_info",
+            "account_tracker_service_last_update",
+        },
+    )
+    _sanitize_json(
+        os.path.join(dest, "Default", "Preferences"),
+        drop_keys={"account_info", "sync", "signin", "google"},
+    )
+    _sanitize_json(
+        os.path.join(dest, "Default", "Secure Preferences"),
+        drop_keys={"account_info", "sync", "signin", "google"},
+    )
 
     size = _dir_size(dest)
-    manifest = {"name": name, "source": source, "created_at": time.time(),
-                "tier": tier, "include_history": include_history,
-                "include_extensions": include_extensions,
-                "copied_files": copied, "skipped_files": skipped,
-                "size_bytes": size}
+    manifest = {
+        "name": name,
+        "source": source,
+        "created_at": time.time(),
+        "tier": tier,
+        "include_history": include_history,
+        "include_extensions": include_extensions,
+        "copied_files": copied,
+        "skipped_files": skipped,
+        "size_bytes": size,
+    }
     with open(os.path.join(dest, "profile.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
@@ -235,14 +317,19 @@ def copy_profile(*, source=None, name=None, tier="default",
     if active_name() is None:
         set_active(name)
         became_active = True
-    return {"status": "ok", "created": name, "became_active": became_active,
-            "active": active_name(), "profiles": list_profiles(),
-            "manifest": manifest}
+    return {
+        "status": "ok",
+        "created": name,
+        "became_active": became_active,
+        "active": active_name(),
+        "profiles": list_profiles(),
+        "manifest": manifest,
+    }
 
 
 def list_profiles() -> list:
     root = profiles_root()
-    out = []
+    out: list = []
     if not os.path.isdir(root):
         return out
     active = active_name()
@@ -256,12 +343,18 @@ def list_profiles() -> list:
                 man = json.load(f)
         except Exception:
             man = {}
-        out.append({"name": d, "active": d == active,
-                    "tier": man.get("tier"), "created_at": man.get("created_at"),
-                    "size_bytes": man.get("size_bytes") or _dir_size(p),
-                    "source": man.get("source"),
-                    "include_history": man.get("include_history"),
-                    "include_extensions": man.get("include_extensions")})
+        out.append(
+            {
+                "name": d,
+                "active": d == active,
+                "tier": man.get("tier"),
+                "created_at": man.get("created_at"),
+                "size_bytes": man.get("size_bytes") or _dir_size(p),
+                "source": man.get("source"),
+                "include_history": man.get("include_history"),
+                "include_extensions": man.get("include_extensions"),
+            }
+        )
     return out
 
 
@@ -280,9 +373,8 @@ def delete_profile(name) -> dict:
             try:
                 os.remove(_active_file())
             except Exception:
-                pass
-    return {"status": "ok", "deleted": name, "active": active_name(),
-            "profiles": list_profiles()}
+                pass  # silent-ok: best-effort，失败不影响主流程
+    return {"status": "ok", "deleted": name, "active": active_name(), "profiles": list_profiles()}
 
 
 def _safe_name(name) -> bool:
@@ -298,5 +390,5 @@ def _dir_size(path):
             try:
                 total += os.path.getsize(os.path.join(cur, fn))
             except Exception:
-                pass
+                pass  # silent-ok: best-effort，失败不影响主流程
     return total

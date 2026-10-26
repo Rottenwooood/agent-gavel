@@ -9,49 +9,108 @@ from dataclasses import dataclass
 
 from .errors import GavelError
 
-READ_KINDS = frozenset({"url", "title", "text", "value", "count", "html",
-                        "expr", "attr"})
-OPS = frozenset({"eq", "neq", "contains", "not_contains", "regex", "exists",
-                 "not_exists", "gt", "lt", "gte", "lte", "count_eq",
-                 "count_gte", "count_gt"})
+READ_KINDS = frozenset({"url", "title", "text", "value", "count", "html", "expr", "attr"})
+OPS = frozenset(
+    {
+        "eq",
+        "neq",
+        "contains",
+        "not_contains",
+        "regex",
+        "exists",
+        "not_exists",
+        "gt",
+        "lt",
+        "gte",
+        "lte",
+        "count_eq",
+        "count_gte",
+        "count_gt",
+    }
+)
 
-_READ_PREFIX = {"url": "url", "title": "title", "text": "text",
-                "value": "value", "count": "count", "html": "html",
-                "expr": "expr", "attr": "attr", "selector": "text"}
-_OP_SUFFIXES = ("not_contains", "count_gte", "count_gt", "count_eq",
-                "contains", "not_exists", "exists", "neq", "eq", "regex",
-                "gte", "lte", "gt", "lt")
+_READ_PREFIX = {
+    "url": "url",
+    "title": "title",
+    "text": "text",
+    "value": "value",
+    "count": "count",
+    "html": "html",
+    "expr": "expr",
+    "attr": "attr",
+    "selector": "text",
+}
+_OP_SUFFIXES = (
+    "not_contains",
+    "count_gte",
+    "count_gt",
+    "count_eq",
+    "contains",
+    "not_exists",
+    "exists",
+    "neq",
+    "eq",
+    "regex",
+    "gte",
+    "lte",
+    "gt",
+    "lt",
+)
 _CHECK_FIELDS = ("read", "selector", "expr", "value", "expected")
 
 
 @dataclass(frozen=True)
 class Check:
-    name: str = None
-    read: str = None
+    name: str | None = None
+    read: str | None = None
     op: str = "eq"
     expected: object = None
-    selector: str = None
-    attr: str = None
-    expr: str = None
+    selector: str | None = None
+    attr: str | None = None
+    expr: str | None = None
     frame: object = None
 
     def to_dict(self):
-        return {k: v for k, v in {
-            "name": self.name, "read": self.read, "op": self.op,
-            "expected": self.expected, "selector": self.selector,
-            "attr": self.attr, "expr": self.expr, "frame": self.frame,
-        }.items() if v is not None}
+        return {
+            k: v
+            for k, v in {
+                "name": self.name,
+                "read": self.read,
+                "op": self.op,
+                "expected": self.expected,
+                "selector": self.selector,
+                "attr": self.attr,
+                "expr": self.expr,
+                "frame": self.frame,
+            }.items()
+            if v is not None
+        }
 
 
 def _check(**kwargs):
     return Check(**kwargs)
 
 
+def read_kind(check):
+    """按显式 read、name、expr/attr/selector 顺序判定读什么。"""
+    read = check.read
+    if read is None:
+        if check.name in READ_KINDS:
+            read = check.name
+        elif check.expr is not None:
+            read = "expr"
+        elif check.attr:
+            read = "attr"
+        elif check.selector:
+            read = "text"
+    return read
+
+
 def _parse_one(name, value):
     read, op = None, "eq"
     for suffix in _OP_SUFFIXES:
-        if name.endswith("_" + suffix) and name[:-len(suffix) - 1] in _READ_PREFIX:
-            read = _READ_PREFIX[name[:-len(suffix) - 1]]
+        if name.endswith("_" + suffix) and name[: -len(suffix) - 1] in _READ_PREFIX:
+            read = _READ_PREFIX[name[: -len(suffix) - 1]]
             op = suffix
             break
     if isinstance(value, dict):
@@ -72,10 +131,21 @@ def _parse_one(name, value):
             elif selector:
                 read = "text"
         if item:
-            raise GavelError("bad_check", f"未识别的断言字段：{sorted(item)}",
-                             hint="用 read/op/value/selector/attr/expr/frame")
-        return _check(name=name, read=read, op=op, expected=expected,
-                      selector=selector, attr=attr, expr=expr, frame=frame)
+            raise GavelError(
+                "bad_check",
+                f"未识别的断言字段：{sorted(item)}",
+                hint="用 read/op/value/selector/attr/expr/frame",
+            )
+        return _check(
+            name=name,
+            read=read,
+            op=op,
+            expected=expected,
+            selector=selector,
+            attr=attr,
+            expr=expr,
+            frame=frame,
+        )
     return _check(name=name, read=read, op=op, expected=value)
 
 
@@ -98,8 +168,7 @@ def parse(raw):
             frame = item.pop("frame", None)
             name = item.pop("name", None) or read or "check"
             if item:
-                raise GavelError("bad_check",
-                                 f"未识别的断言字段：{sorted(item)}")
+                raise GavelError("bad_check", f"未识别的断言字段：{sorted(item)}")
             if read is None:
                 if expr is not None:
                     read = "expr"
@@ -107,15 +176,23 @@ def parse(raw):
                     read = "attr"
                 elif selector:
                     read = "text"
-            return [_check(name=name, read=read, op=op, expected=expected,
-                           selector=selector, attr=attr, expr=expr,
-                           frame=frame)]
+            return [
+                _check(
+                    name=name,
+                    read=read,
+                    op=op,
+                    expected=expected,
+                    selector=selector,
+                    attr=attr,
+                    expr=expr,
+                    frame=frame,
+                )
+            ]
         if "op" in raw:
             keys = [k for k in raw if k in _READ_PREFIX]
             if len(keys) == 1:
                 key = keys[0]
-                return [_check(name=key, read=_READ_PREFIX[key],
-                               op=raw["op"], expected=raw[key])]
+                return [_check(name=key, read=_READ_PREFIX[key], op=raw["op"], expected=raw[key])]
             raise GavelError("bad_check", f"顶层 op 无法绑定目标：{raw}")
         return [_parse_one(name, value) for name, value in raw.items()]
     if isinstance(raw, list):
@@ -154,5 +231,13 @@ def from_checkpoint(cp):
     if ctype not in _CHECKPOINT_OPS:
         raise GavelError("bad_checkpoint", f"未知 checkpoint 类型：{ctype}")
     name, read, op = _CHECKPOINT_OPS[ctype]
-    return [_check(name=name, read=read, op=op, expected=cp.get("value"),
-                   selector=cp.get("selector"), frame=cp.get("frame"))]
+    return [
+        _check(
+            name=name,
+            read=read,
+            op=op,
+            expected=cp.get("value"),
+            selector=cp.get("selector"),
+            frame=cp.get("frame"),
+        )
+    ]

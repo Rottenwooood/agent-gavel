@@ -9,12 +9,16 @@ from .common import backend, guard, ids
 def register_page_tools(mcp):
     @mcp.tool()
     @guard
-    async def page_navigate(page_id: str = None, url: str = None,
-                            wait_until: str = "domcontentloaded",
-                            timeout_s: float = 30.0,
-                            assertions: dict = None, wait_s: float = 6.0,
-                            fail_on_http_error: bool = False,
-                            min_text_chars: int = None):
+    async def page_navigate(
+        page_id: str = None,
+        url: str = None,
+        wait_until: str = "domcontentloaded",
+        timeout_s: float = 30.0,
+        assertions: dict = None,
+        wait_s: float = 6.0,
+        fail_on_http_error: bool = False,
+        min_text_chars: int = None,
+    ):
         """导航到 URL 并（可选）断言。唯一的导航入口。
 
         assertions 格式（与 expect 一致）：{名字: {op, value, read?, selector?, attr?, expr?}}，
@@ -25,6 +29,7 @@ def register_page_tools(mcp):
         - 断言结果：pass（满足）/ fail（未满足）/ ambiguous（没过但页面变了，附 diff）。
         """
         from ..runtime import get_runtime
+
         rt = get_runtime()
         if not url:
             raise GavelError("bad_args", "需要 url")
@@ -35,9 +40,9 @@ def register_page_tools(mcp):
         url_before = handle.page.url
         res = await handle.actor.submit(
             "navigate",
-            lambda: be.goto(handle, url, wait_until=wait_until,
-                            timeout_s=timeout_s),
-            timeout_s=timeout_s + 5)
+            lambda: be.goto(handle, url, wait_until=wait_until, timeout_s=timeout_s),
+            timeout_s=timeout_s + 5,
+        )
         out = {"status": "ok", **ids(handle), **res}
         code = res.get("status_code")
         if isinstance(code, int) and code >= 400:
@@ -51,7 +56,9 @@ def register_page_tools(mcp):
             tl = await handle.actor.submit(
                 "content_len",
                 lambda: handle.page.evaluate(
-                    "() => document.body ? document.body.innerText.length : 0"))
+                    "() => document.body ? document.body.innerText.length : 0"
+                ),
+            )
         except Exception:
             tl = None
         if isinstance(tl, int):
@@ -61,54 +68,60 @@ def register_page_tools(mcp):
                 out["reason"] = "empty_page"
             elif min_text_chars is None and tl < 20:
                 prev = out.get("warning")
-                out["warning"] = f"{prev} page_looks_empty".strip() if prev \
-                    else "page_looks_empty"
+                out["warning"] = f"{prev} page_looks_empty".strip() if prev else "page_looks_empty"
         passed = None
         if assertions:
-            ev = await be.evaluate_checks(handle, assertions,
-                                          before_sig=before, wait_s=wait_s)
+            ev = await be.evaluate_checks(handle, assertions, before_sig=before, wait_s=wait_s)
             out["status"] = ev["status"]
             out["assertions"] = ev["assertions"]
             passed = ev["status"] == "pass"
             if ev.get("diff") is not None:
                 out["diff"] = ev["diff"]
         if rt.recorder is not None and rt.recorder.active:
-            rt.recorder.record(handle, {"type": "navigate", "url": url},
-                               url_before=url_before, url_after=handle.page.url,
-                               checkpoint=assertions if passed else None)
+            rt.recorder.record(
+                handle,
+                {"type": "navigate", "url": url},
+                url_before=url_before,
+                url_after=handle.page.url,
+                checkpoint=assertions if passed else None,
+            )
         return out
 
     @mcp.tool()
     @guard
-    async def page_snapshot(page_id: str = None, level: str = "summary",
-                            limit: int = 50):
+    async def page_snapshot(page_id: str = None, level: str = "summary", limit: int = 50):
         """页面摘要（summary/interactive/full）。页面内容标记 untrusted。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
         res = await handle.actor.submit(
-            "snapshot", lambda: be.retry_on_nav_race(
-                handle.page, lambda: be.snapshot(handle.page, level=level,
-                                                 limit=limit)))
+            "snapshot",
+            lambda: be.retry_on_nav_race(
+                handle.page, lambda: be.snapshot(handle.page, level=level, limit=limit)
+            ),
+        )
         return {"status": "ok", **ids(handle), **res}
 
     @mcp.tool()
     @guard
-    async def page_text(page_id: str = None, selector: str = None,
-                        mode: str = "text", max_chars: int = 50000):
+    async def page_text(
+        page_id: str = None, selector: str = None, mode: str = "text", max_chars: int = 50000
+    ):
         """取页面/元素文本。mode: text|content|html|links。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
         res = await handle.actor.submit(
             "page_text",
             lambda: be.retry_on_nav_race(
-                handle.page,
-                lambda: be.text(handle.page, selector=selector, mode=mode)))
-        if mode != "links" and isinstance(res.get("text"), str) \
-                and len(res["text"]) > max_chars:
+                handle.page, lambda: be.text(handle.page, selector=selector, mode=mode)
+            ),
+        )
+        if mode != "links" and isinstance(res.get("text"), str) and len(res["text"]) > max_chars:
             res["text"] = res["text"][:max_chars]
             res["truncated"] = True
         return {"status": "ok", **ids(handle), "untrusted": True, **res}
@@ -118,24 +131,23 @@ def register_page_tools(mcp):
     async def page_links(page_id: str = None, max_links: int = 500):
         """取页面所有链接 [{text, href}]。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
-        res = await handle.actor.submit(
-            "page_links", lambda: be.text(handle.page, mode="links"))
+        res = await handle.actor.submit("page_links", lambda: be.text(handle.page, mode="links"))
         links = res.get("links", [])[:max_links]
-        return {"status": "ok", **ids(handle), "items": links,
-                "total": len(res.get("links", []))}
+        return {"status": "ok", **ids(handle), "items": links, "total": len(res.get("links", []))}
 
     @mcp.tool()
     @guard
-    async def page_read(page_id: str = None, page_features: dict = None,
-                        selector: str = None):
+    async def page_read(page_id: str = None, page_features: dict = None, selector: str = None):
         """纯读取值（不判定/不重试）：{名字: JS表达式} → 实际值。
 
         selector 给定时先等它出现。表达式支持函数形式 `"() => { ...; return ...; }"`。
         """
         from ..runtime import get_runtime
+
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
@@ -146,18 +158,24 @@ def register_page_tools(mcp):
             try:
                 await handle.page.wait_for_selector(selector, timeout=5000)
             except Exception:
-                return {"status": "no_match", **ids(handle),
-                        "selector": selector,
-                        "hint": "selector 未在 5s 内出现"}
+                return {
+                    "status": "fail",
+                    "reason": "selector_not_found",
+                    **ids(handle),
+                    "selector": selector,
+                    "hint": "selector 未在 5s 内出现",
+                }
         res = await handle.actor.submit(
             "page_read",
-            lambda: be.retry_on_nav_race(
-                handle.page, lambda: be.read(handle.page, features)))
-        out = {"status": "ok", **ids(handle), "untrusted": True,
-               "features": res["features"]}
+            lambda: be.retry_on_nav_race(handle.page, lambda: be.read(handle.page, features)),
+        )
+        out = {"status": "ok", **ids(handle), "untrusted": True, "features": res["features"]}
         if res["errors"]:
             out["errors"] = res["errors"]
-            out["status"] = "partial_error" if res["features"] else "error"
+            if res["features"]:
+                out["complete"] = False
+            else:
+                out["status"] = "error"
         empty = [k for k, v in res["features"].items() if v in (None, "", [])]
         if empty:
             out["empty"] = empty
@@ -165,15 +183,21 @@ def register_page_tools(mcp):
 
     @mcp.tool()
     @guard
-    async def page_explore(page_id: str = None, tag: str = None,
-                          text_contains: str = None, head: int = None,
-                          tail: int = None, include_all: bool = False,
-                          include_hidden: bool = False):
+    async def page_explore(
+        page_id: str = None,
+        tag: str = None,
+        text_contains: str = None,
+        head: int = None,
+        tail: int = None,
+        include_all: bool = False,
+        include_hidden: bool = False,
+    ):
         """枚举可交互元素，给验证过唯一的锚点 + 候选 locator。
 
         裁剪：tag / text_contains / head / tail；include_all 返回无锚点元素。
         """
         from ..runtime import get_runtime
+
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
@@ -181,18 +205,27 @@ def register_page_tools(mcp):
             "page_explore",
             lambda: be.retry_on_nav_race(
                 handle.page,
-                lambda: be.explore(handle.page, tag=tag,
-                                   text_contains=text_contains, head=head,
-                                   tail=tail, include_all=include_all,
-                                   include_hidden=include_hidden)))
+                lambda: be.explore(
+                    handle.page,
+                    tag=tag,
+                    text_contains=text_contains,
+                    head=head,
+                    tail=tail,
+                    include_all=include_all,
+                    include_hidden=include_hidden,
+                ),
+            ),
+        )
         return {"status": "ok", **ids(handle), **res}
 
     @mcp.tool()
     @guard
-    async def page_find_text(page_id: str = None, text: str = None,
-                             limit: int = 10, include_hidden: bool = False):
+    async def page_find_text(
+        page_id: str = None, text: str = None, limit: int = 10, include_hidden: bool = False
+    ):
         """按文本定位到"最近的可点元素"并给稳定锚点（用于点"最新排序"这类文本控件）。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         if not text:
             raise GavelError("bad_args", "需要 text")
@@ -202,8 +235,9 @@ def register_page_tools(mcp):
             "page_find_text",
             lambda: be.retry_on_nav_race(
                 handle.page,
-                lambda: be.find_text(handle.page, text, limit=limit,
-                                     include_hidden=include_hidden)))
+                lambda: be.find_text(handle.page, text, limit=limit, include_hidden=include_hidden),
+            ),
+        )
         return {"status": "ok", **ids(handle), **res}
 
     @mcp.tool()
@@ -211,44 +245,56 @@ def register_page_tools(mcp):
     async def page_meta(page_id: str = None):
         """结构化页面元信息：url/title/描述/canonical/og/h1/h2/计数/正文长度。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
         res = await handle.actor.submit(
             "page_meta",
-            lambda: be.retry_on_nav_race(handle.page,
-                                         lambda: be.page_meta(handle.page)))
+            lambda: be.retry_on_nav_race(handle.page, lambda: be.page_meta(handle.page)),
+        )
         return {"status": "ok", **ids(handle), "untrusted": True, **res}
 
     @mcp.tool()
     @guard
-    async def page_screenshot(page_id: str = None, full_page: bool = False,
-                              selector: str = None, save_to: str = None):
+    async def page_screenshot(
+        page_id: str = None, full_page: bool = False, selector: str = None, save_to: str = None
+    ):
         """截图 → artifact。返回 artifact_id + 坐标元数据。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
         res = await handle.actor.submit(
             "page_screenshot",
-            lambda: be.screenshot(handle.page, full_page=full_page,
-                                  selector=selector))
+            lambda: be.screenshot(handle.page, full_page=full_page, selector=selector),
+        )
         info = await asyncio.to_thread(
-            rt.artifacts.save_bytes, res["data"],
-            filename=f"{handle.page_id}.png", kind="screenshot",
-            mime_type="image/png", source_url=handle.page.url,
+            rt.artifacts.save_bytes,
+            res["data"],
+            filename=f"{handle.page_id}.png",
+            kind="screenshot",
+            mime_type="image/png",
+            source_url=handle.page.url,
             session_id=handle.context.lease_session_id(),
-            page_id=handle.page_id)
-        out = {"status": "ok", **ids(handle),
-               "artifact_id": info["artifact_id"],
-               "width": res["width"], "height": res["height"],
-               "coordinate_width": res["width"],
-               "coordinate_height": res["height"], "scale": 1.0,
-               "device_scale_factor": res["device_scale_factor"]}
+            page_id=handle.page_id,
+        )
+        out = {
+            "status": "ok",
+            **ids(handle),
+            "artifact_id": info["artifact_id"],
+            "width": res["width"],
+            "height": res["height"],
+            "coordinate_width": res["width"],
+            "coordinate_height": res["height"],
+            "scale": 1.0,
+            "device_scale_factor": res["device_scale_factor"],
+        }
         if save_to:
             exp = await asyncio.to_thread(
-                rt.artifacts.export, info["artifact_id"], save_to,
-                policies=rt.policies)
+                rt.artifacts.export, info["artifact_id"], save_to, policies=rt.policies
+            )
             out["exported"] = True
             out["exported_filename"] = exp["filename"]
         return out
@@ -258,23 +304,31 @@ def register_page_tools(mcp):
     async def page_pdf(page_id: str = None, save_to: str = None):
         """生成页面 PDF → artifact（无头与有头均支持）。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
         res = await handle.actor.submit("page_pdf", lambda: be.pdf(handle))
         info = await asyncio.to_thread(
-            rt.artifacts.save_bytes, res["data"],
-            filename=f"{handle.page_id}.pdf", kind="pdf",
-            mime_type="application/pdf", source_url=handle.page.url,
+            rt.artifacts.save_bytes,
+            res["data"],
+            filename=f"{handle.page_id}.pdf",
+            kind="pdf",
+            mime_type="application/pdf",
+            source_url=handle.page.url,
             session_id=handle.context.lease_session_id(),
-            page_id=handle.page_id)
-        out = {"status": "ok", **ids(handle),
-               "artifact_id": info["artifact_id"],
-               "size_bytes": info["size_bytes"]}
+            page_id=handle.page_id,
+        )
+        out = {
+            "status": "ok",
+            **ids(handle),
+            "artifact_id": info["artifact_id"],
+            "size_bytes": info["size_bytes"],
+        }
         if save_to:
             exp = await asyncio.to_thread(
-                rt.artifacts.export, info["artifact_id"], save_to,
-                policies=rt.policies)
+                rt.artifacts.export, info["artifact_id"], save_to, policies=rt.policies
+            )
             out["exported"] = True
             out["exported_filename"] = exp["filename"]
         return out

@@ -48,10 +48,7 @@ class PolicyManager:
         host = (urlparse(url).hostname or "").lower()
         if not host:
             return True
-        for d in self.domains:
-            if host == d or host.endswith("." + d):
-                return True
-        return False
+        return any(host == d or host.endswith("." + d) for d in self.domains)
 
     def check_domain(self, url):
         """非空 allowlist 时校验 url 主机；越界抛 policy_blocked。"""

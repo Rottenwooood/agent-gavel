@@ -22,8 +22,9 @@ async def test_performance_gates(runtime, webapp_server, capsys):
     assert lat["click"]["p95"] < 100, lat["click"]
     assert lat["fill"]["p95"] < 100, lat["fill"]
     # 跨页并发确实并行
-    assert report["cross_page_speedup"] and report["cross_page_speedup"] > 1.5, \
-        report["cross_page_speedup"]
+    assert report["cross_page_speedup"] and report["cross_page_speedup"] > 1.5, report[
+        "cross_page_speedup"
+    ]
     # 1000 次操作不泄漏 page/context；RSS 增长受控
     lk = report["leak"]
     assert lk["pages_after"] == lk["pages_before"], lk

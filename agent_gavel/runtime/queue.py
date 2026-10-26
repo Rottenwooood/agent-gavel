@@ -16,11 +16,20 @@ from ..core.errors import GavelError, wrap_exception
 
 
 class Operation:
-    __slots__ = ("operation_id", "action_type", "fn", "priority", "timeout_s",
-                 "deadline", "cancel_event", "created_at", "cancelled", "fut")
+    __slots__ = (
+        "operation_id",
+        "action_type",
+        "fn",
+        "priority",
+        "timeout_s",
+        "deadline",
+        "cancel_event",
+        "created_at",
+        "cancelled",
+        "fut",
+    )
 
-    def __init__(self, operation_id, action_type, fn, priority, timeout_s,
-                 deadline, cancel_event):
+    def __init__(self, operation_id, action_type, fn, priority, timeout_s, deadline, cancel_event):
         self.operation_id = operation_id
         self.action_type = action_type
         self.fn = fn
@@ -37,9 +46,9 @@ class PageActor:
     def __init__(self, page_id: str, *, metrics=None):
         self.page_id = page_id
         self.metrics = metrics
-        self._pq = asyncio.PriorityQueue()
+        self._pq: asyncio.PriorityQueue = asyncio.PriorityQueue()
         self._seq = itertools.count()
-        self._ops = {}            # operation_id -> Operation（含当前执行中）
+        self._ops: dict = {}  # operation_id -> Operation（含当前执行中）
         self._current = None
         self._current_task = None
         self._worker = None
@@ -79,15 +88,26 @@ class PageActor:
             self._worker = None
 
     # ---- 提交 ----
-    async def submit(self, action_type, fn, *, priority: int = 100,
-                     timeout_s: float = None, deadline: float = None,
-                     operation_id: str = None):
+    async def submit(
+        self,
+        action_type,
+        fn,
+        *,
+        priority: int = 100,
+        timeout_s: float = None,
+        deadline: float = None,
+        operation_id: str = None,
+    ):
         if self._closed:
             raise GavelError("page_closed", f"page {self.page_id} 已关闭")
         loop = asyncio.get_running_loop()
         op = Operation(
             operation_id or f"op_{uuid.uuid4().hex[:8]}",
-            action_type, fn, priority, timeout_s, deadline,
+            action_type,
+            fn,
+            priority,
+            timeout_s,
+            deadline,
             asyncio.Event(),
         )
         op.fut = loop.create_future()
@@ -101,8 +121,7 @@ class PageActor:
             return False
         op.cancelled = True
         op.cancel_event.set()
-        if self._current is op and self._current_task is not None \
-                and not self._current_task.done():
+        if self._current is op and self._current_task is not None and not self._current_task.done():
             self._current_task.cancel()
         return True
 
@@ -127,8 +146,7 @@ class PageActor:
             try:
                 eff = self._effective_timeout(op)
                 if eff is not None and eff <= 0:
-                    raise GavelError("timeout", "操作超时（deadline 已过）",
-                                     retryable=True)
+                    raise GavelError("timeout", "操作超时（deadline 已过）", retryable=True)
                 if eff is None:
                     result = await self._current_task
                 else:
@@ -137,9 +155,12 @@ class PageActor:
                     op.fut.set_result(result)
             except asyncio.TimeoutError:
                 self._current_task.cancel()
-                self._fail(op, GavelError(
-                    "timeout", f"操作超时（{op.timeout_s or 'deadline'}s）",
-                    retryable=True))
+                self._fail(
+                    op,
+                    GavelError(
+                        "timeout", f"操作超时（{op.timeout_s or 'deadline'}s）", retryable=True
+                    ),
+                )
             except asyncio.CancelledError:
                 self._fail(op, GavelError("cancelled", "操作已取消", retryable=True))
                 # 若 closed，下一轮循环顶部 break；否则继续取下一个操作

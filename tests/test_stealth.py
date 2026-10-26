@@ -7,10 +7,14 @@
 
 async def test_navigator_webdriver_off(gavel_tools):
     r = await gavel_tools["session_create"]()
-    rd = await gavel_tools["page_read"](page_id=r["page_id"], page_features={
-        "wd": "navigator.webdriver",
-        "headless_ua": "/HeadlessChrome/.test(navigator.userAgent)",
-        "has_chrome": "!!window.chrome"})
+    rd = await gavel_tools["page_read"](
+        page_id=r["page_id"],
+        page_features={
+            "wd": "navigator.webdriver",
+            "headless_ua": "/HeadlessChrome/.test(navigator.userAgent)",
+            "has_chrome": "!!window.chrome",
+        },
+    )
     assert rd["features"]["wd"] in (False, None), rd  # 不得为 True
     assert rd["features"]["headless_ua"] is False, rd
     assert rd["features"]["has_chrome"] is True, rd

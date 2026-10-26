@@ -1,7 +1,6 @@
 """资料副本：复制选择（反识别项保留、隐私项剔除）、档位、当前副本切换。"""
 
 import json
-import os
 
 import pytest
 
@@ -20,14 +19,19 @@ def _make_source(tmp_path):
     (src / "Default" / "Login Data").write_bytes(b"passwords")
     (src / "Default" / "Sync Data").write_bytes(b"sync")
     (src / "Default" / "Extensions" / "abc" / "manifest.json").write_text("{}")
-    (src / "Default" / "Preferences").write_text(json.dumps(
-        {"profile": {"name": "Me"}, "sync": {"x": 1}, "homepage": "h"}))
-    (src / "Default" / "Secure Preferences").write_text(json.dumps(
-        {"sync": {}, "homepage": "h"}))
-    (src / "Local State").write_text(json.dumps(
-        {"os_crypt": {"encrypted_key": "K"},
-         "user_experience_metrics": {"client_id": "CID"},
-         "variations": "v"}))
+    (src / "Default" / "Preferences").write_text(
+        json.dumps({"profile": {"name": "Me"}, "sync": {"x": 1}, "homepage": "h"})
+    )
+    (src / "Default" / "Secure Preferences").write_text(json.dumps({"sync": {}, "homepage": "h"}))
+    (src / "Local State").write_text(
+        json.dumps(
+            {
+                "os_crypt": {"encrypted_key": "K"},
+                "user_experience_metrics": {"client_id": "CID"},
+                "variations": "v",
+            }
+        )
+    )
     return src
 
 
@@ -72,17 +76,16 @@ def test_copy_strict_excludes_credentials(monkeypatch, tmp_path):
 def test_copy_full_includes_extensions(monkeypatch, tmp_path):
     _use_tmp_profiles(monkeypatch, tmp_path)
     src = _make_source(tmp_path)
-    profiles.copy_profile(source=str(src), name="f1", tier="full",
-                          include_extensions=True)
-    assert (tmp_path / "profiles" / "f1" / "Default" / "Extensions"
-            / "abc" / "manifest.json").exists()
+    profiles.copy_profile(source=str(src), name="f1", tier="full", include_extensions=True)
+    assert (
+        tmp_path / "profiles" / "f1" / "Default" / "Extensions" / "abc" / "manifest.json"
+    ).exists()
 
 
 def test_copy_no_history(monkeypatch, tmp_path):
     _use_tmp_profiles(monkeypatch, tmp_path)
     src = _make_source(tmp_path)
-    profiles.copy_profile(source=str(src), name="nh", tier="default",
-                          include_history=False)
+    profiles.copy_profile(source=str(src), name="nh", tier="default", include_history=False)
     assert not (tmp_path / "profiles" / "nh" / "Default" / "History").exists()
 
 
@@ -104,6 +107,7 @@ def test_bad_name_rejected(monkeypatch, tmp_path):
     _use_tmp_profiles(monkeypatch, tmp_path)
     src = _make_source(tmp_path)
     from agent_gavel.core.errors import GavelError
+
     with pytest.raises(GavelError):
         profiles.copy_profile(source=str(src), name="../evil")
 
@@ -111,5 +115,6 @@ def test_bad_name_rejected(monkeypatch, tmp_path):
 def test_missing_source(monkeypatch, tmp_path):
     _use_tmp_profiles(monkeypatch, tmp_path)
     from agent_gavel.core.errors import GavelError
+
     with pytest.raises(GavelError):
         profiles.copy_profile(source=str(tmp_path / "nope"), name="x")

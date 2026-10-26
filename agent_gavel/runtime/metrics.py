@@ -14,8 +14,8 @@ _DEFAULT_MAXLEN = 1000
 class MetricsRecorder:
     def __init__(self, maxlen: int = _DEFAULT_MAXLEN):
         self.maxlen = maxlen
-        self._samples = defaultdict(lambda: deque(maxlen=maxlen))
-        self._counts = defaultdict(int)
+        self._samples: dict = defaultdict(lambda: deque(maxlen=maxlen))
+        self._counts: dict = defaultdict(int)
 
     def record(self, action_type: str, cost: dict):
         total = float(cost.get("total_ms", 0.0) or 0.0)

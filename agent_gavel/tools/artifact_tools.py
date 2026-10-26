@@ -18,29 +18,28 @@ def _public(info):
 def register_artifact_tools(mcp):
     @mcp.tool()
     @guard
-    async def artifact_list(kind: str = None, session_id: str = None,
-                            run_id: str = None):
+    async def artifact_list(kind: str = None, session_id: str = None, run_id: str = None):
         """列出产物（可按 kind/session/run 过滤）。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
-        items = rt.artifacts.list(kind=kind, session_id=session_id,
-                                  run_id=run_id)
-        return {"status": "ok", "items": [_public(i) for i in items],
-                "total": len(items)}
+        items = rt.artifacts.list(kind=kind, session_id=session_id, run_id=run_id)
+        return {"status": "ok", "items": [_public(i) for i in items], "total": len(items)}
 
     @mcp.tool()
     @guard
     async def artifact_get(artifact_id: str):
         """取单个产物元数据。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         return {"status": "ok", **_public(rt.artifacts.get(artifact_id))}
 
     @mcp.tool()
     @guard
-    async def artifact_export(artifact_id: str, dest_dir: str,
-                              filename: str = None,
-                              path_visibility: str = "hidden"):
+    async def artifact_export(
+        artifact_id: str, dest_dir: str, filename: str = None, path_visibility: str = "hidden"
+    ):
         """把产物导出到本地目录（受文件白名单约束）。
 
         path_visibility=hidden（默认）不回传绝对路径；user_visible 才含
@@ -49,10 +48,16 @@ def register_artifact_tools(mcp):
         ⚠ 会写入本地文件；导出前确认目标目录（受 AGENT_GAVEL_ALLOW_PATHS 约束）。
         """
         from ..runtime import get_runtime
+
         rt = get_runtime()
         res = await asyncio.to_thread(
-            rt.artifacts.export, artifact_id, dest_dir, filename,
-            policies=rt.policies, path_visibility=path_visibility)
+            rt.artifacts.export,
+            artifact_id,
+            dest_dir,
+            filename,
+            policies=rt.policies,
+            path_visibility=path_visibility,
+        )
         return {"status": "ok", **res}
 
     @mcp.tool()
@@ -60,12 +65,11 @@ def register_artifact_tools(mcp):
     async def artifact_cleanup(ttl_days: int = None, max_bytes: int = None):
         """按 TTL/总量清理产物（缺省用 policy 配置）。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         ttl = ttl_days if ttl_days is not None else rt.policies.artifact_ttl_days
-        cap = max_bytes if max_bytes is not None \
-            else rt.policies.artifact_max_bytes
-        res = await asyncio.to_thread(rt.artifacts.cleanup,
-                                      ttl_days=ttl, max_bytes=cap)
+        cap = max_bytes if max_bytes is not None else rt.policies.artifact_max_bytes
+        res = await asyncio.to_thread(rt.artifacts.cleanup, ttl_days=ttl, max_bytes=cap)
         return {"status": "ok", **res}
 
     @mcp.tool()
@@ -73,18 +77,19 @@ def register_artifact_tools(mcp):
     async def download_list(page_id: str = None, session_id: str = None):
         """列出已捕获的下载。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         items = rt.artifacts.list(kind="download", session_id=session_id)
         if page_id:
             items = [i for i in items if i.get("page_id") == page_id]
-        return {"status": "ok", "items": [_public(i) for i in items],
-                "total": len(items)}
+        return {"status": "ok", "items": [_public(i) for i in items], "total": len(items)}
 
     @mcp.tool()
     @guard
     async def download_get(artifact_id: str):
         """取单个下载的元数据。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         info = rt.artifacts.get(artifact_id)
         if info.get("kind") != "download":
@@ -93,17 +98,22 @@ def register_artifact_tools(mcp):
 
     @mcp.tool()
     @guard
-    async def download_save(artifact_id: str, dest_dir: str,
-                            filename: str = None,
-                            path_visibility: str = "hidden"):
+    async def download_save(
+        artifact_id: str, dest_dir: str, filename: str = None, path_visibility: str = "hidden"
+    ):
         """把下载保存到本地目录（受文件白名单约束，默认不回传绝对路径）。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         info = rt.artifacts.get(artifact_id)
         res = await asyncio.to_thread(
-            rt.artifacts.export, artifact_id, dest_dir,
+            rt.artifacts.export,
+            artifact_id,
+            dest_dir,
             filename or info.get("suggested_filename"),
-            policies=rt.policies, path_visibility=path_visibility)
+            policies=rt.policies,
+            path_visibility=path_visibility,
+        )
         return {"status": "ok", **res}
 
     @mcp.tool()
@@ -111,14 +121,15 @@ def register_artifact_tools(mcp):
     async def download_read_text(artifact_id: str):
         """抽取下载文档的文本（PDF/Word/文本）。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
-        return {"status": "ok", **await asyncio.to_thread(
-            rt.artifacts.read_text, artifact_id)}
+        return {"status": "ok", **await asyncio.to_thread(rt.artifacts.read_text, artifact_id)}
 
     @mcp.tool()
     @guard
     async def download_delete(artifact_id: str):
         """删除一个产物。"""
         from ..runtime import get_runtime
+
         rt = get_runtime()
         return {"status": "ok", **rt.artifacts.delete(artifact_id)}
