@@ -65,7 +65,7 @@ async def test_session_page_lifecycle(runtime, webapp_server):
     await runtime.page_mgr.close(handle.page_id)
     await runtime.session_mgr.close(session.session_id)
     assert len(runtime.pages) == 0
-    assert len(runtime.contexts) == 0
+    assert all(c.container == "default" for c in runtime.contexts.values())
     assert len(runtime.sessions) == 0
 
 
@@ -189,7 +189,10 @@ async def test_ephemeral_sessions_container_policy(runtime, gavel_tools):
 
 
 async def test_cold_start_threshold(runtime):
-    """方案 §12：冷启动 < 1.5s。"""
+    """方案 §12：冷启动 < 1.5s（先显式关掉复用的浏览器）。"""
+    handle = await runtime.ensure_default_browser()
+    await runtime.processes.close(handle)
+    runtime._default_handle = None
     t0 = time.perf_counter()
     await runtime.ensure_default_browser()
     assert time.perf_counter() - t0 < 1.5

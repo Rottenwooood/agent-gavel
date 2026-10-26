@@ -4,6 +4,8 @@
 覆盖：生命周期/导航（M1）+ locator 解析/动作/断言/探索/读取（M2）。
 """
 
+import asyncio
+import base64
 import difflib
 import re
 import struct
@@ -625,12 +627,27 @@ class PlaywrightBackend:
                 "url": page.url}
 
     async def pdf(self, handle, *, timeout_s=30.0):
+        """无头用 Playwright；有头走 CDP Page.printToPDF（同一能力，不因模式缺失）。"""
+        page = handle.page
         headless = handle.context.browser_handle.opts.get("headless")
-        if headless is False:
-            raise GavelError("pdf_requires_headless", "page_pdf 只能在无头模式生成",
-                             hint="用 AGENT_GAVEL_HEADLESS=1 启动")
-        data = await handle.page.pdf()
-        return {"data": data, "url": handle.page.url}
+        if headless:
+            data = await page.pdf()
+        else:
+            cdp = await page.context.new_cdp_session(page)
+            try:
+                result = await asyncio.wait_for(
+                    cdp.send("Page.printToPDF", {
+                        "printBackground": True,
+                        "preferCSSPageSize": True,
+                    }),
+                    timeout=timeout_s)
+            finally:
+                try:
+                    await cdp.detach()
+                except Exception:
+                    pass
+            data = base64.b64decode(result["data"])
+        return {"data": data, "url": page.url}
 
     # ================= 断言 =================
     async def page_signature(self, page, target=None):

@@ -254,7 +254,7 @@ def register_page_tools(mcp):
     @mcp.tool()
     @guard
     async def page_pdf(page_id: str = None, save_to: str = None):
-        """生成页面 PDF → artifact（仅无头模式）。"""
+        """生成页面 PDF → artifact（无头与有头均支持）。"""
         from ..runtime import get_runtime
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)

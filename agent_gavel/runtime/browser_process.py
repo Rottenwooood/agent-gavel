@@ -48,7 +48,10 @@ def _launch_args():
       需要软件渲染用 AGENT_GAVEL_DISABLE_GPU=1。
     - AGENT_GAVEL_EXTRA_ARGS：追加自定义参数（空格分隔）。
     """
-    args = ["--no-first-run", "--disable-blink-features=AutomationControlled"]
+    # --keep-alive-for-test：关闭最后一个标签页时不退出浏览器进程。
+    # 自动化场景下"关标签"不等于"关浏览器"，否则复用连接会拿到已退出的进程。
+    args = ["--no-first-run", "--disable-blink-features=AutomationControlled",
+            "--keep-alive-for-test"]
     if sys.platform.startswith("linux"):
         args += ["--no-sandbox", "--disable-dev-shm-usage"]
     if config.disable_gpu():
@@ -506,6 +509,21 @@ class BrowserProcessManager:
 
     def list(self):
         return [h.to_dict() for h in self._handles.values()]
+
+    def kill_all_sync(self):
+        """进程退出时的兜底回收：只杀我们自己启动的浏览器。"""
+        for handle in list(self._handles.values()):
+            if not handle.owned_pid:
+                continue
+            try:
+                if sys.platform.startswith("win"):
+                    subprocess.run(["taskkill", "/F", "/T", "/PID",
+                                    str(handle.owned_pid)],
+                                   capture_output=True, timeout=5)
+                else:
+                    os.killpg(handle.owned_pid, signal.SIGKILL)
+            except Exception:
+                pass
 
     def os_browsers(self):
         """OS 里真实存在、用我们资料目录的 Chrome（含 MCP 重启后丢失登记的孤儿）。"""

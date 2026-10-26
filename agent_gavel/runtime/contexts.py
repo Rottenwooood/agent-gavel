@@ -32,6 +32,17 @@ class Context:
         self.session_ids = {session.session_id}
         self._run_owner = None
         self._run_lock = asyncio.Lock()
+        self._page_handler = None
+
+    def detach(self):
+        """移除挂在底层 context 上的 page 监听，避免旧 context 抢注册新页面。"""
+        handler = self._page_handler
+        self._page_handler = None
+        if handler is not None:
+            try:
+                self.browser_context.remove_listener("page", handler)
+            except Exception:
+                pass
 
     def lease_session_id(self):
         """只有一个租约时返回它；多个会话共享时返回 None。"""
@@ -70,6 +81,14 @@ class ContextManager:
         self.runtime = runtime
         self._by_bc = {}          # id(browser_context) -> Context（复用默认容器）
         self._defaults = {}       # id(browser) -> (browser, Context)
+        self._guarded = []        # 已安装域名守卫的 browser_context
+
+    def reset_state(self):
+        for ctx in list(self.runtime.contexts.values()):
+            ctx.detach()
+        self._by_bc.clear()
+        self._defaults.clear()
+        self.runtime.contexts.clear()
 
     def get(self, context_id):
         ctx = self.runtime.contexts.get(context_id)
@@ -137,6 +156,8 @@ class ContextManager:
                 existing.session_ids.add(session.session_id)
                 if existing.context_id not in session.context_ids:
                     session.context_ids.append(existing.context_id)
+                if not existing.page_ids or existing.active_page_id is None:
+                    await self.runtime.page_mgr.open(existing)
                 return existing
             ctx = await self.adopt(session, default_bc, context_id=cid,
                                    container="default")
@@ -169,7 +190,9 @@ class ContextManager:
         # 域名白名单：拦截 popup / target=_blank / window.open / 重定向的顶层导航
         if self.runtime.policies.domain_restricted:
             await self._install_domain_guard(ctx)
-        browser_context.on("page", self._on_new_page(ctx))
+        handler = self._on_new_page(ctx)
+        ctx._page_handler = handler
+        browser_context.on("page", handler)
         pages = browser_context.pages
         if pages:
             await self.runtime.page_mgr.register(ctx, pages[0], activate=True)
@@ -180,6 +203,8 @@ class ContextManager:
     async def _install_domain_guard(self, ctx):
         """在 context 层拦截顶层导航到非白名单域名的请求。"""
         rt = self.runtime
+        if any(bc is ctx.browser_context for bc in self._guarded):
+            return
 
         async def _guard(route, request):
             try:
@@ -187,10 +212,12 @@ class ContextManager:
                     frame = request.frame
                     if frame is not None and frame == frame.page.main_frame \
                             and not rt.policies.is_domain_allowed(request.url):
+                        page_ctx = rt.page_mgr.find_by_pw_page(frame.page)
                         rt.events.emit({
                             "event": "policy_blocked",
-                            "session_id": ctx.lease_session_id(),
-                            "context_id": ctx.context_id,
+                            "session_id": page_ctx.lease_session_id()
+                            if page_ctx else None,
+                            "context_id": page_ctx.context_id if page_ctx else None,
                             "url": request.url,
                             "host": (urlparse(request.url).hostname or "").lower(),
                         })
@@ -205,6 +232,7 @@ class ContextManager:
 
         try:
             await ctx.browser_context.route("**/*", _guard)
+            self._guarded.append(ctx.browser_context)
         except Exception:
             pass
 

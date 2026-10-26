@@ -45,11 +45,18 @@ def webapp_server():
 
 @pytest_asyncio.fixture
 async def runtime():
-    rt = await reset_runtime()
-    try:
-        yield rt
-    finally:
-        await shutdown_runtime()
+    # 复用同一个浏览器进程，只清 session/context/page；避免每个用例冷启动 Chrome。
+    rt = await reset_runtime(keep_browser=True)
+
+    yield rt
+
+
+
+def pytest_sessionfinish(session, exitstatus):
+    from agent_gavel.runtime import browser_runtime
+    rt = browser_runtime._RUNTIME
+    if rt is not None:
+        rt.processes.kill_all_sync()
 
 
 class FakeMCP:

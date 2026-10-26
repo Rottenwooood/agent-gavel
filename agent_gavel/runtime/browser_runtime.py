@@ -104,6 +104,39 @@ class BrowserRuntime:
         }
 
     # ---- 生命周期 ----
+    async def soft_reset(self):
+        """清理所有 session/context/page 与运行期计数，保留浏览器进程。
+
+        仅供测试与同一进程内的重复初始化；生产路径用 shutdown()。
+        """
+        for pid in list(self.pages):
+            try:
+                await self.page_mgr.close(pid)
+            except Exception:
+                pass
+        for sid in list(self.sessions):
+            try:
+                await self.session_mgr.close(sid)
+            except Exception:
+                pass
+        for cid in list(self.contexts):
+            ctx = self.contexts.get(cid)
+            if ctx is not None and ctx.container != "default":
+                try:
+                    await self.context_mgr.close(cid)
+                except Exception:
+                    pass
+        self.page_mgr.reset_state()
+        self.context_mgr.reset_state()
+        self.runs.clear()
+        self._counters.clear()
+        self.events.clear()
+        self.metrics.reset()
+        try:
+            self.recorder.stop()
+        except Exception:
+            pass
+
     async def shutdown(self):
         if self._closed:
             return
@@ -118,7 +151,10 @@ class BrowserRuntime:
                 await self.context_mgr.close(cid)
             except Exception:
                 pass
+        self.page_mgr.reset_state()
+        self.context_mgr.reset_state()
         self.sessions.clear()
+        self.runs.clear()
         self._default_handle = None
         await self.processes.stop_all()
 
@@ -144,14 +180,18 @@ async def shutdown_runtime():
         _RUNTIME = None
 
 
-async def reset_runtime() -> BrowserRuntime:
-    """仅供测试：先关闭旧单例（含其浏览器进程），再返回一个新实例。
+async def reset_runtime(keep_browser=False) -> BrowserRuntime:
+    """仅供测试：重置运行时。
 
-    生产代码请勿调用；关闭旧实例避免反复 reset 留下孤儿 Chrome 进程。
+    keep_browser=True 时只清 session/context/page 与计数，保留浏览器进程，
+    避免每个用例都冷启动一次 Chrome；进程退出时由调用方统一回收。
     """
     global _RUNTIME
     if _RUNTIME is not None:
         try:
+            if keep_browser:
+                await _RUNTIME.soft_reset()
+                return _RUNTIME
             await _RUNTIME.shutdown()
         except Exception:
             pass

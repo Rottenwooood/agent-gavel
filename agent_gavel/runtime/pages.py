@@ -181,6 +181,13 @@ class PageManager:
         self._reg_lock = asyncio.Lock()
         self._by_key = {}  # id(pw_page) -> PageHandle
 
+    def reset_state(self):
+        self._by_key.clear()
+        self.runtime.pages.clear()
+
+    def find_by_pw_page(self, pw_page):
+        return self._by_key.get(id(pw_page))
+
     def get(self, page_id):
         ph = self.runtime.pages.get(page_id)
         if ph is None:

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### 测试与生命周期（本轮）
+
+- 测试复用同一个浏览器进程（`reset_runtime(keep_browser=True)`），用例共享一个事件
+  循环；全量套件（除真实站点）从 400s+ 降到 142s。
+- `pytest-timeout` 单测上限 90s；不再出现无界等待。
+- 修复 context 的 `page` 监听器泄漏：旧 context 会在 reset 后抢注册新页面。
+- `soft_reset` / `shutdown` 清理 pages/contexts 注册表与默认容器索引。
+- 有头模式 PDF 改走 CDP `Page.printToPDF`，不再是"仅无头可用"。
+- 托管 Chrome 增加 `--keep-alive-for-test`：关闭最后一个标签不再退出浏览器进程。
+
 ### 身份与产物一致性（阶段 2B）
 
 - 录制缓冲下沉到 runtime，按 **context** 归属；每步记录 `page_id`，共享容器下不再丢步。
