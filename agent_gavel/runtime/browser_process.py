@@ -106,26 +106,34 @@ def _free_port() -> int:
     return port
 
 
-def _kill_tree(pid, grace_s=3.0):
+async def _kill_tree(pid, grace_s=3.0):
     if not pid:
         return
+    if sys.platform.startswith("win"):
+        try:
+            await asyncio.to_thread(
+                subprocess.run, ["taskkill", "/T", "/PID", str(pid)],
+                capture_output=True, timeout=5)
+            for _ in range(int(grace_s * 10)):
+                if not _pid_alive(pid):
+                    return
+                await asyncio.sleep(0.1)
+            await asyncio.to_thread(
+                subprocess.run, ["taskkill", "/F", "/T", "/PID", str(pid)],
+                capture_output=True, timeout=5)
+        except Exception:
+            pass
+        return
     try:
-        if sys.platform.startswith("win"):
-            subprocess.run(["taskkill", "/T", "/PID", str(pid)],
-                           capture_output=True, timeout=5)
-            for _ in range(int(grace_s * 10)):
-                if not _pid_alive(pid):
-                    return
-                time.sleep(0.1)
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
-                           capture_output=True, timeout=5)
-        else:
-            os.killpg(pid, signal.SIGTERM)  # 优雅退出，让 Chrome 落盘
-            for _ in range(int(grace_s * 10)):
-                if not _pid_alive(pid):
-                    return
-                time.sleep(0.1)
-            os.killpg(pid, signal.SIGKILL)
+        os.killpg(pid, signal.SIGTERM)  # 优雅退出，让 Chrome 落盘
+    except (ProcessLookupError, PermissionError, OSError):
+        return
+    for _ in range(int(grace_s * 10)):
+        if not _pid_alive(pid):
+            return
+        await asyncio.sleep(0.1)
+    try:
+        os.killpg(pid, signal.SIGKILL)
     except Exception:
         pass
 
@@ -252,20 +260,20 @@ def _reuse_existing(udd):
     return None
 
 
-def _reconcile(udd):
+async def _reconcile(udd):
     """启动前对账：能复用就复用；否则清掉我们遗留的 Chrome 并删除单例锁。
 
     返回 (pid, port) 表示可复用；None 表示需要干净启动。
     """
-    ex = _reuse_existing(udd)
+    ex = await asyncio.to_thread(_reuse_existing, udd)
     if ex:
         return ex
-    pids = _managed_pids(udd)
+    pids = await asyncio.to_thread(_managed_pids, udd)
     if pids:
         for pid in pids:
-            _kill_tree(pid, grace_s=3.0)
+            await _kill_tree(pid, grace_s=3.0)
         _clear_singletons(udd)
-        time.sleep(0.3)
+        await asyncio.sleep(0.3)
     return None
 
 
@@ -346,7 +354,7 @@ class BrowserProcessManager:
                              hint="安装 Chrome，或设 AGENT_GAVEL_CHROME_BIN")
         os.makedirs(udd, exist_ok=True)
         # 启动前对账：能复用就复用（状态文件优先，重启后也能重连）；否则清掉遗留 + 删单例锁
-        ex = _reconcile(udd)
+        ex = await _reconcile(udd)
         if ex:
             _write_state(udd, ex[0], ex[1])
             return _Reused(ex[0]), ex[1]
@@ -375,7 +383,7 @@ class BrowserProcessManager:
                     return proc, port
             except Exception:
                 await asyncio.sleep(0.2)
-        _kill_tree(proc.pid)
+        await _kill_tree(proc.pid)
         _clear_singletons(udd)
         raise GavelError(
             "chrome_env", "自起 Chrome 的调试端口未就绪",
@@ -557,23 +565,25 @@ class BrowserProcessManager:
         self._handles.pop(handle.process_id, None)
         # 自起的 Chrome：先让它自己干净退出（CDP Browser.close），这样 localStorage
         # 等才会落盘；否则立刻 SIGTERM 会丢数据。退出后再兜底 kill。
+        # 注意：浏览器可能在响应到达前就断开，await 必须带超时，否则会永久卡住。
         if handle.owned_pid:
             if handle.browser is not None:
                 try:
-                    cdp = await handle.browser.new_browser_cdp_session()
-                    await cdp.send("Browser.close")
+                    cdp = await asyncio.wait_for(
+                        handle.browser.new_browser_cdp_session(), timeout=3)
+                    await asyncio.wait_for(cdp.send("Browser.close"), timeout=3)
                 except Exception:
                     pass
-            for _ in range(80):
+            for _ in range(50):
                 if not _pid_alive(handle.owned_pid):
                     break
                 await asyncio.sleep(0.1)
             try:
                 if handle.browser is not None:
-                    await handle.browser.close()
+                    await asyncio.wait_for(handle.browser.close(), timeout=3)
             except Exception:
                 pass
-            _kill_tree(handle.owned_pid, grace_s=5.0)
+            await _kill_tree(handle.owned_pid, grace_s=3.0)
             udd = handle.opts.get("user_data_dir")
             if udd:
                 _clear_state(udd)
@@ -581,9 +591,9 @@ class BrowserProcessManager:
             return
         try:
             if handle.persistent_context is not None:
-                await handle.persistent_context.close()
+                await asyncio.wait_for(handle.persistent_context.close(), timeout=5)
             elif handle.browser is not None:
-                await handle.browser.close()
+                await asyncio.wait_for(handle.browser.close(), timeout=5)
         except Exception:
             pass
 
@@ -592,7 +602,7 @@ class BrowserProcessManager:
             await self.close(handle)
         if self._pw is not None:
             try:
-                await self._pw.stop()
+                await asyncio.wait_for(self._pw.stop(), timeout=5)
             except Exception:
                 pass
             self._pw = None
