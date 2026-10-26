@@ -116,6 +116,17 @@ MCP 客户端通过 stdio 拉起 agent-gavel。使用 PyPI 版本时：
 }
 ```
 
+### 进程模型
+
+MCP 客户端（opencode 等）可能同时拉起多个 agent-gavel 进程。agent-gavel 用
+**adapter + daemon** 处理：
+
+- **daemon** 是唯一持有浏览器、session/context/page、队列与产物索引的进程；
+- **adapter** 是 stdio 入口，只转发工具调用，不加载 Playwright；
+- 一个数据目录只有一个 daemon 和一个 Chrome；`browser_status` 返回 `daemon_pid` 与 `adapters`；
+- `daemon_shutdown(confirm=True)` 可停止 daemon（有运行中的 workflow 时需 `force=True`），下一次调用会自动拉起；
+- 因此跨 adapter 的 session/page id 一致，同一 session 的并发 workflow 由 daemon 统一裁决。
+
 ## 配置
 
 常用环境变量：
