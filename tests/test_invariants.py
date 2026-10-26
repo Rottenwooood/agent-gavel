@@ -66,18 +66,7 @@ def test_i1_env_only_in_config():
 # ---------------- I2：backend 页面函数首参为 handle ----------------
 
 # 阶段 3/4 结束时清零。
-PAGE_FIRST_WHITELIST = {
-    "retry_on_nav_race",
-    "resolve",
-    "page_scroll",
-    "read",
-    "text",
-    "snapshot",
-    "explore",
-    "find_text",
-    "page_meta",
-    "screenshot",
-}
+PAGE_FIRST_WHITELIST = set()
 
 
 def test_i2_backend_takes_handle():

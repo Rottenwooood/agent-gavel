@@ -16,13 +16,15 @@ def png_size(data):
 
 
 class ReaderMixin:
-    async def page_scroll(self, page, *, direction="down", amount=1, timeout_s=10.0):
+    async def page_scroll(self, handle, *, direction="down", amount=1, timeout_s=10.0):
+        page = handle.page
         dy = (1 if direction == "down" else -1) * int(amount * 800)
         await page.evaluate("(dy)=>window.scrollBy(0,dy)", dy)
         return {"action": "scroll", "direction": direction, "amount": amount}
 
     # ================= 读取 / 快照 =================
-    async def read(self, page, page_features):
+    async def read(self, handle, page_features):
+        page = handle.page
         out = {}
         errors = {}
         for name, expr in (page_features or {}).items():
@@ -32,7 +34,8 @@ class ReaderMixin:
                 errors[name] = str(e)
         return {"features": out, "errors": errors}
 
-    async def text(self, page, *, selector=None, mode="text"):
+    async def text(self, handle, *, selector=None, mode="text"):
+        page = handle.page
         if mode == "links":
             links = await page.evaluate(
                 "() => Array.from(document.querySelectorAll('a[href]'))"
@@ -51,7 +54,8 @@ class ReaderMixin:
                 val = await root.first.text_content()
         return {"text": val, "mode": mode, "selector": selector}
 
-    async def snapshot(self, page, *, level="summary", limit=50):
+    async def snapshot(self, handle, *, level="summary", limit=50):
+        page = handle.page
         info = await page.evaluate(
             "() => ({url:location.href, title:document.title, "
             "ready:document.readyState, "
@@ -108,7 +112,7 @@ class ReaderMixin:
 
     async def explore(
         self,
-        page,
+        handle,
         *,
         tag=None,
         text_contains=None,
@@ -117,6 +121,7 @@ class ReaderMixin:
         include_all=False,
         include_hidden=False,
     ):
+        page = handle.page
         raw = await page.evaluate(self._EXPLORE_JS)
         items = []
         for el in raw:
@@ -173,8 +178,9 @@ class ReaderMixin:
     }
     """
 
-    async def find_text(self, page, text, *, limit=10, include_hidden=False):
+    async def find_text(self, handle, text, *, limit=10, include_hidden=False):
         """按文本定位：返回包含该文本的"最近可点元素"及其稳定锚点。"""
+        page = handle.page
         raw = await page.evaluate(self._FIND_TEXT_JS, {"text": text})
         items = []
         for el in raw:
@@ -188,8 +194,9 @@ class ReaderMixin:
                 break
         return {"items": items, "total": len(items)}
 
-    async def page_meta(self, page):
+    async def page_meta(self, handle):
         """结构化页面元信息（标题/URL/描述/canonical/标题层级/计数/正文长度）。"""
+        page = handle.page
         return await page.evaluate(
             """() => {
               const meta = (sel, attr) => { const e = document.querySelector(sel);
@@ -267,7 +274,8 @@ class ReaderMixin:
         return tag
 
     # ================= 截图 / PDF =================
-    async def screenshot(self, page, *, full_page=False, selector=None, timeout_s=20.0):
+    async def screenshot(self, handle, *, full_page=False, selector=None, timeout_s=20.0):
+        page = handle.page
         ms = timeout_s * 1000
 
         async def _cap():

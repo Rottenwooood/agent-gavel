@@ -26,7 +26,8 @@ class LocatorMixin:
             )
         return by, value
 
-    async def resolve(self, page, target):
+    async def resolve(self, handle, target):
+        page = handle.page
         by, value = self._normalize_target(target)
         name = target.get("name")
         exact = target.get("exact")

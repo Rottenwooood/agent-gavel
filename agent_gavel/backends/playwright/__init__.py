@@ -35,7 +35,7 @@ class PlaywrightBackend(LocatorMixin, ReaderMixin):
         s = str(e)
         return any(k in s for k in cls._NAV_RACE)
 
-    async def retry_on_nav_race(self, page, fn, retries=1):
+    async def retry_on_nav_race(self, handle, fn, retries=1):
         """只读操作遇导航竞态时，等页面稳定后自动重试一次；仍失败则报可重试错误。"""
         try:
             return await fn()
@@ -50,10 +50,10 @@ class PlaywrightBackend(LocatorMixin, ReaderMixin):
                     hint="页面正在导航，稍后重试读取",
                 ) from e
             try:
-                await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                await handle.page.wait_for_load_state("domcontentloaded", timeout=5000)
             except Exception:
                 await _sleep(0.3)
-            return await self.retry_on_nav_race(page, fn, retries - 1)
+            return await self.retry_on_nav_race(handle, fn, retries - 1)
 
     # ================= 导航 / 等待 =================
     async def goto(self, handle, url, *, wait_until="domcontentloaded", timeout_s=30.0):

@@ -358,7 +358,7 @@ class Runner:
     async def _do_screenshot(self, page, act):
         be, rt = self.backend, self.runtime
         res = await page.actor.submit(
-            "screenshot", lambda: be.screenshot(page.page, full_page=bool(act.get("full_page")))
+            "screenshot", lambda: be.screenshot(page, full_page=bool(act.get("full_page")))
         )
         info = await asyncio.to_thread(
             rt.artifacts.save_bytes,
@@ -523,7 +523,7 @@ class Runner:
         if not needles:
             return None
         try:
-            found = await be.explore(page.page)
+            found = await be.explore(page)
         except Exception:
             return None
         match, best = None, 0

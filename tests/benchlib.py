@@ -101,10 +101,10 @@ async def run_suite(rt, base, n=30):
         n,
     )
     report["latency"]["snapshot_summary"] = await measure(
-        lambda: h.actor.submit("snap", lambda: be.snapshot(h.page, level="summary")), min(n, 15)
+        lambda: h.actor.submit("snap", lambda: be.snapshot(h, level="summary")), min(n, 15)
     )
     report["latency"]["explore"] = await measure(
-        lambda: h.actor.submit("explore", lambda: be.explore(h.page)), min(n, 15)
+        lambda: h.actor.submit("explore", lambda: be.explore(h)), min(n, 15)
     )
     report["latency"]["navigate_local"] = await measure(
         lambda: h.actor.submit("nav", lambda: be.goto(h, f"{base}/basic.html")), min(n, 15)

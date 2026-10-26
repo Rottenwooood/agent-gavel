@@ -227,7 +227,7 @@ def register_action_tools(mcp):
 
             def invoke(h):
                 return be.page_scroll(
-                    h.page,
+                    h,
                     direction=direction,
                     amount=amount,
                     timeout_s=timeout_s,

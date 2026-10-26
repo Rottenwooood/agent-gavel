@@ -49,7 +49,7 @@ async def page_signature(backend, handle, target=None):
     噪音更少），否则整页 body。返回 dict，供 diff_summary 比较。"""
     if target:
         try:
-            loc = (await backend.resolve(handle.page, target)).first
+            loc = (await backend.resolve(handle, target)).first
             return await loc.evaluate(_SIG_SCOPE_JS)
         except Exception:
             pass  # silent-ok: best-effort，失败不影响主流程

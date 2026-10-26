@@ -18,7 +18,7 @@ def _done(handle, action, url_before, *, wait_navigation=False, timeout_s=30.0):
 
 
 async def do_click(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
+    loc = await backend.resolve(handle, target)
     url_before = handle.page.url
     await loc.click(
         button=kw.get("button", "left"),
@@ -30,14 +30,14 @@ async def do_click(backend, handle, target, *, timeout_s=30.0, **kw):
 
 
 async def do_fill(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
+    loc = await backend.resolve(handle, target)
     url_before = handle.page.url
     await loc.fill(kw.get("value", ""), timeout=timeout_s * 1000)
     return _done(handle, "fill", url_before)
 
 
 async def do_type(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
+    loc = await backend.resolve(handle, target)
     url_before = handle.page.url
     text = kw.get("value", "")
     delay = kw.get("delay_ms", 0)
@@ -49,7 +49,7 @@ async def do_type(backend, handle, target, *, timeout_s=30.0, **kw):
 
 
 async def do_press(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
+    loc = await backend.resolve(handle, target)
     url_before = handle.page.url
     await loc.press(kw.get("keys", "Enter"), timeout=timeout_s * 1000)
     result = _done(handle, "press", url_before)
@@ -63,49 +63,49 @@ async def do_press(backend, handle, target, *, timeout_s=30.0, **kw):
 
 
 async def do_hover(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
+    loc = await backend.resolve(handle, target)
     url_before = handle.page.url
     await loc.hover(timeout=timeout_s * 1000)
     return _done(handle, "hover", url_before)
 
 
 async def do_focus(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
+    loc = await backend.resolve(handle, target)
     url_before = handle.page.url
     await loc.focus(timeout=timeout_s * 1000)
     return _done(handle, "focus", url_before)
 
 
 async def do_clear(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
+    loc = await backend.resolve(handle, target)
     url_before = handle.page.url
     await loc.fill("", timeout=timeout_s * 1000)
     return _done(handle, "clear", url_before)
 
 
 async def do_scroll(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
+    loc = await backend.resolve(handle, target)
     url_before = handle.page.url
     await loc.scroll_into_view_if_needed(timeout=timeout_s * 1000)
     return _done(handle, "scroll", url_before)
 
 
 async def do_check(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
+    loc = await backend.resolve(handle, target)
     url_before = handle.page.url
     await loc.check(timeout=timeout_s * 1000)
     return _done(handle, "check", url_before)
 
 
 async def do_uncheck(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
+    loc = await backend.resolve(handle, target)
     url_before = handle.page.url
     await loc.uncheck(timeout=timeout_s * 1000)
     return _done(handle, "uncheck", url_before)
 
 
 async def do_select(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
+    loc = await backend.resolve(handle, target)
     url_before = handle.page.url
     value = kw.get("value")
     by = kw.get("select_by", "value")
@@ -119,15 +119,15 @@ async def do_select(backend, handle, target, *, timeout_s=30.0, **kw):
 
 
 async def do_upload(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
+    loc = await backend.resolve(handle, target)
     url_before = handle.page.url
     await loc.set_input_files(kw.get("files"), timeout=timeout_s * 1000)
     return _done(handle, "upload", url_before)
 
 
 async def do_drag(backend, handle, target, *, timeout_s=30.0, **kw):
-    loc = await backend.resolve(handle.page, target)
-    destination = await backend.resolve(handle.page, kw.get("destination"))
+    loc = await backend.resolve(handle, target)
+    destination = await backend.resolve(handle, kw.get("destination"))
     url_before = handle.page.url
     await loc.drag_to(destination, timeout=timeout_s * 1000)
     return _done(handle, "drag", url_before)

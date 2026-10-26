@@ -90,7 +90,7 @@ def register_page_tools(mcp):
         res = await handle.actor.submit(
             "snapshot",
             lambda: be.retry_on_nav_race(
-                handle.page, lambda: be.snapshot(handle.page, level=level, limit=limit)
+                handle, lambda: be.snapshot(handle, level=level, limit=limit)
             ),
         )
         return {"status": "ok", **ids(handle), **res}
@@ -109,7 +109,7 @@ def register_page_tools(mcp):
         res = await handle.actor.submit(
             "page_text",
             lambda: be.retry_on_nav_race(
-                handle.page, lambda: be.text(handle.page, selector=selector, mode=mode)
+                handle, lambda: be.text(handle, selector=selector, mode=mode)
             ),
         )
         if mode != "links" and isinstance(res.get("text"), str) and len(res["text"]) > max_chars:
@@ -126,7 +126,7 @@ def register_page_tools(mcp):
         rt = get_runtime()
         handle = rt.page_mgr.resolve(page_id)
         be = backend()
-        res = await handle.actor.submit("page_links", lambda: be.text(handle.page, mode="links"))
+        res = await handle.actor.submit("page_links", lambda: be.text(handle, mode="links"))
         links = res.get("links", [])[:max_links]
         return {"status": "ok", **ids(handle), "items": links, "total": len(res.get("links", []))}
 
@@ -158,7 +158,7 @@ def register_page_tools(mcp):
                 }
         res = await handle.actor.submit(
             "page_read",
-            lambda: be.retry_on_nav_race(handle.page, lambda: be.read(handle.page, features)),
+            lambda: be.retry_on_nav_race(handle, lambda: be.read(handle, features)),
         )
         out = {"status": "ok", **ids(handle), "untrusted": True, "features": res["features"]}
         if res["errors"]:
@@ -195,9 +195,9 @@ def register_page_tools(mcp):
         res = await handle.actor.submit(
             "page_explore",
             lambda: be.retry_on_nav_race(
-                handle.page,
+                handle,
                 lambda: be.explore(
-                    handle.page,
+                    handle,
                     tag=tag,
                     text_contains=text_contains,
                     head=head,
@@ -225,8 +225,8 @@ def register_page_tools(mcp):
         res = await handle.actor.submit(
             "page_find_text",
             lambda: be.retry_on_nav_race(
-                handle.page,
-                lambda: be.find_text(handle.page, text, limit=limit, include_hidden=include_hidden),
+                handle,
+                lambda: be.find_text(handle, text, limit=limit, include_hidden=include_hidden),
             ),
         )
         return {"status": "ok", **ids(handle), **res}
@@ -242,7 +242,7 @@ def register_page_tools(mcp):
         be = backend()
         res = await handle.actor.submit(
             "page_meta",
-            lambda: be.retry_on_nav_race(handle.page, lambda: be.page_meta(handle.page)),
+            lambda: be.retry_on_nav_race(handle, lambda: be.page_meta(handle)),
         )
         return {"status": "ok", **ids(handle), "untrusted": True, **res}
 
@@ -259,7 +259,7 @@ def register_page_tools(mcp):
         be = backend()
         res = await handle.actor.submit(
             "page_screenshot",
-            lambda: be.screenshot(handle.page, full_page=full_page, selector=selector),
+            lambda: be.screenshot(handle, full_page=full_page, selector=selector),
         )
         info = await asyncio.to_thread(
             rt.artifacts.save_bytes,
