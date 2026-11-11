@@ -1,0 +1,14 @@
+{
+  "mode": "headed",
+  "status": "blocked",
+  "scope": "browser",
+  "browser_checks": "not_run",
+  "environment": {
+    "display": ":0",
+    "tcp_loopback": "[Errno 1] Operation not permitted",
+    "unix_socket": "[Errno 1] Operation not permitted"
+  },
+  "stage": "transport_environment",
+  "error": "Required local socket binding is denied; browser acceptance did not run",
+  "calls": []
+}

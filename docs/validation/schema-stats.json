@@ -1,0 +1,27 @@
+{
+  "method": "UTF-8, ensure_ascii=False, separators=(comma,colon), full tools object",
+  "baseline_commit": "337b508",
+  "before": {
+    "tool_count": 95,
+    "tools_list_bytes": 42844,
+    "description_bytes": 11434,
+    "input_schema_bytes": 25637
+  },
+  "after": {
+    "tool_count": 14,
+    "tools_list_bytes": 36218,
+    "description_bytes": 11183,
+    "input_schema_bytes": 24174
+  },
+  "operation_count": 90,
+  "mapped_old_operations": 95,
+  "before_sha256": "9e3db42d270b60492437413925905c69837de938723fe26015681006f3d10193",
+  "after_sha256": "7d9aa3c1a54a1aa88a37de35b8fcb7fedd918f3ffcabd7506a35b7fe8fe65f96",
+  "runtime_packages": {
+    "mcp": "2.1.1",
+    "pydantic": "2.13.5",
+    "jsonschema": "4.26.0",
+    "playwright": "1.63.0"
+  },
+  "browser_e2e_verified": false
+}

@@ -7,9 +7,9 @@ import asyncio
 import time
 
 import pytest
+from tool_fixture import register_legacy_tools as register_runtime_tools
 
 from agent_gavel.core.errors import GavelError
-from tool_fixture import register_legacy_tools as register_runtime_tools
 
 
 class FakeMCP:
