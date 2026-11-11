@@ -3,14 +3,12 @@
 from ..core import config
 from ..runtime import get_runtime
 from .common import ATTACH_WARNING as _ATTACH_WARNING
-from .common import guard
 
 
-def register_browser_tools(mcp):
+def register_browser_tools(catalog):
     rt_get = get_runtime
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Browser")
     async def browser_launch(
         headless: bool = None,
         channel: str = None,
@@ -18,16 +16,7 @@ def register_browser_tools(mcp):
         browser_mode: str = None,
         cdp_endpoint: str = None,
     ):
-        """启动/确保默认浏览器进程。
-
-        默认 **managed（C1）**：自起加固 Chrome（持久真实资料目录）+ Playwright 连接；
-        `browser_mode="attach"` + `cdp_endpoint` 则**接管**一个已存在的浏览器（C2，见警告）；
-        `browser_mode="playwright"` 回到 Playwright 直接启动。
-        headless 省略时按 AGENT_GAVEL_HEADLESS 决定（默认有头）。
-
-        ⚠ 隐私敏感：`browser_mode="attach"`（C2）会操作**用户真实账号环境**，并把控制权
-        暴露在本机调试口。使用前必须先向用户说明并取得同意。
-        """
+        "managed持久Chrome/CDP；attach接管现有；playwright直接启动。"
         rt = rt_get()
         handle = await rt.ensure_browser(
             headless=headless,
@@ -36,7 +25,11 @@ def register_browser_tools(mcp):
             browser_mode=browser_mode,
             cdp_endpoint=cdp_endpoint,
         )
-        out = {"status": "ok", **handle.to_dict(), "counts": (await rt.status())["counts"]}
+        out = {
+            "status": "ok",
+            **handle.to_dict(),
+            "counts": (await rt.status(detail="compact"))["counts"],
+        }
         attach = (
             handle.mode == "attach"
             or (browser_mode or config.browser_mode()).strip().lower() == "attach"
@@ -46,17 +39,15 @@ def register_browser_tools(mcp):
             out["warning"] = _ATTACH_WARNING
         return out
 
-    @mcp.tool()
-    @guard
-    async def browser_status():
-        """只读：当前进程/session/context/page 计数、事件与指标快照。"""
+    @catalog.operation(returns="BrowserStatus")
+    async def browser_status(detail: str = "compact"):
+        "资源概况；full再含会话配置、OS进程、事件与指标。"
         rt = rt_get()
-        return {"status": "ok", **(await rt.status())}
+        return {"status": "ok", **(await rt.status(detail=detail))}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="BrowserClosed")
     async def browser_close():
-        """关闭所有浏览器进程与资源（runtime 仍可继续用，下次调用会重拉）。"""
+        "关闭所有浏览器进程与资源（runtime 仍可继续用，下次调用会重拉）。"
         rt = rt_get()
         await rt.shutdown()
         rt.mark_open()

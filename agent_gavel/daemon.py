@@ -8,6 +8,7 @@ MCP 适配器（main.py）通过本地 socket 转发工具调用，不再各自�
 """
 
 import asyncio
+import base64
 import errno
 import json
 import os
@@ -18,21 +19,8 @@ import sys
 from .core import config
 from .core.errors import wrap_exception
 from .core.logging import setup as setup_logging
-from .tools import register_runtime_tools
-
-
-class _Registry:
-    """收集工具函数，不生成 MCP 传输。"""
-
-    def __init__(self):
-        self.tools = {}
-
-    def tool(self, *args, **kwargs):
-        def decorator(fn):
-            self.tools[fn.__name__] = fn
-            return fn
-
-        return decorator
+from .core.results import TOOL_API_VERSION, ToolReply
+from .tools import create_catalog
 
 
 def _paths():
@@ -67,30 +55,24 @@ def _acquire_lock(path):
 
 
 async def _tool_schemas():
-    from mcp.server.mcpserver import MCPServer
-
-    server = MCPServer("agent-gavel")
-    register_runtime_tools(server)
-    return [t.model_dump(by_alias=True, exclude_none=True) for t in await server.list_tools()]
+    return create_catalog().schemas()
 
 
-async def _dispatch(registry, schemas, name, args, adapter_count):
+async def _dispatch(catalog, schemas, name, args, adapter_count):
     if name == "__describe__":
-        return {"tools": schemas, "daemon_pid": os.getpid()}
+        return {"tools": schemas, "daemon_pid": os.getpid(), "tool_api_version": TOOL_API_VERSION}
     if name == "__ping__":
         return {"status": "ok", "daemon_pid": os.getpid()}
-    fn = registry.tools.get(name)
-    if fn is None:
-        return {
-            "status": "error",
-            "reason": "unknown_tool",
-            "error": f"daemon 没有这个工具：{name}",
-        }
-    result = await fn(**(args or {}))
-    if name == "browser_status" and isinstance(result, dict):
-        result["daemon_pid"] = os.getpid()
-        result["adapters"] = adapter_count()
-    return result
+    arguments = args if args is not None else {}
+    reply = await catalog.call(name, arguments)
+    if (
+        name == "browser"
+        and isinstance(arguments, dict)
+        and arguments.get("op") == "status"
+        and arguments.get("detail") == "full"
+    ):
+        reply.result.update(daemon_pid=os.getpid(), adapters=adapter_count())
+    return reply
 
 
 async def _serve(paths, token, registry, schemas, stop):
@@ -126,7 +108,23 @@ async def _serve(paths, token, registry, schemas, stop):
             result = await _dispatch(
                 registry, schemas, req.get("tool"), req.get("args"), adapter_count
             )
-            out = {"id": rid, "result": result}
+            if isinstance(result, ToolReply):
+                out = {
+                    "id": rid,
+                    "result": result.result,
+                    "is_error": result.result.get("status") == "error",
+                }
+                if result.images:
+                    out["images"] = [
+                        {
+                            "type": "image",
+                            "mimeType": image.mime_type,
+                            "data": base64.b64encode(image.data).decode("ascii"),
+                        }
+                        for image in result.images
+                    ]
+            else:
+                out = {"id": rid, "result": result}
         except Exception as e:  # noqa: BLE001
             out = {"id": rid, "error": wrap_exception(e).to_dict()}
         data = (json.dumps(out, ensure_ascii=False, default=str) + "\n").encode()
@@ -219,9 +217,8 @@ async def _run(lock_fd):
         except (NotImplementedError, RuntimeError):
             pass
 
-    registry = _Registry()
-    register_runtime_tools(registry)
-    schemas = await _tool_schemas()
+    registry = create_catalog()
+    schemas = registry.schemas()
     token = secrets.token_hex(16)
 
     from .runtime import get_runtime

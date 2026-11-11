@@ -6,6 +6,21 @@
 
 ---
 
+## 0.5 工具接口修订（2026-11-10）
+
+本节记录经用户授权的0.5接口变更，取代下文历史阶段计划中“保留旧工具名”的冻结条款。
+
+- 公共入口固定为14个：browser、session、context、page、locator、workflow、artifact、assertion、trace、network、console_get、performance_metrics、daemon_shutdown、screenshot；共90个操作。95个旧操作的能力通过操作合并或迁移保留，不注册旧名。
+- `tools/catalog.py` 是操作声明、路由及错误封装的唯一入口；`tools/schemas.py` 从声明生成公共参数类型和操作差异约束。操作选择不实现领域行为。
+- `tools/results.py` 是结果类型和精简视图的唯一主人。请求和完整业务结果在执行时校验；默认只省略契约明确允许省略的字段，读取值中的null、false、0、空集合与失败证据不递归清理。detail=full保留原业务字段与诊断信息。
+- `core/targets.py` 拥有定位输入格式与归一；动作业务要求继续来自core/actions.py。工具特有的必填要求不改变工作流模板原有的required_fields。
+- 下载仍由ArtifactStore捕获与持久化。它也是kind/page/session过滤与expected_kind校验的主人；下载管理统一通过artifact，保留not_a_download错误。
+- screenshot复用页面队列和截图后端；一次捕获后存产物并通过daemon返回图片。adapter只把传输中的图片封装为ImageContent，不访问浏览器、文件或产物存储。
+- 输出中的status仍由common.envelope归一。图像与元数据使用core/results.py的传输无关值，core不依赖MCP或Playwright。
+- 模板、断言三态、权限、资源id、daemon锁与同页串行机制不变。写路径删除模板修正为精确id，不在工具层执行宽松resolve_id。
+- `docs/tools.md` 由`python -m agent_gavel.tools.describe --markdown docs/tools.md`生成。公开schema与文档来自同一操作声明，禁止维护第二份参数默认值表。
+- 对外工具数量快照改为14；本轮验收使用`tests/e2e_mcp.py`通过真实MCP stdio和独立daemon调用真实浏览器。内部函数测试和语法检查不能作为端到端通过的证据。环境拒绝socket绑定或无法打开显示会话时，验收必须记录失败，不能宣告浏览器路径通过。
+
 ## 0. 适用范围
 
 - 适用于 `agent_gavel/` 下的全部生产代码、`tests/` 下的门禁测试、以及对外文档中的架构描述。
@@ -123,7 +138,10 @@ agent_gavel/
     loader.py          # resolve_id（只读）+ get/save/delete（精确）
 
   tools/
-    common.py          # guard / backend() / envelope() / run_with_optional_assert()
+    catalog.py         # 操作声明、schema生成与路由
+    schemas.py         # 共享类型与操作差异约束
+    results.py         # 结果契约和精简视图
+    common.py          # backend() / envelope() / run_with_optional_assert()
     browser_tools.py       # 浏览器进程
     session_tools.py       # 会话
     context_tools.py       # 容器
@@ -148,7 +166,9 @@ agent_gavel/
 |---|---|---|
 | 环境变量与路径 | `core/config.py` | 任何其他模块 |
 | 错误码与状态取值 | `core/errors.py` | 工具函数内手拼 |
-| 对外响应封装 | `tools/common.envelope` | 各工具自行拼装 |
+| 对外响应封装 | `tools/common.envelope` + `tools/results.py`的结果视图 | 各工具自行归一状态或递归清理读取数据 |
+| 定位格式与归一 | `core/targets.py` | backend/tools各写一份 |
+| 操作接口与默认值 | 操作函数签名及其catalog声明 | 独立手写公开schema或文档参数表 |
 | 动作类型、必填字段、幂等性、副作用判定 | `core/actions.py` | `schema`、`runner`、`backend`、`recorder` |
 | 断言读取类型、比较操作、解析 | `core/checks.py` | `schema`、`backend`、`assertion_schema` 工具 |
 | active page | `Context.active_page_id` | `BrowserRuntime` |
@@ -170,7 +190,7 @@ agent_gavel/
 | 契约 | 内容 |
 |---|---|
 | 模板格式 | `schema_version=2`；字段名、`$VAR` 语义、checkpoint 类型、`failure_policy` 键保持不变 |
-| 保留工具名 | 除第 6 节阶段 4 明确删除的三个别名外，其余工具名不变 |
+| 保留工具名 | 0.5使用第0.5节的14个规范入口；旧名仅见迁移文档，不在服务端注册 |
 | 错误码 | 现有 `GavelError.code` 字符串不得重命名；新增错误码集中登记在 `core/errors.py` |
 | 断言三态 | `pass` / `fail` / `ambiguous` 的判定条件不变；`ambiguous` 必须附带有意义的变化证据 |
 | 并发语义 | 同页串行、跨页并行；`session_busy` 语义不变 |

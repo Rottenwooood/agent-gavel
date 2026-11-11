@@ -145,7 +145,7 @@ async def test_screenshot_and_pdf(page):
     ss = await tools["page_screenshot"](page_id=pid)
     assert ss["status"] == "ok"
     assert ss["artifact_id"].startswith("artifact_")
-    assert ss["width"] > 0 and ss["coordinate_width"] == ss["width"]
+    assert ss["width"] > 0 and ss["height"] > 0
 
     pdf = await tools["page_pdf"](page_id=pid)
     assert pdf["status"] == "ok"

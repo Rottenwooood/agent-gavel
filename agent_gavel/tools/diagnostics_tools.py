@@ -5,14 +5,12 @@ import os
 import tempfile
 
 from ..core.errors import GavelError
-from .common import guard
 
 
-def register_diagnostics_tools(mcp):
-    @mcp.tool()
-    @guard
+def register_diagnostics_tools(catalog):
+    @catalog.operation(returns="Tracing")
     async def trace_start(context_id: str):
-        """对 context 开启 Playwright trace（截图+snapshot+source）。"""
+        """"""
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -20,10 +18,9 @@ def register_diagnostics_tools(mcp):
         await rt.tracer.start(ctx)
         return {"status": "ok", "context_id": context_id, "tracing": True}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="TraceArtifact")
     async def trace_stop(context_id: str):
-        """停止 trace 并存成 artifact（zip）。"""
+        """"""
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -47,40 +44,26 @@ def register_diagnostics_tools(mcp):
             "size_bytes": info["size_bytes"],
         }
 
-    @mcp.tool()
-    @guard
-    async def trace_get(artifact_id: str):
-        """取 trace artifact 元数据。"""
-        from ..runtime import get_runtime
-
-        rt = get_runtime()
-        info = rt.artifacts.get(artifact_id)
-        info.pop("path", None)
-        return {"status": "ok", **info}
-
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Network")
     async def network_start(context_id: str):
-        """开始记录 context 的网络请求/响应。"""
+        """"""
         from ..runtime import get_runtime
 
         rt = get_runtime()
         rt.context_mgr.get(context_id)  # 校验存在
         return {"status": "ok", **rt.network.start(context_id)}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="NetworkRecords")
     async def network_stop(context_id: str, limit: int = 1000):
-        """停止网络记录并返回记录列表。"""
+        """"""
         from ..runtime import get_runtime
 
         rt = get_runtime()
         return {"status": "ok", **rt.network.stop(context_id, limit=limit)}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Events")
     async def console_get(page_id: str = None, limit: int = 100):
-        """取页面 console error/warning 事件。"""
+        """"""
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -89,10 +72,9 @@ def register_diagnostics_tools(mcp):
             items = [e for e in items if e.get("page_id") == page_id]
         return {"status": "ok", "items": items[-limit:], "total": len(items)}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Events")
     async def page_errors(page_id: str = None, limit: int = 100):
-        """取页面 JS 错误/崩溃事件。"""
+        """"""
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -101,10 +83,9 @@ def register_diagnostics_tools(mcp):
             items = [e for e in items if e.get("page_id") == page_id]
         return {"status": "ok", "items": items[-limit:], "total": len(items)}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Metrics")
     async def performance_metrics():
-        """返回各动作类型的 p50/p95/p99 延迟指标。"""
+        """"""
         from ..runtime import get_runtime
 
         rt = get_runtime()

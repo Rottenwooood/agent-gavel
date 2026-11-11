@@ -15,8 +15,9 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from .core import config
-from .core.errors import GavelError, wrap_exception
+from .core.errors import DAEMON_API_MISMATCH, GavelError, wrap_exception
 from .core.logging import setup as setup_logging
+from .core.results import TOOL_API_VERSION
 
 DAEMON_MODULE = "agent_gavel.daemon"
 
@@ -154,8 +155,8 @@ class DaemonClient:
             raise GavelError("daemon_unavailable", f"daemon 写入失败：{e}", retryable=True) from e
         msg = await fut
         if "error" in msg:
-            return msg["error"], True
-        return msg["result"], False
+            return msg["error"], True, []
+        return msg["result"], bool(msg.get("is_error")), msg.get("images", [])
 
     async def close(self):
         if self._pump is not None:
@@ -180,17 +181,18 @@ async def _serve(client, tools):
 
     async def on_call_tool(context, params):
         try:
-            result, is_error = await client.call(params.name, params.arguments or {})
+            result, is_error, images = await client.call(params.name, params.arguments or {})
         except GavelError as e:
-            result, is_error = e.to_dict(), True
+            result, is_error, images = e.to_dict(), True, []
         except Exception as e:  # noqa: BLE001
-            result, is_error = wrap_exception(e).to_dict(), True
+            result, is_error, images = wrap_exception(e).to_dict(), True, []
         return types.CallToolResult(
             content=[
                 types.TextContent(
                     type="text", text=json.dumps(result, ensure_ascii=False, default=str)
                 )
-            ],
+            ]
+            + [types.ImageContent.model_validate(image) for image in images],
             structured_content=result if isinstance(result, dict) else None,
             is_error=is_error,
         )
@@ -207,9 +209,15 @@ async def run():
     client = DaemonClient()
     await client.ensure()
     try:
-        desc, is_error = await client.call("__describe__")
+        desc, is_error, _images = await client.call("__describe__")
         if is_error:
             raise GavelError("daemon_unavailable", str(desc), hint="查看 daemon.log")
+        if desc.get("tool_api_version") != TOOL_API_VERSION:
+            raise GavelError(
+                DAEMON_API_MISMATCH,
+                "当前数据根仍有旧接口daemon；请用旧客户端执行daemon_shutdown后重新启动",
+                hint="不会自动停止现有浏览器或运行任务",
+            )
         await _serve(client, desc["tools"])
     finally:
         await client.close()

@@ -2,15 +2,13 @@
 
 from ..core.errors import GavelError
 from ..runtime import get_runtime
-from .common import guard
 from .common import resolve_session as _resolve_session
 
 
-def register_context_tools(mcp):
+def register_context_tools(catalog):
     rt_get = get_runtime
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Context", fields={"container": {"enum": ["default", "isolated"]}})
     async def context_create(
         session_id: str = None,
         locale: str = None,
@@ -22,11 +20,7 @@ def register_context_tools(mcp):
         storage_state: dict = None,
         container: str = "isolated",
     ):
-        """在指定 session 下新建容器（不同账号/cookie/语言/设备）。
-
-        container 默认 isolated：新建隔离容器（继承 profile 的 cookie，但不写回）；
-        传 "default" 则复用 profile 默认容器。
-        """
+        "container默认isolated，继承profile登录态但不写回；default复用并写回。"
         rt = rt_get()
         session = await _resolve_session(session_id)
         config = dict(
@@ -42,20 +36,15 @@ def register_context_tools(mcp):
         ctx = await rt.context_mgr.create(session, config)
         return {"status": "ok", **ctx.to_dict()}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="ContextClosed")
     async def context_close(context_id: str):
-        """关闭 context（级联关闭其 page）。"""
+        """"""
         rt = rt_get()
         return {"status": "ok", **await rt.context_mgr.close(context_id)}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Cookies")
     async def context_cookies_get(context_id: str, url: str = None):
-        """读取 context 的 cookie（可选按 url 过滤）。
-
-        ⚠ 隐私敏感：cookie 含登录态。仅在用户授权下读取，不要写入日志/外传。
-        """
+        "含登录态，仅在用户授权下读取，不外传。"
         rt = rt_get()
         ctx = rt.context_mgr.get(context_id)
         cookies = (
@@ -63,14 +52,9 @@ def register_context_tools(mcp):
         )
         return {"status": "ok", "context_id": context_id, "cookies": cookies, "count": len(cookies)}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="CookiesAdded", required=("cookies",), nonempty=("cookies",))
     async def context_cookies_set(context_id: str, cookies: list = None):
-        """写入 cookie（Playwright addCookies 格式）。
-
-        cookie 需有 url 或 domain+path；url 缺路径会自动补 "/"
-        （Playwright 拒绝无 path 的 url，如 "https://example.com"）。
-        """
+        "cookies为Playwright格式，需url或domain+path；缺URL路径补/。"
         from urllib.parse import urlparse
 
         def _norm(c):
@@ -87,30 +71,27 @@ def register_context_tools(mcp):
         await ctx.browser_context.add_cookies([_norm(c) for c in cookies])
         return {"status": "ok", "context_id": context_id, "added": len(cookies)}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="CookiesCleared")
     async def context_cookies_clear(context_id: str):
-        """清空 context 的所有 cookie。"""
+        """"""
         rt = rt_get()
         ctx = rt.context_mgr.get(context_id)
         await ctx.browser_context.clear_cookies()
         return {"status": "ok", "context_id": context_id, "cleared": True}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Headers")
     async def context_set_headers(context_id: str, headers: dict = None):
-        """设置 context 的额外请求头（set_extra_http_headers）。"""
+        """"""
         rt = rt_get()
         ctx = rt.context_mgr.get(context_id)
         await ctx.browser_context.set_extra_http_headers(headers or {})
         return {"status": "ok", "context_id": context_id, "headers": headers or {}}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Permissions")
     async def context_set_permissions(
         context_id: str, permissions: list = None, origin: str = None
     ):
-        """授予/清空 context 权限（给出 permissions 授予，空则清空）。"""
+        "非空授予；空列表清空权限，origin仅用于授予。"
         rt = rt_get()
         ctx = rt.context_mgr.get(context_id)
         if permissions:

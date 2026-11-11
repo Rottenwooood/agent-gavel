@@ -15,7 +15,7 @@ import threading
 import time
 
 from ..core import config
-from ..core.errors import GavelError
+from ..core.errors import ARTIFACT_KIND_MISMATCH, GavelError
 
 
 def _now():
@@ -172,14 +172,17 @@ class ArtifactStore:
         return dict(info)
 
     # ---- 读 ----
-    def get(self, artifact_id: str) -> dict:
+    def get(self, artifact_id: str, *, expected_kind=None) -> dict:
         with self._lock:
             info = self._load().get(artifact_id)
             if not info or info.get("pending"):
                 raise GavelError("artifact_not_found", f"未知 artifact：{artifact_id}")
+            if expected_kind is not None and info.get("kind") != expected_kind:
+                reason = "not_a_download" if expected_kind == "download" else ARTIFACT_KIND_MISMATCH
+                raise GavelError(reason, f"{artifact_id} 不是 {expected_kind} 产物")
             return dict(info)
 
-    def list(self, *, kind=None, run_id=None, session_id=None) -> list:
+    def list(self, *, kind=None, run_id=None, session_id=None, page_id=None) -> list:
         out = []
         with self._lock:
             items = list(self._load().values())
@@ -191,6 +194,8 @@ class ArtifactStore:
             if run_id and info.get("run_id") != run_id:
                 continue
             if session_id and info.get("session_id") != session_id:
+                continue
+            if page_id and info.get("page_id") != page_id:
                 continue
             out.append(dict(info))
         return sorted(out, key=lambda x: x.get("created_at", 0))

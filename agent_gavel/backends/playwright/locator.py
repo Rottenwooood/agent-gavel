@@ -1,30 +1,12 @@
 """locator 解析：target 归一、strict 检查与候选样例。"""
 
 from ...core.errors import GavelError
+from ...core.targets import normalize
 from .frames import frame_root
-
-_TARGET_KEYS = ("role", "label", "placeholder", "text", "testid", "css", "xpath")
 
 
 class LocatorMixin:
-    @staticmethod
-    def _normalize_target(target):
-        if not isinstance(target, dict):
-            raise GavelError("bad_target", "target 必须是对象", hint='如 {"by":"css","value":"#q"}')
-        by = target.get("by")
-        value = target.get("value")
-        if by is None:
-            for k in _TARGET_KEYS:
-                if k in target:
-                    by, value = k, target[k]
-                    break
-        if by is None or value is None:
-            raise GavelError(
-                "bad_target",
-                f"target 缺少 by/value：{target}",
-                hint="by 取 role|label|placeholder|text|testid|css|xpath",
-            )
-        return by, value
+    _normalize_target = staticmethod(normalize)
 
     async def resolve(self, handle, target):
         page = handle.page
@@ -68,7 +50,7 @@ class LocatorMixin:
                     f"locator 无命中：{by}={value}",
                     detail={"target": target},
                     retryable=True,
-                    hint="用 page_explore 找可用锚点",
+                    hint="用 page(op=explore) 找可用锚点",
                 )
             if n > 1:
                 samples = await self._samples(loc)

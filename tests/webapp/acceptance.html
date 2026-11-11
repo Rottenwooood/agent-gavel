@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>MCP Acceptance</title></head>
+<body>
+  <h1>Browser acceptance</h1>
+  <input id="entry" aria-label="Entry">
+  <input id="check" type="checkbox" aria-label="Check">
+  <select id="choice" aria-label="Choice"><option value="a">Alpha</option><option value="b">Beta</option></select>
+  <input id="upload" type="file" multiple>
+  <div id="source" draggable="true" ondragstart="event.dataTransfer.setData('text/plain','dragged')">Drag source</div>
+  <div id="destination" style="width:240px;height:100px;background:#eee"
+       ondragover="event.preventDefault()"
+       ondrop="event.preventDefault();this.textContent=event.dataTransfer.getData('text/plain')">Drop here</div>
+  <button id="popup" onclick="window.open('basic.html','_blank')">Open popup</button>
+  <button id="dialog" onclick="document.getElementById('answer').textContent=prompt('Test prompt','default')">Prompt</button>
+  <output id="answer"></output>
+  <a id="download" href="data:text/plain;charset=utf-8,e2e%20download" download="report.txt">Download</a>
+  <button id="delayed" onclick="setTimeout(()=>{document.getElementById('later').textContent='Ready'},50)">Delayed</button>
+  <output id="later"></output>
+  <div style="height:1600px">Scroll area</div>
+</body>
+</html>

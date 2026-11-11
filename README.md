@@ -1,377 +1,111 @@
-<div align="center">
-
 # agent-gavel
 
-**让 AI 探索一次网页流程，之后用可验证的 workflow 重放。**
+本地浏览器运行时与 MCP server：现场操作页面并附带断言，或录制工作流后重放。
 
-面向 AI agent 的本地浏览器运行时与 MCP server
+当前源码为 **0.5（未发布）**。95个旧入口收敛为14个入口、90个操作；旧工具名不再注册。完整参数、返回与迁移表见 [工具参考](docs/tools.md)。
 
-[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.13%2B-brightgreen)](pyproject.toml)
+## 安装与启动
 
-</div>
-
-## 它是什么
-
-agent-gavel 给 AI agent 提供完整的浏览器操作能力：多 session、多 context、多标签页、网页交互、文件上传下载、新窗口、嵌入页面和网页对话框处理，以及程序化断言。
-
-它有两种使用方式：
-
-- **即时操作**：AI 现场探索页面，执行动作，并在同一次调用中验证结果。
-- **Workflow 重放**：把探索过的流程录制、参数化并保存。之后一次 `workflow_run` 完成整条流程，减少重复探索、MCP 往返和上下文消耗。
-
-```text
-第一次：探索 → 操作 → 断言 → 录制 workflow
-以后：  workflow_run(params) → 浏览器执行 → 检查点验证 → 结果摘要
-页面变化：从失败步骤重新探索 → 局部修复 → 发布新版本
-```
-
-agent-gavel 负责浏览器运行、动作执行、结果验证和产物管理；任务目标和页面内容的理解仍由 AI agent 负责。
-
-### 为什么要有断言
-
-浏览器动作本身通常很快，但“动作到底有没有完成”经常需要模型再次查看页面才能判断。agent-gavel 把期望结果交给程序检查：动作完成后直接读取 URL、标题、文本、输入值、数量或业务字段，返回明确结果和证据。
-
-这带来三层收益：
-
-1. **更快、更可靠地确认结果**：模型不必为每个动作重新接收整页信息，也不靠肉眼猜测点击是否生效。
-2. **减少视觉回传、重试和模型思考**：简单表单、搜索、筛选和下载流程可以在一次工具调用中完成动作与验证；只有证据不足时才把问题交回模型。
-3. **成为 workflow 复用的基石**：模板把动作和检查点一起保存。后续重放时，程序在浏览器内部执行整条流程，只向模型返回摘要、失败步骤和产物。
-
-## 安装
-
-### 开发环境
-
-适合修改源码、运行测试和贡献模板。需要 Python 3.13+、Chrome/Chromium 和 uv：
+需要Python 3.13+、Chrome/Chromium和uv。
 
 ```bash
 git clone https://github.com/Rottenwooood/agent-gavel.git
 cd agent-gavel
 uv sync
-```
-
-系统已有 Chrome/Chromium 时可以直接使用。没有可用浏览器时安装 Playwright Chromium：
-
-```bash
-uv run playwright install chromium
-```
-
-启动源码版 MCP server：
-
-```bash
 ./run-mcp.sh
 ```
 
-### 通过 PyPI 安装
+本地MCP配置（替换为实际绝对路径）：
 
-适合直接使用已发布版本。全局安装：
+```json
+{"mcpServers":{"agent-gavel":{"command":"/absolute/path/agent-gavel/run-mcp.sh"}}}
+```
+
+升级0.5前先用旧客户端停止旧daemon；新adapter会拒绝不兼容接口，不会自动终止现有任务。
+
+adapter转发stdio；daemon唯一持有浏览器、资源和锁。多个客户端共享资源编号，同页串行，跨页可并行。
+
+## 公开接口
+
+```text
+browser        浏览器进程与资料副本
+session        执行租约与状态导入导出
+context        容器、cookie、请求头与权限
+page           生命周期、读取、等待与PDF
+locator        元素动作，可附带断言
+assertion      条件检查与格式说明
+workflow       模板、录制与运行控制
+artifact       所有产物，包含下载的查询、导出、抽取与清理
+trace          追踪开始/停止
+network        网络记录开始/停止
+screenshot     直接返回PNG图片及产物元数据
+console_get    控制台错误与警告
+performance_metrics 动作延迟统计
+daemon_shutdown      停止共享daemon
+```
+
+系列工具用op选择操作。参数集、业务必填、类型和默认值分别校验。返回也按操作定义：page.get返回单页；page.list返回items数组；page.meta和page.read分别返回元信息、自定义读取结果。
+
+默认detail=compact，省略明确重复或未指定的元数据；full保留业务字段和诊断。读取值里的null、false、0、空字符串、空集合与失败证据不会被递归删除。
+
+## 调用示例
+
+以下为MCP tools/call的工具名与参数。编号替换为实际返回值；先探索目标站点，不假定示例控件存在。
+
+```json
+{"name":"session","arguments":{"op":"create"}}
+{"name":"page","arguments":{"op":"navigate","page_id":"page_001","url":"https://example.com"}}
+{"name":"page","arguments":{"op":"explore","page_id":"page_001"}}
+{"name":"locator","arguments":{"op":"fill","page_id":"page_001","target":{"by":"label","value":"Search"},"value":"hello"}}
+{"name":"locator","arguments":{"op":"click","page_id":"page_001","target":{"by":"role","value":"button","name":"Search"},"assertions":{"url_contains":"search"}}}
+{"name":"screenshot","arguments":{"page_id":"page_001"}}
+```
+
+定位支持role/label/placeholder/text/testid/css/xpath、strict、nth和嵌套iframe。ok表示动作执行返回；pass表示检查通过；fail表示未满足；ambiguous保留变化证据。技术错误返回错误码和恢复提示，MCP isError为真。
+
+## 截图、下载与工作流
+
+screenshot(page_id?, selector?, full_page=false, save_to?)一次返回原生MCP图片和artifact_id/width/height等元数据。selector优先截元素，否则截视口或整页；width/height为图片像素；save_to是目录。图片不放入普通JSON文本。PDF使用page的pdf操作。
+
+下载自动捕获为kind=download的产物：
+
+```json
+{"name":"artifact","arguments":{"op":"list","kind":"download","page_id":"page_001"}}
+{"name":"artifact","arguments":{"op":"get","artifact_id":"artifact_001","expected_kind":"download"}}
+{"name":"artifact","arguments":{"op":"export","artifact_id":"artifact_001","dest_dir":"/tmp","path_visibility":"hidden"}}
+{"name":"artifact","arguments":{"op":"read_text","artifact_id":"artifact_001"}}
+```
+
+导出受路径白名单约束，默认隐藏绝对路径；user_visible才返回路径。expected_kind=download保留not_a_download错误。
+
+workflow的record_start开始录制，正常执行动作后record_stop编译保存草稿；也可直接save/validate模板，通过run重放。verbosity为summary/steps/full，失败步保留证据。模板仍为schema_version=2；写操作要求精确id。同session并发运行返回session_busy，暂停和取消在步骤边界处理。
+
+## 浏览器与资料
+
+默认有头managed：自起加固Chrome并以CDP连接，使用持久资料。default容器写回资料，isolated继承状态但不写回。session是租约，不是窗口。
+
+browser_mode=attach配合cdp_endpoint接管现有浏览器；playwright模式直接启动。接管真实环境、操作真实资料、导入导出登录态须获得相应授权。测试只用新建私有资料。
+
+常用配置：AGENT_GAVEL_HEADLESS、AGENT_GAVEL_DATA_DIR、AGENT_GAVEL_BROWSER_PROFILE、AGENT_GAVEL_WORKFLOWS_DIR、AGENT_GAVEL_ARTIFACT_DIR、AGENT_GAVEL_ALLOW_PATHS、AGENT_GAVEL_ALLOW_DOMAINS。环境变量仅由core/config.py读取。
+
+## 端到端验收
+
+验收走真实stdio、adapter、daemon和浏览器，不调用内部注册表或mock。数据和资料隔离，结束后仅清理本次测试拥有的进程及文件。
 
 ```bash
-uv tool install agent-gavel
+uv run python tests/e2e_mcp.py --output /tmp/gavel-headed-e2e.json
+uv run python tests/e2e_mcp.py --headless --output /tmp/gavel-headless-e2e.json
 ```
 
-或者安装到当前 Python 环境：
+覆盖14个入口、参数错误、真实交互/上传/下载、产物过滤/导出/抽取、cookie与状态迁移、工作流及并发、双客户端共享资源、三种PNG范围、PDF、追踪与网络记录。PNG验证图片内容块、实际尺寸及元数据一致。
+
+--list-only只验证协议和不依赖浏览器的调用，不能替代浏览器验收。环境必须允许本地socket并提供显示会话；环境失败不能用内部函数检查宣告通过。
+
+接口参考和schema从同一操作声明导出：
 
 ```bash
-pip install agent-gavel
+uv run python -m agent_gavel.tools.describe
+uv run python -m agent_gavel.tools.describe --markdown docs/tools.md
 ```
 
-安装完成后，`agent-gavel` 命令会启动 stdio MCP server，供 MCP 客户端拉起。
-
-## 接入 MCP 客户端
-
-MCP 客户端通过 stdio 拉起 agent-gavel。使用 PyPI 版本时：
-
-```json
-{
-  "mcp": {
-    "agent-gavel": {
-      "type": "local",
-      "command": ["agent-gavel"],
-      "enabled": true
-    }
-  }
-}
-```
-
-使用源码版本时，把 `command` 换成仓库中的 `run-mcp.sh` 绝对路径：
-
-```json
-{
-  "mcp": {
-    "agent-gavel": {
-      "type": "local",
-      "command": ["/绝对路径/agent-gavel/run-mcp.sh"],
-      "enabled": true
-    }
-  }
-}
-```
-
-无图形会话、服务器或 CI 环境可以给 MCP server 配置：
-
-```json
-"environment": {
-  "AGENT_GAVEL_HEADLESS": "1"
-}
-```
-
-### 进程模型
-
-MCP 客户端（opencode 等）可能同时拉起多个 agent-gavel 进程。agent-gavel 用
-**adapter + daemon** 处理：
-
-- **daemon** 是唯一持有浏览器、session/context/page、队列与产物索引的进程；
-- **adapter** 是 stdio 入口，只转发工具调用，不加载 Playwright；
-- 一个数据目录只有一个 daemon 和一个 Chrome；`browser_status` 返回 `daemon_pid` 与 `adapters`；
-- `daemon_shutdown(confirm=True)` 可停止 daemon（有运行中的 workflow 时需 `force=True`），下一次调用会自动拉起；
-- 因此跨 adapter 的 session/page id 一致，同一 session 的并发 workflow 由 daemon 统一裁决。
-
-## 配置
-
-常用环境变量：
-
-| 变量 | 用途 |
-|---|---|
-| `AGENT_GAVEL_HEADLESS` | `1` 使用无头浏览器 |
-| `AGENT_GAVEL_ALLOW_DOMAINS` | 允许访问的域名，逗号分隔 |
-| `AGENT_GAVEL_DOMAIN_GUARD` | `1` 时启用严格域名限制 |
-| `AGENT_GAVEL_ALLOW_PATHS` | 允许上传和导出的本地目录，逗号分隔 |
-| `AGENT_GAVEL_DATA_DIR` | session/profile 等运行数据目录 |
-| `AGENT_GAVEL_ARTIFACT_DIR` | 下载、截图、PDF 等产物目录 |
-| `AGENT_GAVEL_WORKFLOWS_DIR` | 用户 workflow 模板目录 |
-| `AGENT_GAVEL_MAX_DOWNLOAD_BYTES` | 单个下载大小上限 |
-| `AGENT_GAVEL_ARTIFACT_TTL_DAYS` | artifact 保留天数 |
-| `AGENT_GAVEL_CHROME_CHANNEL` | 指定浏览器通道；空 = 用 Playwright 自带 chromium |
-| `AGENT_GAVEL_EXTRA_ARGS` | 追加浏览器启动参数（空格分隔） |
-| `AGENT_GAVEL_DISABLE_GPU` | `1` 加回 `--disable-gpu`（软件渲染，一般不需要） |
-| `AGENT_GAVEL_BROWSER_MODE` | 浏览器来源：`managed`（默认，自启加固 Chrome）/ `playwright` |
-| `AGENT_GAVEL_CDP_ENDPOINT` | 接管一个已存在的浏览器（C2，如 `http://127.0.0.1:9222`） |
-| `AGENT_GAVEL_BROWSER_PROFILE` | C1 用的资料目录（覆盖当前副本） |
-| `AGENT_GAVEL_BROWSER_PROFILES` | 资料副本存放目录 |
-| `AGENT_GAVEL_CHROME_USER_DATA` | 复制来源：用户本机 Chrome 资料目录 |
-| `AGENT_GAVEL_CHROME_BIN` | 指定 Chrome/Chromium 可执行文件 |
-
-默认用户目录：
-
-```text
-~/.config/agent-gavel/workflows/
-```
-
-运行数据和 artifact 默认位于系统临时目录下的 `agent-gavel/`。密码、token、cookie 和 storage state 不应提交到仓库或模板社区。
-
-## 浏览器与身份
-
-默认（**C1**）：agent-gavel 自己启动一台加固过的 Chrome（持久真实资料目录），再用 Playwright 连接它——已关闭 `navigator.webdriver`、无头 UA 去标记、有头用真实 GPU。在这之上：
-
-**容器策略**（`session_create(container=...)`）：
-
-- `default`（默认）：用资料目录的**默认容器**，继承其中的登录/cookie，改动**累积回**资料目录（可迭代）。
-- `isolated`：新建隔离容器，**继承**资料目录的 cookie，但**不写回**（并行/多账号不污染身份）。
-- `context_create` 与 `clone` 默认用 `isolated`。
-
-**资料副本**（把你本机 Chrome 的身份复制成我们自己的，可多份切换）：
-
-```text
-browser_profile_copy(tier="default")   # 从 ~/.config/google-chrome 复制一份
-browser_profile_list()                  # 列出所有副本 + 当前使用的
-browser_profile_use(name)               # 切换当前副本
-browser_profile_delete(name)            # 删除副本（不动用户原目录）
-```
-
-`tier`：`strict`（不含 cookie/站点态，隐私最好）/ `default`（含 cookie/历史/站点态，推荐）/ `full`（再加扩展代码）。始终剔除密码、自动填充、同步、设备标识与缓存。首个副本自动成为当前，默认存放在 `~/.config/agent-gavel/browser-profiles/`。可反复调用 = 从用户当前资料目录再拍一份新快照。
-
-**接管已有浏览器（C2）**：
-
-```text
-browser_launch(browser_mode="attach", cdp_endpoint="http://127.0.0.1:9222")
-```
-
-只连接、不负责关闭，返回会带 `warning`（真实账号暴露在本机调试口）。`browser_mode="playwright"` 回到 Playwright 直接启动。
-
-**生命周期**：启动前会对账——复用已有同资料目录的 Chrome（含 MCP 重启后靠状态文件 re-attach），或清理我们自己遗留的进程并删除单例锁后干净启动；`browser_launch` 幂等；`browser_status.os_browsers` 报告 OS 里真实在用我们资料目录的 Chrome。
-
-> 复制资料副本会把**真实 cookie/登录态**落到本地副本目录；不需要登录身份时用 `strict` 档。对风控敏感的站点建议**有头** + 复用持久资料。
->
-> **隐私约定**：`browser_profile_copy`、`browser_mode="attach"`、`context_cookies_get`、`session_export_state`/`import_state` 等涉及真实 cookie/登录态或写入本地文件的工具，在 MCP 描述里都标了 **⚠ 隐私敏感**；**agent 调用前应先向用户说明并取得同意**。
-
-## 最小使用流程
-
-工具调用时，始终优先使用返回的 `session_id`、`context_id` 和 `page_id`，多个页面并行时不要依赖“当前页面”。
-
-### 现场操作
-
-```text
-session_create()
-page_navigate(page_id, url, assertions?)
-page_explore(page_id, tag?, text_contains?, head?, tail?)
-locator_fill(page_id, target, value, assertions?)
-locator_click(page_id, target, assertions?)
-locator_press(page_id, target, keys, assertions?)
-page_read(page_id, page_features)
-```
-
-常用字段：
-
-- `target`：`{"by":"css","value":"#search"}`、`{"by":"role","value":"button","name":"提交"}` 等。
-- `assertions` / `checks`（两处叫法等价）三种写法：
-  - 映射：`{"u": {"read":"url","op":"contains","value":"baidu.com"}}`
-  - 扁平：`{"url_contains":"baidu.com","text_contains":"保研","count_gte":1}`
-  - 顶层 op：`{"title":"百度","op":"contains"}`
-  `read` 取 url|title|text|value|count|html|expr|attr（缺省按名字或 selector 推断，判断不出会**报错**而不是拿标题去比）；`op` 取 eq|neq|contains|not_contains|regex|exists|not_exists|gt|lt|gte|lte|count_eq|count_gte|count_gt；`value`/`expected` 等价。`assertion_schema()` 可查全套。
-- `page_features`：名称到 JavaScript 表达式的映射。
-
-例如：
-
-```json
-{
-  "page_id": "page_001",
-  "target": {"by": "css", "value": "#search"},
-  "value": "Playwright",
-  "assertions": {
-    "result": {
-      "selector": "#results",
-      "op": "contains",
-      "value": "Playwright"
-    }
-  }
-}
-```
-
-动作结果会带 `pass`、`fail` 或 `ambiguous`，并返回断言明细。`ambiguous` 表示页面发生了变化，但当前断言不足以确认结果。没有断言的动作仍然可以执行，但无法获得同样的结果保证。
-
-### 录制和重放
-
-```text
-workflow_record_start(page_id?)
-→ 执行一组 page_* / locator_* 操作
-workflow_record_stop(site?, desc?, template_id?, parameterize?, sensitive?)
-workflow_run(name_or_id, params?, session_id?, verbosity?, confirm?)
-```
-
-workflow 会保存参数、步骤、检查点和副作用策略。执行结果默认返回摘要；需要排查时可使用 `verbosity="steps"` 或 `verbosity="full"`。
-
-## 能力总览
-
-| 范畴 | 能力 |
-|---|---|
-| 浏览器资源 | browser、session、context、page，临时/持久/克隆 session |
-| 页面 | 导航、读取、正文、链接、探索、截图、PDF、前进后退、刷新 |
-| 交互 | click、fill、type、press、hover、scroll、check、select、drag、upload |
-| 页面结构 | 多标签页、新窗口、嵌入页面 iframe、网页 alert/confirm/prompt 对话框 |
-| 状态 | cookies、storage state、headers、permissions、proxy |
-| 验证 | URL、标题、文本、值、属性、元素存在、数量、表达式、三态结果 |
-| 身份 / 容器 | 资料副本（复制/切换/清理）；默认容器（继承+累积）/ 隔离容器；C1 自启 / C2 接管 |
-| 定位 / 元信息 | 按文本定位可点元素、页面元信息、紧凑可点清单、按文本等待、空内容兜底 |
-| 文件 | 下载捕获、artifact、SHA-256、MIME、文本抽取、导出和清理 |
-| Workflow | 录制、编译、参数化、检查点、重放、暂停、恢复、取消、局部修复 |
-| 诊断 | trace、网络记录、console、页面错误、性能指标 |
-
-同一 page 的动作会串行执行；不同 page、context 和 session 可以并行执行。
-
-## Workflow 模板
-
-模板保存在用户目录中，用户层优先于随包模板。模板可以通过 `workflow_save`、`workflow_validate`、`workflow_get`、`workflow_list`、`workflow_publish` 和 `workflow_stats` 管理。
-
-模板适合保存：
-
-- 固定网站中的重复操作。
-- 带登录态的后台流程。
-- 多步骤搜索、筛选、下载和校验。
-- 有明确结果检查点的表单流程。
-
-分享模板时：
-
-- 用 `$VAR` 替代关键词、账号和其他可变输入。
-- 通过 `sensitive` 标记密码、token 等敏感参数。
-- 不提交真实 cookie、storage state、个人数据和本机路径。
-- 说明依赖的登录态、测试环境和已知失效点。
-
-当前模板分享方式是本地文件和 Git PR，暂时没有远程模板市场或自动同步服务。
-
-## 验证和安全边界
-
-Playwright 负责元素等待和动作执行，agent-gavel 负责结果验证。动作完成不等于业务成功；关键流程应配置检查点和业务断言，例如：
-
-- 页面是否到了目标 URL。
-- 结果区域是否出现。
-- 下载是否完成、文件是否符合预期。
-- 页面金额和下载文件金额是否一致。
-- 提交、删除、支付等副作用是否经过确认。
-
-安全配置可以限制：
-
-- 允许访问的域名。
-- 允许上传和导出的目录。
-- 单文件下载大小。
-- artifact 保留时间和总量。
-- workflow 中可自动重试的动作。
-
-页面文本、截图和 accessibility 信息都应视为不可信输入，不能把网页中的指令当作系统指令。
-
-## 性能和测试
-
-本地 fixture 基准用于衡量 runtime 开销，不代表所有网站的网络加载速度。当前测得：
-
-| 指标 | 本地结果 |
-|---|---:|
-| 冷启动 | 约 370ms |
-| 热调用 | 约 1.5ms |
-| click p95 | 约 34ms |
-| fill p95 | 约 5.5ms |
-| page_explore p95 | 约 13ms |
-| 跨 page 并行相对串行 | 约 2 倍 |
-
-任务级 benchmark 还会比较探索和模板重放的调用次数与返回数据量。当前本地固定流程的一次结果是：探索 5 次工具调用、回传 1681B；模板重放 1 次调用、回传 192B，约减少 80% 的回传数据。回传数据量只是 token 的代理指标，不等于真实模型 token；真实网站会受到网络、登录态和反爬策略影响。
-
-| 流程 | 探索 | 模板重放 |
-|---|---:|---:|
-| MCP 调用次数 | 5 次 | **1 次** |
-| 回传数据量 | 1681B | **192B** |
-
-这个收益来自减少重复探索和中间页面回传，不代表浏览器跳过了真实的页面加载和等待。
-
-开发环境运行：
-
-```bash
-uv run pytest -q
-uv run python tests/bench_runtime.py
-uv run python tests/bench_tasks.py
-uv run python tests/bench_real.py
-uv run python tests/mcp_live_smoke.py
-```
-
-## 支持范围和限制
-
-- 当前主线是 Playwright runtime；旧裸 CDP 网页通道和 AT-SPI 桌面通道已归档到 `legacy/`，不注册、不打包、不运行。
-- Linux、Windows 网页通道已验证；macOS 尚未作为发布目标验证。
-- 系统 Chrome 优先；也可以安装 Playwright Chromium。
-- 不提供验证码识别、反爬绕过或强风控站点自动化。
-- 启动阶段已做基础反检测加固（关闭 `navigator.webdriver`、无头 UA 去 `HeadlessChrome`、有头用真实 GPU），但全新 profile、无头 WebGL、CDP 附着等仍是残留特征；对风控敏感的站点建议**有头**并复用持久 profile。调研与前后对比见 [docs/detection.md](docs/detection.md)。
-- Canvas、WebGL、地图和网页小游戏需要视觉/坐标后端，目前不在语义 DOM 的承诺范围内。
-- workflow 的暂停、恢复和取消主要在步骤边界生效。
-- 当前版本仍是开发预览版，涉及发送、删除、支付、下单或覆盖数据的流程必须先在测试环境验证。
-
-## 模板贡献
-
-欢迎贡献经过验证的 workflow。一个合格的模板 PR 应说明：
-
-- 站点和任务目标。
-- 参数和敏感参数。
-- 是否依赖已登录 session。
-- 使用的 locator 和检查点。
-- 多组参数的运行结果。
-- 已知失效点和外部副作用。
-
-不要提交密码、token、cookie、storage state 或真实业务数据。贡献代码和模板时使用 [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)。
-
-## 文档和路线
-
-- [CHANGELOG.md](CHANGELOG.md)：版本变更。
-- [docs/tech-plan.md](docs/tech-plan.md)：技术实现基准。
-- [docs/roadmap.md](docs/roadmap.md)：当前路线和发布准备。
-- [docs/agent-gavel-discussion.md](docs/agent-gavel-discussion.md)：完整设计讨论。
-
-## License
-
-MIT
+架构与唯一归属见 [docs/architecture.md](docs/architecture.md)。

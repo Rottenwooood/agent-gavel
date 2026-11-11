@@ -9,7 +9,7 @@ import time
 import pytest
 
 from agent_gavel.core.errors import GavelError
-from agent_gavel.tools import register_runtime_tools
+from tool_fixture import register_legacy_tools as register_runtime_tools
 
 
 class FakeMCP:

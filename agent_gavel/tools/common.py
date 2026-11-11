@@ -1,11 +1,7 @@
-"""工具层公共：guard 装饰器、runtime/backend 解析、id 拼装。"""
-
-import functools
-import time
-import uuid
+"""工具层公共：runtime/backend 解析、id 拼装。"""
 
 from ..backends.playwright import PlaywrightBackend
-from ..core.errors import STATUS_VALUES, GavelError, wrap_exception
+from ..core.errors import STATUS_VALUES, GavelError
 from ..runtime import get_runtime
 
 _BACKEND = None
@@ -37,26 +33,6 @@ def envelope(result, *, operation_id=None, elapsed_ms=None):
     if elapsed_ms is not None:
         result.setdefault("elapsed_ms", elapsed_ms)
     return result
-
-
-def guard(fn):
-    @functools.wraps(fn)
-    async def wrapper(*args, **kwargs):
-        operation_id = "op_" + uuid.uuid4().hex[:8]
-        started = time.perf_counter()
-        try:
-            result = await fn(*args, **kwargs)
-        except GavelError as e:
-            result = e.to_dict()
-        except Exception as e:  # noqa: BLE001
-            result = wrap_exception(e).to_dict()
-        return envelope(
-            result,
-            operation_id=operation_id,
-            elapsed_ms=round((time.perf_counter() - started) * 1000, 1),
-        )
-
-    return wrapper
 
 
 def ids(handle):

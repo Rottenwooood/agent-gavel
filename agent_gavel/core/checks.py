@@ -29,6 +29,17 @@ OPS = frozenset(
     }
 )
 
+
+def documentation():
+    """Compact public syntax, generated from the parser's own vocabulary."""
+    return (
+        "断言支持{名称:{read?,op,value?,expected?,selector?,attr?,expr?,frame?}}、"
+        "{url_contains:'x'}、{title:'x',op:'contains'}及单条检查。"
+        "value/expected等价；read缺省按名称/expr/attr/selector推导，无法推导报错。"
+        "read=" + "|".join(sorted(READ_KINDS)) + ";op=" + "|".join(sorted(OPS)) + "。"
+    )
+
+
 _READ_PREFIX = {
     "url": "url",
     "title": "title",

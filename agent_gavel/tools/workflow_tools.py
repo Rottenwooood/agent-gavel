@@ -1,7 +1,7 @@
 """M4：workflow_* MCP 工具（docs/tech-plan.md §8、§5.15）。"""
 
 from ..core.errors import GavelError
-from .common import backend, guard
+from .common import backend
 
 
 def _build_tid(site_slug, name_slug):
@@ -30,11 +30,10 @@ def _find_run(rt, run_id):
     return list(rt.runs.values())[-1]
 
 
-def register_workflow_tools(mcp):
-    @mcp.tool()
-    @guard
+def register_workflow_tools(catalog):
+    @catalog.operation(returns="WorkflowSaved", required=("template",), nonempty=("template",))
     async def workflow_save(template: dict = None):
-        """校验并保存工作流模板（同 template_id 再存 = version+1）。"""
+        "校验后保存，同id版本递增。"
         from ..workflows import loader
         from ..workflows import schema as S
 
@@ -51,18 +50,16 @@ def register_workflow_tools(mcp):
         info = loader.save(norm)
         return {"status": "ok", **info, "warnings": warnings}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="WorkflowDeleted")
     async def workflow_delete(template_id: str):
-        """删除一个模板（按名称解析后精确删除）。"""
+        "只接受精确template_id。"
         from ..workflows import loader
 
-        return {"status": "ok", **loader.delete(loader.resolve_id(template_id))}
+        return {"status": "ok", **loader.delete(template_id)}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Validation", required=("template",), nonempty=("template",))
     async def workflow_validate(template: dict = None):
-        """校验模板，返回是否有效及错误/告警。"""
+        "校验模板，返回是否有效及错误/告警。"
         from ..workflows import schema as S
 
         if not template:
@@ -76,45 +73,40 @@ def register_workflow_tools(mcp):
             "normalized": norm if not errors else None,
         }
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Workflows")
     async def workflow_list():
-        """列出工作流（用户层优先），含版本与成功/失败统计。"""
+        """"""
         from ..workflows import loader
 
         return {"status": "ok", "items": loader.list_workflows()}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Template")
     async def workflow_get(name_or_id: str):
-        """按 template_id 或 site 取模板全文。"""
+        "按精确id或site只读查询。"
         from ..workflows import loader
 
         t, _path = loader.load(name_or_id)
         return {"status": "ok", "template": t}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Published")
     async def workflow_publish(template_id: str, out_dir: str = None):
-        """导出干净模板 JSON 供 PR（不联网）。"""
+        "导出模板，不联网。"
         from ..workflows import loader
 
         return {"status": "ok", **loader.publish(template_id, out_dir)}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="WorkflowStats")
     async def workflow_stats():
-        """所有模板的成功/失败统计。"""
+        """"""
         from ..workflows import loader
 
         return {"status": "ok", "stats": loader.stats()}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Recording")
     async def workflow_record_start(
         session_id: str = None, context_id: str = None, page_id: str = None, keep_all: bool = False
     ):
-        """开始录制：之后通过 locator_*/page_navigate 执行的动作会被记录。"""
+        "录制后续元素动作和导航。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -131,8 +123,7 @@ def register_workflow_tools(mcp):
         )
         return {"status": "ok", **info}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="WorkflowSaved")
     async def workflow_record_stop(
         site: str = None,
         desc: str = "",
@@ -142,7 +133,7 @@ def register_workflow_tools(mcp):
         sensitive: list = None,
         auto_checkpoint: bool = False,
     ):
-        """停止录制，编译成模板草稿并保存。"""
+        "编译保存草稿；parameterize={变量:被替换值}。"
         from ..runtime import get_runtime
         from ..workflows import compiler, loader
 
@@ -173,8 +164,9 @@ def register_workflow_tools(mcp):
         info = loader.save(draft)
         return {"status": "ok", **info, "warnings": warnings, "recorded_steps": len(rec.steps)}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(
+        returns="WorkflowRun", fields={"verbosity": {"enum": ["summary", "steps", "full"]}}
+    )
     async def workflow_run(
         name_or_id: str,
         params: dict = None,
@@ -185,12 +177,7 @@ def register_workflow_tools(mcp):
         wait_s: float = 6.0,
         page_id: str = None,
     ):
-        """一次调用重放模板。
-
-        verbosity: summary（默认，只回检查点摘要）| steps（每步）| full（含证据）。
-        失败步自动升级为 full。requires_confirmation 步需 confirm=True 才执行。
-        page_id：显式指定在哪个 page 上执行（省略则用 session 的 active page）。
-        """
+        "失败步含证据，确认步骤需confirm。"
         from ..workflows import loader
 
         rt, runner = _runner()
@@ -216,10 +203,9 @@ def register_workflow_tools(mcp):
             result["republished"] = info
         return result
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="RunControl")
     async def workflow_pause(run_id: str = None):
-        """在步边界暂停一个运行中的 workflow。"""
+        "在步边界暂停。"
         from ..runtime import get_runtime
 
         st = _find_run(get_runtime(), run_id)
@@ -227,10 +213,9 @@ def register_workflow_tools(mcp):
         st.status = "paused"
         return {"status": "ok", "run_id": st.run_id, "paused": True}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="RunControl")
     async def workflow_resume(run_id: str = None):
-        """恢复被暂停的 workflow（不重放已完成步骤）。"""
+        "继续未完成步骤，不重放。"
         from ..runtime import get_runtime
 
         st = _find_run(get_runtime(), run_id)
@@ -239,10 +224,9 @@ def register_workflow_tools(mcp):
             st.status = "running"
         return {"status": "ok", "run_id": st.run_id, "paused": False}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="RunControl")
     async def workflow_cancel(run_id: str = None):
-        """取消 workflow（在步边界生效）。"""
+        "在步边界取消。"
         from ..runtime import get_runtime
 
         st = _find_run(get_runtime(), run_id)

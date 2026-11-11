@@ -5,31 +5,17 @@ expect 做 UI/业务层断言，三态：pass / fail / ambiguous（有动作前�
 
 from ..core.checks import OPS, READ_KINDS
 from ..core.errors import GavelError
-from .common import backend, guard, ids
+from .common import backend, ids
 
 
-def register_assertion_tools(mcp):
-    @mcp.tool()
-    @guard
+def register_assertion_tools(catalog):
+    @catalog.operation(
+        returns="Assertions", tool="assertion", op="check", one_nonempty=("checks", "assertions")
+    )
     async def expect(
         page_id: str = None, checks: dict = None, assertions: dict = None, wait_s: float = 6.0
     ):
-        """断言一组检查，轮询到满足或超时。参数 checks 与 assertions 等价。
-
-        格式（两种写法都支持）：
-        1) 映射：{名字: {op, value, read?, selector?, attr?, expr?, frame?}}
-           例 {"t": {"read":"title","op":"contains","value":"百度"},
-               "u": {"read":"url","op":"contains","value":"baidu.com"},
-               "n": {"read":"count","selector":".item","op":"count_gte","value":1}}
-        2) 扁平便利：{url_contains: "baidu", text_contains: "保研", title_eq: "x"}
-           前缀 = 读什么（url|title|text|value|count|html|expr|attr），后缀 = 比较。
-        也兼容 {"title": {"op":"contains","expected":"百度"}}（expected 等同 value）。
-        op: eq|neq|contains|not_contains|regex|exists|not_exists|gt|lt|gte|lte|
-            count_eq|count_gte|count_gt
-        缺省读什么：按名字（url/title/text/…）或 selector（元素文本）；都判断不出会报错，
-        不会再静默拿标题去比。
-        返回 status: pass|fail（配动作时由动作工具判 pass|fail|ambiguous）。
-        """
+        "checks/assertions择一非空；同时给以checks优先；按wait_s轮询。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -41,10 +27,9 @@ def register_assertion_tools(mcp):
         ev = await be.evaluate_checks(handle, checks, wait_s=wait_s)
         return {"status": ev["status"], **ids(handle), "assertions": ev["assertions"]}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="AssertionSchema")
     async def assertion_schema():
-        """只读：断言（assertions/checks）的可用写法、字段与 op 枚举。"""
+        "断言完整格式与示例。"
         return {
             "status": "ok",
             "forms": {
@@ -70,10 +55,9 @@ def register_assertion_tools(mcp):
             "note": "文本类返回（page_text/page_read 等）标 untrusted=true，注入模型时按不可信内容处理",
         }
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Location", required=("url",), nonempty=("url",))
     async def page_wait_for_url(page_id: str = None, url: str = None, timeout_s: float = 30.0):
-        """等待 URL 匹配（子串/glob/正则，Playwright wait_for_url 语义）。"""
+        "精确URL或glob匹配。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -88,12 +72,16 @@ def register_assertion_tools(mcp):
         )
         return {"status": "ok", **ids(handle), **res}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(
+        returns="WaitSelector",
+        required=("selector",),
+        nonempty=("selector",),
+        fields={"state": {"enum": ["attached", "detached", "visible", "hidden"]}},
+    )
     async def page_wait_for_selector(
         page_id: str = None, selector: str = None, state: str = "visible", timeout_s: float = 30.0
     ):
-        """等待选择器出现（state: attached|detached|visible|hidden）。"""
+        """"""
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -118,8 +106,11 @@ def register_assertion_tools(mcp):
             )
         return {"status": "ok", **ids(handle), **res}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(
+        returns="WaitText",
+        required=("text",),
+        fields={"state": {"enum": ["attached", "detached", "visible", "hidden"]}},
+    )
     async def page_wait_for_text(
         page_id: str = None,
         text: str = None,
@@ -127,10 +118,7 @@ def register_assertion_tools(mcp):
         state: str = "visible",
         timeout_s: float = 30.0,
     ):
-        """等某段文本出现（满足即返回；selector 给了就在其内部等）。
-
-        优于猜结构选择器：直接等"该看到的文案"，加载快则快返回、慢则等到出现。
-        """
+        "等待首个文本命中；selector限定范围，不要求唯一。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -150,10 +138,11 @@ def register_assertion_tools(mcp):
             rt.recorder.record(handle, step)
         return {"status": "ok", **ids(handle), **res}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(
+        returns="WaitLoad", fields={"state": {"enum": ["load", "domcontentloaded", "networkidle"]}}
+    )
     async def page_wait_for_load(page_id: str = None, state: str = "load", timeout_s: float = 30.0):
-        """等待页面加载状态（load / domcontentloaded / networkidle）。"""
+        """"""
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -166,12 +155,11 @@ def register_assertion_tools(mcp):
         )
         return {"status": "ok", **ids(handle), **res}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="WaitResponse")
     async def page_wait_for_response(
         page_id: str = None, url: str = None, status: int = None, timeout_s: float = 30.0
     ):
-        """等待一个匹配的响应（url 支持子串或 * glob；可选 status）。"""
+        "按URL子串/glob和HTTP状态码筛选响应。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -184,10 +172,9 @@ def register_assertion_tools(mcp):
         )
         return {"status": "ok", **ids(handle), **res}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Download")
     async def page_wait_for_download(page_id: str = None, timeout_s: float = 30.0):
-        """等待下载完成并返回 artifact（由 page.on('download') 自动捕获）。"""
+        "等待下载完成并返回 artifact（由 page.on('download') 自动捕获）。"
         from ..core.errors import GavelError
         from ..runtime import get_runtime
 
@@ -210,10 +197,9 @@ def register_assertion_tools(mcp):
             "mime_type": info["mime_type"],
         }
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Popup")
     async def page_wait_for_popup(page_id: str = None, url: str = None, timeout_s: float = 30.0):
-        """等待由该 page 打开的新页面（popup / target=_blank）。"""
+        "等待由该 page 打开的新页面（popup / target=_blank）。"
         from ..core.errors import GavelError
         from ..runtime import get_runtime
 
@@ -240,16 +226,11 @@ def register_assertion_tools(mcp):
             "new_page": new_page.to_dict() if new_page else None,
         }
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Event")
     async def page_wait_for_event(
         kinds: list = None, page_id: str = None, timeout_s: float = 30.0, include_past: bool = False
     ):
-        """等待一个**新**事件（kinds 为事件名列表，如 ["download_completed"]）。
-
-        默认只等调用之后发生的事件（避免命中缓冲里的旧事件）；
-        include_past=True 时也接受缓冲里的历史事件。
-        """
+        "默认只等调用后的新事件；include_past才接受缓冲历史。"
         import time
 
         from ..core.errors import GavelError

@@ -66,13 +66,13 @@ class ReaderMixin:
         )
         result = {"source": "dom", "untrusted": True, **info}
         if level == "compact":
-            items = await self.explore(page)
+            items = await self.explore(handle)
             result["elements"] = [
                 {"tag": e.get("tag"), "text": (e.get("text") or "")[:60], "anchor": e.get("anchor")}
                 for e in items["items"][:limit]
             ]
         elif level in ("interactive", "full"):
-            items = await self.explore(page, include_all=True)
+            items = await self.explore(handle, include_all=True)
             result["elements"] = items["items"][:limit]
         if level == "full":
             html = await page.content()

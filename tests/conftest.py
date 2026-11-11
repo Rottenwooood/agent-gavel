@@ -89,28 +89,44 @@ def pytest_sessionfinish(session, exitstatus):
     _kill_test_chrome()
 
 
-class FakeMCP:
-    """收集 @mcp.tool() 注册的函数，供直接调用工具层。"""
+class ToolFixture(dict):
+    """Legacy test notation only; the production catalog exposes canonical tools.
 
-    def __init__(self):
-        self.tools = {}
+    Old behavioral tests can keep their calls while the new black-box acceptance
+    exercises the actual MCP tool names. This does not register legacy MCP tools.
+    """
 
-    def tool(self, *a, **k):
-        def deco(fn):
-            self.tools[fn.__name__] = fn
-            return fn
+    def __init__(self, catalog):
+        self.catalog = catalog
+        for name in catalog.groups:
+            self[name] = self._call(name)
 
-        return deco
+    def _call(self, tool, op=None, defaults=None):
+        async def call(**arguments):
+            payload = {"detail": "full", **(defaults or {}), **arguments}
+            if op is not None:
+                payload["op"] = op
+            return (await self.catalog.call(tool, payload)).result
+
+        return call
+
+    def __missing__(self, old_name):
+        from agent_gavel.tools.migration import mappings
+
+        aliases = mappings(self.catalog)
+        if old_name in aliases:
+            return self._call(*aliases[old_name])
+        tool, op = old_name.split("_", 1)
+        if (tool, op) not in self.catalog.operations:
+            raise KeyError(old_name)
+        return self._call(tool, op)
 
 
 @pytest.fixture
 def gavel_tools(runtime):
-    """注册全部 runtime 工具，返回 {name: callable}。"""
-    from agent_gavel.tools import register_runtime_tools
+    from agent_gavel.tools import create_catalog
 
-    m = FakeMCP()
-    register_runtime_tools(m)
-    return m.tools
+    return ToolFixture(create_catalog())
 
 
 @pytest_asyncio.fixture

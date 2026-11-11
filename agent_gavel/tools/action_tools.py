@@ -4,7 +4,7 @@
 """
 
 from ..core.errors import GavelError
-from .common import backend, guard, ids, rec, run_with_optional_assert
+from .common import backend, ids, rec, run_with_optional_assert
 
 
 def _rt_and_handle(page_id):
@@ -45,9 +45,8 @@ async def _run_target(
     )
 
 
-def register_action_tools(mcp):
-    @mcp.tool()
-    @guard
+def register_action_tools(catalog):
+    @catalog.operation(returns="Action", action="click")
     async def locator_click(
         page_id: str = None,
         target: dict = None,
@@ -59,7 +58,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """点击元素。target 见 locator 规范；count=2 双击，button=right 右键。"""
+        "count=2双击。"
         return await _run_target(
             page_id,
             "click",
@@ -74,8 +73,7 @@ def register_action_tools(mcp):
             wait_navigation=wait_navigation,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Action", action="fill")
     async def locator_fill(
         page_id: str = None,
         target: dict = None,
@@ -84,7 +82,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """清空并填入文本（真实输入）。"""
+        "替换输入。"
         return await _run_target(
             page_id,
             "fill",
@@ -96,8 +94,7 @@ def register_action_tools(mcp):
             value=value,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Action", action="type")
     async def locator_type(
         page_id: str = None,
         target: dict = None,
@@ -107,7 +104,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """逐键输入文本（含中文/emoji；delay_ms 控制按键间隔）。"""
+        "逐键追加输入。"
         return await _run_target(
             page_id,
             "type",
@@ -120,8 +117,7 @@ def register_action_tools(mcp):
             delay_ms=delay_ms,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Action", action="press")
     async def locator_press(
         page_id: str = None,
         target: dict = None,
@@ -131,7 +127,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """对元素按键/组合键，如 Enter / Tab / Control+A / Shift+Tab。"""
+        "按键或组合键。"
         return await _run_target(
             page_id,
             "press",
@@ -144,8 +140,7 @@ def register_action_tools(mcp):
             wait_navigation=wait_navigation,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Action", action="hover")
     async def locator_hover(
         page_id: str = None,
         target: dict = None,
@@ -153,7 +148,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """悬停元素（触发 tooltip/hover 态）。"""
+        """"""
         return await _run_target(
             page_id,
             "hover",
@@ -164,8 +159,7 @@ def register_action_tools(mcp):
             timeout_s=timeout_s,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Action", action="focus")
     async def locator_focus(
         page_id: str = None,
         target: dict = None,
@@ -173,7 +167,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """聚焦元素（不清空）。"""
+        """"""
         return await _run_target(
             page_id,
             "focus",
@@ -184,8 +178,7 @@ def register_action_tools(mcp):
             timeout_s=timeout_s,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Action", action="clear")
     async def locator_clear(
         page_id: str = None,
         target: dict = None,
@@ -193,7 +186,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """清空元素内容。"""
+        """"""
         return await _run_target(
             page_id,
             "clear",
@@ -204,8 +197,7 @@ def register_action_tools(mcp):
             timeout_s=timeout_s,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Action", action="scroll")
     async def locator_scroll(
         page_id: str = None,
         target: dict = None,
@@ -215,7 +207,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """滚动：给 target 则滚到该元素可见；否则按 direction/amount 滚页面。"""
+        "有target滚至元素，否则滚页面。"
         rt, handle = _rt_and_handle(page_id)
         be = backend()
         if target:
@@ -244,8 +236,7 @@ def register_action_tools(mcp):
             invoke=invoke,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Action", action="check")
     async def locator_check(
         page_id: str = None,
         target: dict = None,
@@ -253,7 +244,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """勾选 checkbox/radio。"""
+        """"""
         return await _run_target(
             page_id,
             "check",
@@ -264,8 +255,7 @@ def register_action_tools(mcp):
             timeout_s=timeout_s,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Action", action="uncheck")
     async def locator_uncheck(
         page_id: str = None,
         target: dict = None,
@@ -273,7 +263,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """取消勾选 checkbox。"""
+        """"""
         return await _run_target(
             page_id,
             "uncheck",
@@ -284,8 +274,7 @@ def register_action_tools(mcp):
             timeout_s=timeout_s,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Action", action="select")
     async def locator_select(
         page_id: str = None,
         target: dict = None,
@@ -295,7 +284,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """选择 <select> 选项。select_by: value|label|index。"""
+        "value允许null。"
         return await _run_target(
             page_id,
             "select",
@@ -308,8 +297,7 @@ def register_action_tools(mcp):
             select_by=select_by,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Action", action="drag")
     async def locator_drag(
         page_id: str = None,
         target: dict = None,
@@ -318,7 +306,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """拖拽：把 target 拖到 destination。"""
+        ""
         return await _run_target(
             page_id,
             "drag",
@@ -330,8 +318,7 @@ def register_action_tools(mcp):
             destination=destination,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Action", action="upload")
     async def locator_upload(
         page_id: str = None,
         target: dict = None,
@@ -340,7 +327,7 @@ def register_action_tools(mcp):
         assertions: dict = None,
         wait_s: float = 6.0,
     ):
-        """给 <input type=file> 设置文件（受文件白名单约束）。"""
+        "上传文件，受路径规则约束。"
         rt, _handle = _rt_and_handle(page_id)
         if not files:
             raise GavelError("bad_args", "需要 files（路径或路径列表）")
@@ -358,22 +345,14 @@ def register_action_tools(mcp):
             files=payload,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Dialog")
     async def page_handle_dialog(
         page_id: str = None,
         action: str = "accept",
         prompt_text: str = None,
         policy: str = None,
     ):
-        """处理页面对话框（alert/confirm/prompt）。
-
-        action: accept|dismiss；prompt_text 用于 prompt。
-        policy: manual|auto_accept|auto_dismiss —— 设置后续 dialog 的默认行为。
-        该调用**不经页面动作队列**（避免与阻塞动作死锁）。
-
-        注意：policy=manual（默认）时 dialog 会阻塞页面，须再调本工具处理。
-        """
+        "action=accept|dismiss；policy=manual|auto_accept|auto_dismiss；prompt_text用于prompt；绕开动作队列避免死锁。"
         rt, handle = _rt_and_handle(page_id)
         return {
             "status": "ok",

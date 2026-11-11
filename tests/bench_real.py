@@ -21,7 +21,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from agent_gavel.runtime import reset_runtime, shutdown_runtime  # noqa: E402
-from agent_gavel.tools import register_runtime_tools  # noqa: E402
+from tool_fixture import register_legacy_tools as register_runtime_tools  # noqa: E402
 
 PROXY = (
     os.environ.get("AGENT_GAVEL_BENCH_PROXY")

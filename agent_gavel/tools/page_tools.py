@@ -3,12 +3,15 @@
 import asyncio
 
 from ..core.errors import GavelError
-from .common import backend, guard, ids, rec, run_with_optional_assert
+from .common import backend, ids, rec, run_with_optional_assert
 
 
-def register_page_tools(mcp):
-    @mcp.tool()
-    @guard
+def register_page_tools(catalog):
+    @catalog.operation(
+        returns="Navigation",
+        action="navigate",
+        fields={"wait_until": {"enum": ["load", "domcontentloaded", "networkidle", "commit"]}},
+    )
     async def page_navigate(
         page_id: str = None,
         url: str = None,
@@ -19,15 +22,7 @@ def register_page_tools(mcp):
         fail_on_http_error: bool = False,
         min_text_chars: int = None,
     ):
-        """导航到 URL 并（可选）断言。唯一的导航入口。
-
-        assertions 格式（与 expect 一致）：{名字: {op, value, read?, selector?, attr?, expr?}}，
-        也支持扁平写法 {url_contains:"baidu.com", title_contains:"百度"}；
-        read 缺省按名字（url|title|text|value|count|html|expr|attr）或 selector。
-        - HTTP≥400 会带上 `http_status`/`warning`；`fail_on_http_error=True` 时直接判失败。
-        - `min_text_chars` 给定且正文更短 → 判失败（`empty_page`），避免"空壳仍 ok"。
-        - 断言结果：pass（满足）/ fail（未满足）/ ambiguous（没过但页面变了，附 diff）。
-        """
+        "HTTP错误可设失败；min_text_chars防空页。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -78,10 +73,12 @@ def register_page_tools(mcp):
             post=post,
         )
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(
+        returns="Snapshot",
+        fields={"level": {"enum": ["summary", "compact", "interactive", "full"]}},
+    )
     async def page_snapshot(page_id: str = None, level: str = "summary", limit: int = 50):
-        """页面摘要（summary/interactive/full）。页面内容标记 untrusted。"""
+        "summary摘要/compact锚点/interactive元素/full再含HTML。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -95,12 +92,13 @@ def register_page_tools(mcp):
         )
         return {"status": "ok", **ids(handle), **res}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(
+        returns="Text", fields={"mode": {"enum": ["text", "content", "html", "links"]}}
+    )
     async def page_text(
         page_id: str = None, selector: str = None, mode: str = "text", max_chars: int = 50000
     ):
-        """取页面/元素文本。mode: text|content|html|links。"""
+        "text=innerText/content=textContent；links整页且忽略selector/max_chars。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -117,10 +115,9 @@ def register_page_tools(mcp):
             res["truncated"] = True
         return {"status": "ok", **ids(handle), "untrusted": True, **res}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Links")
     async def page_links(page_id: str = None, max_links: int = 500):
-        """取页面所有链接 [{text, href}]。"""
+        "链接items与裁剪前total；max_links默认500。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -130,13 +127,9 @@ def register_page_tools(mcp):
         links = res.get("links", [])[:max_links]
         return {"status": "ok", **ids(handle), "items": links, "total": len(res.get("links", []))}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Read", required=("page_features",), nonempty=("page_features",))
     async def page_read(page_id: str = None, page_features: dict = None, selector: str = None):
-        """纯读取值（不判定/不重试）：{名字: JS表达式} → 实际值。
-
-        selector 给定时先等它出现。表达式支持函数形式 `"() => { ...; return ...; }"`。
-        """
+        "page_features为JS表达式映射；selector先等5秒。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -172,8 +165,7 @@ def register_page_tools(mcp):
             out["empty"] = empty
         return out
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Explore")
     async def page_explore(
         page_id: str = None,
         tag: str = None,
@@ -183,10 +175,7 @@ def register_page_tools(mcp):
         include_all: bool = False,
         include_hidden: bool = False,
     ):
-        """枚举可交互元素，给验证过唯一的锚点 + 候选 locator。
-
-        裁剪：tag / text_contains / head / tail；include_all 返回无锚点元素。
-        """
+        "head/tail裁剪；include_all含无锚点项；候选唯一性可未知。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -209,12 +198,11 @@ def register_page_tools(mcp):
         )
         return {"status": "ok", **ids(handle), **res}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Explore", required=("text",), nonempty=("text",))
     async def page_find_text(
         page_id: str = None, text: str = None, limit: int = 10, include_hidden: bool = False
     ):
-        """按文本定位到"最近的可点元素"并给稳定锚点（用于点"最新排序"这类文本控件）。"""
+        "按文本找最近可点击祖先。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -231,10 +219,9 @@ def register_page_tools(mcp):
         )
         return {"status": "ok", **ids(handle), **res}
 
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="Meta")
     async def page_meta(page_id: str = None):
-        """结构化页面元信息：url/title/描述/canonical/og/h1/h2/计数/正文长度。"""
+        "固定元信息提取，含canonical/og/h1/h2。"
         from ..runtime import get_runtime
 
         rt = get_runtime()
@@ -246,54 +233,9 @@ def register_page_tools(mcp):
         )
         return {"status": "ok", **ids(handle), "untrusted": True, **res}
 
-    @mcp.tool()
-    @guard
-    async def page_screenshot(
-        page_id: str = None, full_page: bool = False, selector: str = None, save_to: str = None
-    ):
-        """截图 → artifact。返回 artifact_id + 坐标元数据。"""
-        from ..runtime import get_runtime
-
-        rt = get_runtime()
-        handle = rt.page_mgr.resolve(page_id)
-        be = backend()
-        res = await handle.actor.submit(
-            "page_screenshot",
-            lambda: be.screenshot(handle, full_page=full_page, selector=selector),
-        )
-        info = await asyncio.to_thread(
-            rt.artifacts.save_bytes,
-            res["data"],
-            filename=f"{handle.page_id}.png",
-            kind="screenshot",
-            mime_type="image/png",
-            source_url=handle.page.url,
-            session_id=handle.context.lease_session_id(),
-            page_id=handle.page_id,
-        )
-        out = {
-            "status": "ok",
-            **ids(handle),
-            "artifact_id": info["artifact_id"],
-            "width": res["width"],
-            "height": res["height"],
-            "coordinate_width": res["width"],
-            "coordinate_height": res["height"],
-            "scale": 1.0,
-            "device_scale_factor": res["device_scale_factor"],
-        }
-        if save_to:
-            exp = await asyncio.to_thread(
-                rt.artifacts.export, info["artifact_id"], save_to, policies=rt.policies
-            )
-            out["exported"] = True
-            out["exported_filename"] = exp["filename"]
-        return out
-
-    @mcp.tool()
-    @guard
+    @catalog.operation(returns="ArtifactRef")
     async def page_pdf(page_id: str = None, save_to: str = None):
-        """生成页面 PDF → artifact（无头与有头均支持）。"""
+        "PDF产物；save_to为导出目标目录。"
         from ..runtime import get_runtime
 
         rt = get_runtime()

@@ -14,6 +14,8 @@ import asyncio
 from ..core import config as gavel_config
 from ..core.errors import GavelError
 
+SESSION_MODES = ("ephemeral", "persistent", "clone")
+
 
 class Session:
     def __init__(self, session_id, mode, config, handle):
@@ -81,7 +83,7 @@ class SessionManager:
             raise GavelError(
                 "session_not_found",
                 f"未知 session：{session_id}",
-                hint="用 session_create 新建，或 session_list 查看",
+                hint="用 session(op=create) 新建，或 session(op=list) 查看",
             )
         return s
 
@@ -89,7 +91,7 @@ class SessionManager:
         return {k: config[k] for k in self._LAUNCH_KEYS if config.get(k) is not None}
 
     async def create(self, mode="ephemeral", **config):
-        if mode not in ("ephemeral", "persistent", "clone"):
+        if mode not in SESSION_MODES:
             raise GavelError(
                 "bad_mode", f"未知 session 模式：{mode}", hint="mode 取 ephemeral|persistent|clone"
             )

@@ -82,21 +82,17 @@ class BrowserRuntime:
         return asyncio.ensure_future(coro)
 
     # ---- 状态 ----
-    async def status(self):
-        os_browsers = await asyncio.to_thread(self.processes.os_browsers)
-        return {
-            "processes": self.processes.list(),
-            "os_browsers": os_browsers,
-            "sessions": [s.to_dict() for s in self.sessions.values()],
+    async def status(self, detail="full"):
+        processes = self.processes.list()
+        result = {
+            "processes": processes,
             "counts": {
                 "sessions": len(self.sessions),
                 "contexts": len(self.contexts),
                 "pages": len(self.pages),
-                "processes": len(self.processes.list()),
+                "processes": len(processes),
             },
             "active_pages": {cid: c.active_page_id for cid, c in self.contexts.items()},
-            "events": self.events.stats(),
-            "metrics": self.metrics.snapshot(),
             "domain_restricted": self.policies.domain_restricted,
             "runs": {
                 rid: {"status": r.status, "template_id": r.template_id}
@@ -104,6 +100,14 @@ class BrowserRuntime:
             },
             "recording": self.recorder.active,
         }
+        if detail == "full":
+            result.update(
+                os_browsers=await asyncio.to_thread(self.processes.os_browsers),
+                sessions=[session.to_dict() for session in self.sessions.values()],
+                events=self.events.stats(),
+                metrics=self.metrics.snapshot(),
+            )
+        return result
 
     # ---- 生命周期 ----
     async def soft_reset(self):

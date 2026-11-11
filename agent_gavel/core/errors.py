@@ -10,6 +10,11 @@ import traceback
 import uuid
 
 STATUS_VALUES = frozenset({"ok", "pass", "fail", "ambiguous", "error", "blocked", "cancelled"})
+UNKNOWN_TOOL = "unknown_tool"
+UNKNOWN_OPERATION = "unknown_operation"
+ARTIFACT_KIND_MISMATCH = "artifact_kind_mismatch"
+CAPTURE_FAILED = "capture_failed"
+DAEMON_API_MISMATCH = "daemon_api_mismatch"
 
 _log = logging.getLogger("agent_gavel")
 
