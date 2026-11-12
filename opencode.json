@@ -1,0 +1,26 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "agent-gavel": {
+        "type": "local",
+        "command": ["./.venv/bin/python", "-m", "agent_gavel.main"],
+        "cwd": ".",
+        "codemode": false,
+        "environment": {
+          "AGENT_GAVEL_DATA_DIR": ".runtime/opencode/data",
+          "AGENT_GAVEL_ARTIFACT_DIR": ".runtime/opencode/artifacts",
+          "AGENT_GAVEL_WORKFLOWS_DIR": ".runtime/opencode/workflows",
+          "AGENT_GAVEL_BROWSER_PROFILE": ".runtime/opencode/browser-profile",
+          "AGENT_GAVEL_BROWSER_PROFILES": ".runtime/opencode/browser-profiles",
+          "AGENT_GAVEL_PROFILE_DIR": ".runtime/opencode/session-profiles",
+          "AGENT_GAVEL_ALLOW_PATHS": ".runtime/opencode",
+          "AGENT_GAVEL_BROWSER_MODE": "managed",
+          "AGENT_GAVEL_CDP_ENDPOINT": "",
+          "AGENT_GAVEL_EXTRA_ARGS": "",
+          "AGENT_GAVEL_HEADLESS": "0"
+        }
+      }
+    }
+  }
+}

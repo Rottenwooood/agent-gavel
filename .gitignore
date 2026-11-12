@@ -8,6 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+.runtime/
 *.txt
 
 # Runtime debug call logs (debug=1 dumps JSON per call)

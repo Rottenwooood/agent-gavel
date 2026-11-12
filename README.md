@@ -21,6 +21,8 @@ uv sync
 {"mcpServers":{"agent-gavel":{"command":"/absolute/path/agent-gavel/run-mcp.sh"}}}
 ```
 
+OpenCode V2 使用本仓库的 `opencode.json`（`mcp.servers` 格式）。执行 `uv sync` 后从仓库根目录启动 `opencode`，它使用本地 `.venv` 中的安装；浏览器资料、工作流和产物存入已忽略的 `.runtime/opencode/`。该项目配置将同名旧入口替换为当前安装，其他全局配置仍按 OpenCode 的规则加载。接入验收状态见 [OpenCode 验收记录](docs/validation/opencode-install.md)。
+
 升级0.5前先用旧客户端停止旧daemon；新adapter会拒绝不兼容接口，不会自动终止现有任务。
 
 adapter转发stdio；daemon唯一持有浏览器、资源和锁。多个客户端共享资源编号，同页串行，跨页可并行。

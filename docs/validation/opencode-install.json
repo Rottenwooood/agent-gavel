@@ -1,0 +1,44 @@
+{
+  "date": "2026-11-12",
+  "opencode_version": "2.0.24",
+  "package_version": "0.5.0",
+  "checkout": "/home/c6h4o2/Documents/Codex/2026-11-09/new-chat/work/agent-gavel",
+  "configuration": "opencode.json",
+  "installation": "independent editable virtual environment",
+  "global_configuration_modified": false,
+  "status": "blocked",
+  "mcp_checks": "not_run",
+  "browser_checks": "not_run",
+  "reason": "OpenCode server cannot listen in this restricted environment (EPERM)",
+  "runs": [
+    {
+      "command": [
+        "opencode",
+        "mcp",
+        "list"
+      ],
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "Error: Server process exited with code 1\nServeError: \n    at f (/$bunfs/root/chunk-x6wemdbt.js:54:51704)\n    at applyHandlers (node:events:64:20)\n    at emitError (node:events:44:27)\n    at emitListenErrorNextTick (node:_http_server:134:12)\n    at processTicksAndRejections (native:7:39) {\n  [cause]: Error: EPERM: operation not permitted, listen\n      at serve (unknown)\n      at <anonymous> (node:_http_server:359:39)\n      at <anonymous> (node:_http_server:332:33)\n      at <anonymous> (/$bunfs/root/chunk-x6wemdbt.js:54:51742)\n}\n    at map (native:1:11)\n    at reap (/$bunfs/root/chunk-cmf69fdy.js:2:1159)\n    at <anonymous> (/$bunfs/root/chunk-cmf69fdy.js:3:6546)\n    at service.ensure (/$bunfs/root/chunk-mwsxz1zk.js:3:732)\n    at service.ensure (definition) (/$bunfs/root/chunk-cmf69fdy.js:3:5105)\n    at cli.server-connection.resolve (/$bunfs/root/chunk-beyfseh4.js:2:905)\n    at cli.server-connection.resolve (definition) (/$bunfs/root/chunk-mwsxz1zk.js:2:402)\n    at cli.mcp.list (/$bunfs/root/chunk-9j447bg3.js:49:15682)\n    at cli.mcp.list (definition) (/$bunfs/root/chunk-beyfseh4.js:2:852)\n",
+      "mcp_checks": "not_run",
+      "browser_checks": "not_run"
+    },
+    {
+      "command": [
+        "opencode",
+        "run",
+        "--standalone",
+        "--format",
+        "json",
+        "--title",
+        "agent-gavel 0.5 smoke",
+        "请仅使用 agent-gavel 的 MCP 工具做一次浏览器冒烟测试：新建测试会话，打开本项目 tests/webapp/basic.html 的 file URL，读取页面，填写 #text-input，点击 #btn 并断言 #out 为 clicked，调用 screenshot 返回原生图片，最后关闭本次会话。不要修改任何文件，不要操作其他会话。逐项报告工具调用结果；遇到工具不可用请立即停止并报告错误，不能改用其他工具模拟通过。"
+      ],
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "Error: Standalone server exited before reporting readiness\n    at <anonymous> (/$bunfs/root/chunk-spdx9z3d.js:2:974)\n    at cli.standalone.endpoint (/$bunfs/root/chunk-mwsxz1zk.js:3:91)\n    at cli.standalone.endpoint (definition) (/$bunfs/root/chunk-spdx9z3d.js:2:795)\n    at cli.server-connection.resolve (/$bunfs/root/chunk-c6grtmqt.js:2:939)\n    at cli.server-connection.resolve (definition) (/$bunfs/root/chunk-mwsxz1zk.js:2:402)\n",
+      "mcp_checks": "not_run",
+      "browser_checks": "not_run"
+    }
+  ]
+}
