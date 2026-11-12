@@ -176,7 +176,7 @@ RESULT_TYPES = {
         "page_id:str artifact_id:str suggested_filename:str size_bytes:int mime_type:JSON sha256:str"
     ),
     "Popup": Result("page_id:str new_page_id:str opener_page_id?:JSON url?:JSON new_page?:JSON"),
-    "Event": Result("event:str", untrusted=True),
+    "Event": Result("event:map", untrusted=True),
     "Dialog": Result(
         "page_id:str policy:str accepted?:bool dialog?:JSON dialog_type?:str message?:str"
     ),

@@ -6,6 +6,8 @@ import struct
 import time
 from pathlib import Path
 
+WEBAPP = Path(__file__).resolve().parent / "webapp"
+
 
 async def interactions(client, pid, cid, sid, base, data):
     await client.ok("page", op="navigate", page_id=pid, url=f"{base}/acceptance.html")
@@ -81,7 +83,7 @@ async def interactions(client, pid, cid, sid, base, data):
     event = await client.ok(
         "page", op="wait_for_event", kinds=["page_created"], include_past=True, timeout_s=1
     )
-    assert event["event"] == "page_created"
+    assert event["event"]["event"] == "page_created" and event["event"]["ts"] > 0, event
 
     download, _ = await asyncio.gather(
         client.ok("page", op="wait_for_download", page_id=pid, timeout_s=5),
@@ -194,8 +196,18 @@ async def profile_copy(client, data):
 
 
 async def capture_images(client, pid, env, options, report):
+    await client.ok(
+        "page",
+        op="navigate",
+        page_id=pid,
+        url=(WEBAPP / "acceptance.html").as_uri(),
+    )
     images = []
-    for scope in ({}, {"full_page": True}, {"selector": "#btn"}):
+    for scope in (
+        {},
+        {"full_page": True},
+        {"selector": "#delayed", "save_to": env["AGENT_GAVEL_DATA_DIR"]},
+    ):
         metadata, wire = await client.call("screenshot", page_id=pid, **scope)
         assert not wire.get("isError"), metadata
         blocks = [block for block in wire["content"] if block["type"] == "image"]
@@ -207,6 +219,8 @@ async def capture_images(client, pid, env, options, report):
         width, height = struct.unpack(">II", png[16:24])
         assert (metadata["width"], metadata["height"]) == (width, height)
         assert width > 0 and height > 0 and metadata["artifact_id"]
+        if "save_to" in scope:
+            assert metadata["exported"] and metadata["exported_filename"]
         images.append({"scope": scope, "width": width, "height": height, "bytes": len(png)})
         if options.output:
             image_dir = Path(options.output).with_suffix("")
@@ -216,5 +230,7 @@ async def capture_images(client, pid, env, options, report):
             await asyncio.to_thread(image_path.write_bytes, png)
             images[-1]["path"] = str(image_path)
         (Path(env["AGENT_GAVEL_DATA_DIR"]) / f"capture-{len(images)}.png").write_bytes(png)
+    assert images[1]["height"] > images[0]["height"], images
+    assert images[2]["height"] < images[0]["height"], images
     report["screenshots"] = images
     return metadata["artifact_id"]

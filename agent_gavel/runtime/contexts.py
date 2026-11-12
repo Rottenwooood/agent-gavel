@@ -255,8 +255,12 @@ class ContextManager:
 
     async def close(self, context_id, session_id=None):
         ctx = self.get(context_id)
-        if session_id:
-            ctx.session_ids.discard(session_id)
+        leases = {session_id} if ctx.container == "default" and session_id else set(ctx.session_ids)
+        for sid in leases:
+            ctx.session_ids.discard(sid)
+            session = self.runtime.sessions.get(sid)
+            if session is not None and context_id in session.context_ids:
+                session.context_ids.remove(context_id)
         # 默认容器 = profile 本体：不关闭（保留窗口与磁盘身份），只解绑会话，便于复用与累积
         if ctx.container == "default":
             return {

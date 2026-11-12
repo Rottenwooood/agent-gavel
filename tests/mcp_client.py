@@ -118,9 +118,9 @@ class MCP:
             raise RuntimeError(msg["error"])
         return msg["result"]
 
-    async def call(self, name, **args):
+    async def call(self, tool_name, **args):
         started = time.perf_counter()
-        reply = await self.rpc("tools/call", {"name": name, "arguments": args})
+        reply = await self.rpc("tools/call", {"name": tool_name, "arguments": args})
         result = reply.get("structuredContent")
         if result is None:
             for block in reply.get("content", []):
@@ -130,7 +130,7 @@ class MCP:
         result = result or {}
         self.rows.append(
             {
-                "tool": name,
+                "tool": tool_name,
                 "op": args.get("op"),
                 "status": result.get("status"),
                 "reason": result.get("reason"),
@@ -144,8 +144,8 @@ class MCP:
         )
         return result, reply
 
-    async def ok(self, name, **args):
-        result, reply = await self.call(name, **args)
+    async def ok(self, tool_name, **args):
+        result, reply = await self.call(tool_name, **args)
         assert not reply.get("isError"), result
         assert result.get("status") in {"ok", "pass"}, result
         return result

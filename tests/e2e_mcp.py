@@ -186,6 +186,8 @@ async def exercise(client, env, options, report):
     await client.ok("context", op="set_permissions", context_id=cid, permissions=[])
     context = await client.ok("context", op="create", session_id=sid, container="isolated")
     await client.ok("context", op="close", context_id=context["context_id"])
+    leases = await client.ok("session", op="get", session_id=sid)
+    assert context["context_id"] not in leases["context_ids"], leases
     await client.ok("workflow", op="delete", template_id="e2e_flow")
     await client.ok("artifact", op="delete", artifact_id=aid)
     await client.ok("session", op="get", session_id=sid)
