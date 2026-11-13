@@ -1,3 +1,7 @@
+> **历史文档**：本文是 0.4 时期的设计讨论记录，其中的扁平工具名（`page_read`、
+> `locator_click`、`workflow_run` 等）已在 0.5 收敛为 `page(op=read)`、
+> `locator(op=click)`、`workflow(op=run)`。当前接口以 [工具参考](tools.md) 为准。
+
 # agent-gavel 讨论整理
 
 本文整理围绕 agent-gavel 的测试结果、产品定位、架构重建、速度、模板复用、验证、视觉操作、市场需求、开源宣发和个人决策等讨论内容。

@@ -1,3 +1,7 @@
+> **设计背景**：本文是分期实现阶段的设计记录，不是当前接口的约束。
+> 其中的工具名（`page_read`、`download_*`、`page_screenshot` 等）已在 0.5 收敛或改名，
+> 当前接口与参数以 [工具参考](tools.md) 和 [架构约束](architecture.md) 为准。
+
 # agent-gavel 技术方案（Playwright Runtime 重建）
 
 > 本文是早期设计背景，不再作为实现约束；不变量、阶段计划与门禁以

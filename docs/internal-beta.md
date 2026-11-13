@@ -17,21 +17,21 @@ AI 声明动作 + "做完后页面应该长什么样" → 工具执行、等待�
 
 ## 工具分组（`agent-gavel_` 前缀）
 
-| 组 | 代表工具 | 用途 |
+| 组 | 代表操作 | 用途 |
 |---|---|---|
-| 资源 | `session_create` `context_create` `page_open` `page_list` | 建隔离环境、管页面 |
-| 读 | `page_navigate` `page_read` `page_text` `page_explore` `page_snapshot` | 导航、取值/正文、找锚点 |
-| 动 | `locator_click` `locator_fill` `locator_type` `locator_press` … | 动作（可带断言） |
-| 断言 | `expect` `page_wait_for_*` | 独立断言、等响应/加载/下载/事件 |
-| 产物 | `artifact_list/get/export/cleanup` `download_*` `page_screenshot` `page_pdf` | 落盘与查看 |
-| 工作流 | `workflow_record_*` `workflow_save/validate/publish/run/replay` `workflow_pause/resume/cancel` | 模板闭环 |
-| 诊断 | `trace_*` `network_*` `console_get` `page_errors` `performance_metrics` | 排查 |
+| 资源 | `session(op=create)` `context(op=create)` `page(op=open/list)` | 建隔离环境、管页面 |
+| 读 | `page(op=navigate/text/read/explore/snapshot)` | 导航、取值/正文、找锚点 |
+| 动 | `locator(op=click/fill/type/press…)` | 动作（可带断言） |
+| 断言 | `assertion(op=check)`、`page(op=wait_for_url/selector/text/load/response/download/popup/event)` | 独立断言、等响应/加载/下载/事件 |
+| 产物 | `artifact(op=list/get/export/read_text/cleanup)`、`screenshot`、`page(op=pdf)` | 落盘与查看 |
+| 工作流 | `workflow(op=record_start/record_stop/save/validate/run/pause/resume/cancel)` | 模板闭环 |
+| 诊断 | `trace(op=start/stop)` `network(op=start/stop)` `console_get` `performance_metrics` | 排查 |
 
 ## 使用要点
 
 1. 动作能带断言就带断言——这是省 token 的关键。
 2. 写窄了/指错了会返回 `ambiguous` + diff 证据，看证据再决定，不要无脑重试。
-3. 陌生站先 `page_explore` 拿稳定锚点，再动作；跑通后录成模板。
+3. 陌生站先用 `page(op=explore)` 或 `page(op=text)` 的 `anchors` 拿稳定锚点，再动作；跑通后录成模板。
 4. 副作用步骤（提交/删除/支付）默认需确认，别为省事关掉。
 5. 失败先看结构化 `reason` 和 `hint`，多数情况直接告诉你怎么修。
 
@@ -39,7 +39,7 @@ AI 声明动作 + "做完后页面应该长什么样" → 工具执行、等待�
 
 - 强风控站点（如淘宝/京东）会拦截自动化，属预期，不在内测承诺范围。
 - 真实站点靠网络；无头/服务器环境可能需要显式代理配置。
-- 报告问题时附：复现步骤、`workflow_run` 的 `verbosity="full"` 输出、trace/截图 artifact、
+- 报告问题时附：复现步骤、`workflow(op=run)` 的 `verbosity="full"` 输出、trace/截图 artifact、
   浏览器与系统版本。
 
 ## 自检

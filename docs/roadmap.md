@@ -1,6 +1,6 @@
 # agent-gavel 开发路线图
 
-> 定位快照：2026-10，Playwright runtime（M1–M4）已完成并加固，旧通道归档，进入"发布准备"阶段。
+> 定位快照：2026-11-13，0.5.1 已发布（PyPI `agent-gavel` / GitHub `Rottenwooood/agent-gavel`），旧通道归档。
 
 ## 一句话定位
 
@@ -34,21 +34,22 @@ legacy/  旧裸 CDP 网页通道 + AT-SPI 桌面通道：归档，不打包、�
 | 真实任务基准（含真实站点） | ✅ | `bench_tasks.py`（5/5，重放 5 调用/1681B → 1 调用/192B） |
 | 旧通道归档 | ✅ | `legacy/`（不打包/不运行） |
 | 文档与打包 | ✅ | README 重写、Dockerfile、CHANGELOG、CONTRIBUTING |
+| 工具面收敛（0.5） | ✅ | 14 入口 / 89 操作；`test_schema_compat.py` |
+| 统一 diff（0.5） | ✅ | `observation.py`、`test_observation_edit.py` |
+| 模板可编辑（0.5） | ✅ | 模板即 JSON、`$VAR` 全覆盖、`test_observation_edit.py` |
+| 跨客户端 schema 兼容（0.5.1） | ✅ | 顶层无 union，Claude 系可正常调用 |
 
-## 距离"可发布"还差什么（按优先级）
+## 发布后待办
 
-### 阻塞
-- [ ] **真实复杂站点验证**：找一个非强风控、需登录的真实后台，跑通并沉淀 2–3 个真实
-      模板；验证"第二次明显更快、更省 token"。（淘宝/京东等强风控站点不在承诺范围）
-- [ ] **失败可解释端到端**：验证码/元素消失 → 返回 `status/reason/artifact/resume_hint`
-      并可 `workflow_resume` 恢复，做成演示。
+### 已随 0.5.1 完成
+
+- [x] 失败可解释并续跑：`reason` / `resume_hint` / `proposed_repairs`，`workflow(op=resume)` 从失败步继续。
+- [x] 真实站点联调：高校/政府站点采集、附件下载、权限墙识别、多页并发读取。
+
+### 仍待办
+
 - [ ] **独立 benchmark**：与 Playwright MCP / Stagehand / browser-use 在成功率/误判率/
       token/延迟上对比（当前只有自测）。
-
-### 非阻塞（发布后）
-- [ ] M6 视觉/坐标后端（仅截图 + 坐标，AI 在环；不引入 OCR/CV）。
-- [ ] Python/TS SDK、独立 CLI、MCP registry 接入。
-- [ ] 模板仓库 + 贡献规范落地（当前只到"本地文件 + Git PR"与 CONTRIBUTING）。
 
 ## 诚实差距
 

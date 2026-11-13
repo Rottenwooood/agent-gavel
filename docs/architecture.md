@@ -10,7 +10,7 @@
 
 本节记录经用户授权的0.5接口变更，取代下文历史阶段计划中“保留旧工具名”的冻结条款。
 
-- 公共入口固定为14个：browser、session、context、page、locator、workflow、artifact、assertion、trace、network、console_get、performance_metrics、daemon_shutdown、screenshot；共90个操作。95个旧操作的能力通过操作合并或迁移保留，不注册旧名。
+- 公共入口固定为14个：browser、session、context、page、locator、workflow、artifact、assertion、trace、network、console_get、performance_metrics、daemon_shutdown、screenshot；共89个操作。95个旧操作的能力通过操作合并或迁移保留，不注册旧名。
 - `tools/catalog.py` 是操作声明、路由及错误封装的唯一入口；`tools/schemas.py` 从声明生成公共参数类型和操作差异约束。操作选择不实现领域行为。
 - `tools/results.py` 是结果类型和精简视图的唯一主人。请求和完整业务结果在执行时校验；默认只省略契约明确允许省略的字段，读取值中的null、false、0、空集合与失败证据不递归清理。detail=full保留原业务字段与诊断信息。
 - `core/targets.py` 拥有定位输入格式与归一；动作业务要求继续来自core/actions.py。工具特有的必填要求不改变工作流模板原有的required_fields。
@@ -54,7 +54,7 @@
 | I7 | async 调用链禁止同步阻塞 I/O | AST 扫描 async 函数体 + 阻塞入口清单双向核对（见第 9 节） |
 | I8 | 包依赖单向 | 导入图检查：`runtime` 不得 import `workflows` / `backends` / `tools`；`core` 不得 import 其他包 |
 | I9 | 一个数据根在任意时刻只有一个运行时守护进程（daemon）持有浏览器与可变状态 | 进程模型检查：`flock(<数据根>/daemon.lock)`；任何 adapter 不得创建浏览器、不得持有注册表 |
-| I10 | 所有资源 id（session/context/page/run/artifact）只由 daemon 分配；跨 adapter 必须一致 | 集成测试：多个 adapter 并发 `page_list` / `browser_status` 看到同一组 id |
+| I10 | 所有资源 id（session/context/page/run/artifact）只由 daemon 分配；跨 adapter 必须一致 | 集成测试：多个 adapter 并发 `page(op=list)` / `browser(op=status)` 看到同一组 id |
 
 ### 2.1 进程模型的定义
 
@@ -214,7 +214,7 @@ agent_gavel/
 **改动**
 
 1. 新增 `tests/test_contract_snapshot.py`
-   - 固定场景：`session_create` → `page_navigate` → `locator_fill` → `locator_click`（带断言）→ `expect` → `workflow_save` → `workflow_validate` → `workflow_run` → `artifact_list` → `browser_status`
+   - 固定场景：`session(op=create)` → `page(op=navigate)` → `locator(op=fill)` → `locator(op=click)`（带断言）→ `assertion(op=check)` → `workflow(op=save)` → `workflow(op=validate)` → `workflow(op=run)` → `artifact(op=list)` → `browser(op=status)`
    - 断言每个响应的字段集合与 `status` 取值，不比对易变值（URL、时间戳、资源 id）
    - 覆盖错误路径：`locator_not_found`、`ambiguous_page`、`session_busy`、`precondition_failed`
 2. 新增 `tests/test_invariants.py`：按第 2 节实现八条检查
@@ -308,8 +308,8 @@ agent_gavel/
 **验收（必须跨进程真实执行）**
 
 - 在同一父进程下启动 4 个 adapter：进程表中有 1 个 daemon、4 个 adapter，且只有 daemon 派生了 Chrome
-- 4 个 adapter 并发调用 `page_list` / `browser_status`：返回完全相同的 page id 集合与 daemon pid
-- 从两个不同 adapter 对同一 session 并发发起 `workflow_run`：一个执行，另一个得到 `session_busy`
+- 4 个 adapter 并发调用 `page(op=list)` / `browser(op=status)`：返回完全相同的 page id 集合与 daemon pid
+- 从两个不同 adapter 对同一 session 并发发起 `workflow(op=run)`：一个执行，另一个得到 `session_busy`
 - 杀掉 daemon：下一次调用要么成功拉起新 daemon，要么返回 `daemon_unavailable` 并说明原因；不得出现两个 daemon 同时持有浏览器
 - 全过程中 `ps` 里该数据根的 Chrome 数量恒为 1
 
@@ -333,14 +333,14 @@ agent_gavel/
    - `close()` 语义写死：`default` 为解除租约，`isolated` 为销毁
 4. `runtime/browser_runtime.py`：删除 `active_page_id`；`status()` 输出每个 context 的 active page。
 5. `workflows/runner.py`：页面解析改为 `page_id` → `context_id` → 会话内唯一 context，否则报 `ambiguous_page`。
-6. 工具层：`session_create` 响应增加 `shared_container`；共享默认容器时明确告知该会话与其他会话共用同一标签页。
+6. 工具层：`session(op=create)` 响应增加 `shared_container`；共享默认容器时明确告知该会话与其他会话共用同一标签页。
 7. 响应中的身份字段：页面归属只到 `context_id`。`session_id` 表示**本次调用所属会话**（由解析路径确定），不是页面的固有属性；当页面来自多会话共享的默认容器且调用未指定会话时，响应省略 `session_id`，只给 `context_id`，避免伪造归属。
 8. `runtime/artifacts.py`：索引读改写加锁（或用追加式索引），新增并发下载测试。
 
 **验收**
 
 - 新增 `tests/test_identity.py`：
-  - 两个会话共享默认容器时，`page_list` 的归属正确，且在第二个会话中录制不丢步
+  - 两个会话共享默认容器时，`page(op=list)` 的归属正确，且在第二个会话中录制不丢步
   - 同一默认容器上的并发 workflow 不得交错执行，第二个应得到 `session_busy` 或明确的页面占用错误
   - 打开 popup 后未显式选择页面时，解析应报歧义，不得静默选中
   - 共享容器且未指定会话时，响应不含伪造的 `session_id`
@@ -450,7 +450,7 @@ agent_gavel/
 6. 别名合并（对外破坏性变更，写入 CHANGELOG）：
    - 删除 `page_focus`，保留 `page_select`
    - 删除 `locator_set_files`，保留 `locator_upload`
-   - 删除 `workflow_replay`，保留 `workflow_run`
+   - 删除 0.4 的 `workflow_replay`，统一用 `workflow(op=run)`
 7. backend 拆分落位：`__init__.py` 只保留入口与编排；`actions` / `locator` / `reader` / `assertion` / `signature` 各自独立。
 8. 工具文件按资源拆分：browser / session / context / page_lifecycle / page；每个文件少于 300 行。
 9. 异常审计：逐处检查 `except Exception: pass`，能删的删；必须保留的写 `# silent-ok: 理由`，并由不变量测试要求存在该标注。
@@ -630,7 +630,7 @@ pytest -q   # 配置 pytest-timeout，单测上限 90s
 **模板编辑**：模板就是一份 JSON，不额外长编辑工具。
 
 - `workflow_record_stop` 返回草稿 `template`；`workflow_get` 读全文，改完 `workflow_save` 写回。
-- 断言与动作里的固定值都支持 `$VAR`；`parameters` 可写 `default`，`workflow_run(params=...)` 覆盖。
+- 断言与动作里的固定值都支持 `$VAR`；`parameters` 可写 `default`，`workflow(op=run, params=...)` 覆盖。
 - `substitute` 按 params → default → 报错三级回退，不静默保留 `$VAR`。
 - `loader.save` 写前归档旧版本到 `history/<id>/vN.json`（无对应工具，供人工回溯）。
 - 运行期局部修复只返回 `proposed_repairs`，不自动改模板。

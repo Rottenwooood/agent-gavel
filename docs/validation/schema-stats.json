@@ -23,5 +23,6 @@
     "jsonschema": "4.26.0",
     "playwright": "1.63.0"
   },
-  "browser_e2e_verified": false
+  "browser_e2e_verified": false,
+  "note": "测量于 0.5 收敛当次（baseline 337b508）。之后 page.links 并入 page.text(mode=links)，当前为 89 个操作；sha256 为当时快照。"
 }

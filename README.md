@@ -50,6 +50,16 @@ daemon_shutdown      停止共享daemon
 
 默认detail=compact，省略明确重复或未指定的元数据；full保留业务字段和诊断。读取值里的null、false、0、空字符串、空集合与失败证据不会被递归删除。
 
+动作类调用会附带 `diff`：只列出这一步真正改变了什么（新开页、下载产物、焦点、局部 DOM），没变化就没有该字段。`page(op=navigate)` 与 `page(op=open)` 入参一致，加载后默认带回 4000 字正文摘要（`text_chars=0` 关闭）；compact 下导航不返回 diff 与 anchors。链接清单用 `page(op=text, mode="links")` 取（原 `links` 操作已并入）。
+
+导航结果可能带这些提示，含义固定：
+
+- `access_restricted` + `page_status=blocked`：被重定向到登录/权限页，别重试，换入口或补登录态。
+- `sparse_content`：正文很少但页面有附件/下载链接，内容大概率在文件里，用 `artifact(op=read_text)`。
+- `page_looks_empty`：正文少于 20 字，可能没渲染完或选错了页面。
+- `navigated_to_download`：链接是文件不是网页，返回里直接给了 `artifact_id` 与 `mime_type`。
+- `http_404` / `http_5xx`：HTTP 层失败，`http_error=true`。
+
 ## 调用示例
 
 以下为MCP tools/call的工具名与参数。编号替换为实际返回值；先探索目标站点，不假定示例控件存在。

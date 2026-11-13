@@ -38,7 +38,7 @@
 ## 3. 仍未解决 / 需要决策
 
 - **全新 profile**：默认共享浏览器是临时上下文，没有历史与 cookie，本身就是可疑信号。
-  登录类真实任务建议用 `session_create(mode="persistent", user_data_dir=...)` 复用真实
+  登录类真实任务建议用 `session(op=create, mode="persistent", user_data_dir=...)` 复用真实
   profile。是否把"持久真实 profile"设为默认，需要权衡（会牺牲上下文隔离模型的简洁性）。
 - **无头 WebGL**：无 GPU 时只能软件渲染，属无头固有特征；对风控敏感的站点应使用**有头**。
 - **接管用户自己的浏览器**（旧版最强的一点）：Playwright 的 `connect_over_cdp` **不支持

@@ -62,7 +62,7 @@
   `parameters` 保留 `default`；`substitute` 三级回退，不再静默保留 `$VAR`。
 - 运行期局部修复不再自动覆盖模板，只返回 `proposed_repairs`。
 - 页面引用改为相对记号 `page0` / `new:N`，重放时按 diff 的 `pages.opened` 绑定。
-- 不新增编辑类工具：工具面仍为 14 个入口、90 个操作。
+- 不新增编辑类工具：工具面仍为 14 个入口、89 个操作。
 
 ### 失败驻留
 
