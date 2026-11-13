@@ -34,6 +34,84 @@ class ReaderMixin:
                 errors[name] = str(e)
         return {"features": out, "errors": errors}
 
+    _ANCHORS_JS = """
+    (el) => {
+      const sel = 'a[href], button, input, select, textarea, [role=button],' +
+        '[role=link], [role=tab]';
+      const out = [];
+      const label = (n) => {
+        const tag = n.tagName.toLowerCase();
+        if (tag === 'select') {
+          const name = n.getAttribute('aria-label') || n.getAttribute('name') || 'select';
+          return name + ' (' + n.options.length + '\u9879)';
+        }
+        return (n.innerText || n.value || n.getAttribute('aria-label') || '')
+          .trim().slice(0, 80);
+      };
+      for (const n of el.querySelectorAll(sel)) {
+        const r = n.getBoundingClientRect();
+        const st = getComputedStyle(n);
+        if (!(r.width > 0 && r.height > 0 &&
+              st.visibility !== 'hidden' && st.display !== 'none')) continue;
+        const text = label(n);
+        if (!text) continue;
+        const tag = n.tagName.toLowerCase();
+        let target;
+        if (n.id) target = {by: 'css', value: '#' + n.id};
+        else if (n.getAttribute('name')) {
+          target = {by: 'css', value: tag + '[name="' + n.getAttribute('name') + '"]'};
+        } else target = {by: 'text', value: text};
+        let href = null;
+        if (tag === 'a') {
+          const raw = n.getAttribute('href') || '';
+          if (raw && raw !== '#' && !/^javascript:/i.test(raw)) href = n.href;
+        }
+        out.push({tag: tag, text: text, target: target, href: href});
+        if (out.length >= 40) break;
+      }
+      return out;
+    }
+    """
+
+    _TEXT_JS = """
+    (arg) => {
+      const strip = 'header, nav, footer, script, style, noscript, svg, iframe';
+      const clean = (root) => {
+        const clone = root.cloneNode(true);
+        clone.querySelectorAll(strip).forEach((n) => n.remove());
+        return clone.innerText || clone.textContent || '';
+      };
+      if (arg && arg.selector) {
+        const el = document.querySelector(arg.selector);
+        return el ? (el.innerText || el.textContent || '') : '';
+      }
+      const cand = document.querySelector('main, article, [role=main]');
+      if (cand) {
+        const text = (cand.innerText || cand.textContent || '').trim();
+        // 空壳 main/article（老旧站点常见）不采纳，回退到整页去噪
+        if (text.length >= 200) return text;
+      }
+      return document.body ? clean(document.body) : '';
+    }
+    """
+
+    _CONTENT_LEN_JS = """
+    () => {
+      if (!document.body) return 0;
+      const clone = document.body.cloneNode(true);
+      clone.querySelectorAll('header, nav, footer, script, style, noscript, svg, iframe')
+        .forEach((n) => n.remove());
+      return (clone.innerText || clone.textContent || '').length;
+    }
+    """
+
+    async def content_len(self, handle):
+        """去噪后的正文长度：阈值判定统一用它，避免导航/页脚把短正文垫长。"""
+        try:
+            return await handle.page.evaluate(self._CONTENT_LEN_JS)
+        except Exception:
+            return None
+
     async def text(self, handle, *, selector=None, mode="text"):
         page = handle.page
         if mode == "links":
@@ -46,15 +124,24 @@ class ReaderMixin:
         if mode == "html":
             val = await root.first.inner_html()
         elif mode == "content":
-            val = await root.first.text_content()
+            val = await page.evaluate(self._TEXT_JS, {"selector": selector})
         else:
             try:
-                val = await root.first.inner_text()
+                val = await page.evaluate(self._TEXT_JS, {"selector": selector})
             except Exception:
                 val = await root.first.text_content()
-        return {"text": val, "mode": mode, "selector": selector}
+        out = {"text": val, "mode": mode, "selector": selector}
+        # 读文本时顺带给出"可直接点的目标"，省掉 text → find_text → click 两次往返
+        if mode in ("text", "content"):
+            try:
+                anchors = await root.first.evaluate(self._ANCHORS_JS)
+            except Exception:
+                anchors = None
+            if anchors:
+                out["anchors"] = anchors
+        return out
 
-    async def snapshot(self, handle, *, level="summary", limit=50):
+    async def snapshot(self, handle, *, level="summary", limit=50, compact=True):
         page = handle.page
         info = await page.evaluate(
             "() => ({url:location.href, title:document.title, "
@@ -73,7 +160,12 @@ class ReaderMixin:
             ]
         elif level in ("interactive", "full"):
             items = await self.explore(handle, include_all=True)
-            result["elements"] = items["items"][:limit]
+            selected = items["items"][:limit]
+            if compact:
+                # 选择器驱动不需要像素坐标和候选列表；href 必须有，否则要再调一次 links
+                result["elements"] = [_compact_element(item) for item in selected]
+            else:
+                result["elements"] = selected
         if level == "full":
             html = await page.content()
             result["html"] = html
@@ -100,7 +192,19 @@ class ReaderMixin:
           placeholder: el.getAttribute('placeholder'),
           aria: el.getAttribute('aria-label'),
           role: el.getAttribute('role'),
-          text: (el.innerText || el.value || '').trim().slice(0, 60),
+          text: (el.tagName === 'SELECT'
+            ? ((el.getAttribute('aria-label') || el.getAttribute('name') || 'select')
+               + ' (' + el.options.length + '\u9879)')
+            : (el.tagName === 'INPUT'
+               ? (['checkbox', 'radio', 'file', 'submit', 'button', 'image', 'reset']
+                   .includes((el.type || '').toLowerCase())
+                  ? (el.getAttribute('aria-label') || el.getAttribute('placeholder')
+                     || el.getAttribute('name') || '')
+                  : (el.value || el.getAttribute('placeholder')
+                     || el.getAttribute('aria-label') || ''))
+               : (el.innerText || el.value || '')).trim().slice(0, 80)),
+          href: (el.tagName === 'A' && el.getAttribute('href')
+                 && !/^javascript:/i.test(el.getAttribute('href'))) ? el.href : null,
           visible: visible,
           bounds: {x: Math.round(r.x), y: Math.round(r.y),
                    w: Math.round(r.width), h: Math.round(r.height)},
@@ -226,7 +330,7 @@ class ReaderMixin:
             sel = f"#{el['id']}"
             n = await page.locator(sel).count()
             candidates.append(
-                {"kind": "css", "value": sel, "count": n, "score": 0.96 if n == 1 else 0.5}
+                {"by": "css", "value": sel, "count": n, "score": 0.96 if n == 1 else 0.5}
             )
         # 2) name
         if el.get("name"):
@@ -234,7 +338,7 @@ class ReaderMixin:
             try:
                 n = await page.locator(sel).count()
                 candidates.append(
-                    {"kind": "css", "value": sel, "count": n, "score": 0.9 if n == 1 else 0.4}
+                    {"by": "css", "value": sel, "count": n, "score": 0.9 if n == 1 else 0.4}
                 )
             except Exception:
                 pass  # silent-ok: best-effort，失败不影响主流程
@@ -242,25 +346,25 @@ class ReaderMixin:
         role = el.get("role")
         if role and el.get("aria"):
             candidates.append(
-                {"kind": "role", "value": role, "name": el["aria"], "count": None, "score": 0.93}
+                {"by": "role", "value": role, "name": el["aria"], "count": None, "score": 0.93}
             )
         # 4) text
         if el.get("text"):
-            candidates.append({"kind": "text", "value": el["text"], "count": None, "score": 0.7})
+            candidates.append({"by": "text", "value": el["text"], "count": None, "score": 0.7})
         anchor = None
         for c in candidates:
             if c.get("count") == 1:
-                anchor = {k: v for k, v in c.items() if k in ("kind", "value", "name")}
+                anchor = {k: v for k, v in c.items() if k in ("by", "value", "name")}
                 break
         if anchor is None and el.get("id"):
-            anchor = {"kind": "css", "value": f"#{el['id']}"}
+            anchor = {"by": "css", "value": f"#{el['id']}"}
         if anchor is None and el.get("name"):
-            anchor = {"kind": "css", "value": f'{tag}[name="{el["name"]}"]'}
+            anchor = {"by": "css", "value": f'{tag}[name="{el["name"]}"]'}
         if anchor is None and candidates:
-            anchor = {k: v for k, v in candidates[-1].items() if k in ("kind", "value", "name")}
+            anchor = {k: v for k, v in candidates[-1].items() if k in ("by", "value", "name")}
         if not include_all and anchor is None:
             candidates.append(
-                {"kind": "css", "value": self._css_path(el), "count": None, "score": 0.2}
+                {"by": "css", "value": self._css_path(el), "count": None, "score": 0.2}
             )
         return anchor, candidates
 
@@ -302,3 +406,21 @@ class ReaderMixin:
             "full_page": full_page,
             "url": page.url,
         }
+
+
+def _compact_element(item):
+    """snapshot compact 元素：够模型决策即可。
+
+    <input> 的 text 常为空，靠 type/placeholder 才能判断该 fill / check / upload，
+    所以这两个非空时保留；text 为空则用 placeholder/aria 兜底。
+    """
+    text = (item.get("text") or item.get("placeholder") or item.get("aria") or "")[:80]
+    out = {"tag": item.get("tag"), "text": text, "anchor": item.get("anchor")}
+    if item.get("href"):
+        out["href"] = item["href"]
+    kind = item.get("type")
+    if kind and kind != "text":
+        out["type"] = kind
+    if item.get("placeholder"):
+        out["placeholder"] = item["placeholder"]
+    return {key: value for key, value in out.items() if value}

@@ -27,6 +27,15 @@ class RunState:
         self.cancelled = False
         self.step_results = []
         self.result = None
+        # 失败驻留所需：恢复时要能回到同一条链、同一个现场
+        self.session_id = None
+        self.steps = []
+        self.ctx = None
+        self.arts_before = set()
+        self.verbosity = "summary"
+        self.t0 = 0.0
+        self.failed_index = None
+        self.observed = {}
 
 
 class Runner:
@@ -80,21 +89,34 @@ class Runner:
                 self._record_run(template.get("template_id"), "blocked")
                 return res
             arts_before = {a["artifact_id"] for a in rt.artifacts.list()}
-            steps = _schema.substitute(template.get("steps", []), params)
+            steps = _schema.substitute(
+                template.get("steps", []), params, template.get("parameters")
+            )
             ctx = {
                 "template": template,
                 "page": page,
                 "params": params,
                 "wait_s": wait_s,
                 "confirm": confirm,
+                "page_map": {"page0": page.page_id},
+                "new_count": 0,
             }
+            state.session_id = session.session_id
+            state.steps = steps
+            state.ctx = ctx
+            state.arts_before = arts_before
+            state.verbosity = verbosity
+            state.t0 = t0
             return await self._execute_steps(state, steps, ctx, arts_before, verbosity, t0)
         finally:
             if page_ctx is not None:
                 page_ctx.release_run(run_id)
             session.release(run_id)
-            rt.runs.pop(run_id, None)
-            if owned:
+            # 失败必须驻留：runs 被 pop 掉，workflow_resume 就找不到现场了。
+            # 只有"跑完/取消"才释放；失败留给 LLM 接手。
+            if state.status not in ("fail", "ambiguous", "error"):
+                rt.runs.pop(run_id, None)
+            if owned and state.status not in ("fail", "ambiguous", "error"):
                 try:
                     await rt.session_mgr.close(session.session_id)
                 except Exception:
@@ -146,14 +168,15 @@ class Runner:
         return rt.page_mgr.resolve(None, context_id=contexts[0].context_id)
 
     # ---- 主循环 ----
-    async def _execute_steps(self, state, steps, ctx, arts_before, verbosity, t0):
-        rt, page = self.runtime, ctx["page"]
+    async def _execute_steps(self, state, steps, ctx, arts_before, verbosity, t0, start_idx=0):
+        rt = self.runtime
         template = ctx["template"]
         checkpoints_passed = 0
         failed = None
         cancelled = False
 
-        for idx, step in enumerate(steps):
+        for idx in range(start_idx, len(steps)):
+            step = steps[idx]
             # 取消 / 暂停（步边界）
             if state.cancelled:
                 cancelled = True
@@ -171,10 +194,29 @@ class Runner:
                     {"step_id": step["id"], "status": "blocked", "reason": "requires_confirmation"}
                 )
                 failed = ("blocked", idx, "requires_confirmation")
+                state.failed_index = idx
+                break
+
+            try:
+                page = self._page_for(ctx, step)
+            except GavelError as e:
+                state.step_results.append(
+                    {
+                        "step_id": step["id"],
+                        "status": "error",
+                        "reason": e.code,
+                        "error": e.message,
+                    }
+                )
+                failed = ("error", idx, e.code)
+                state.failed_index = idx
                 break
 
             res = await self._run_one(page, step, ctx)
+            self._bind_pages(ctx, res)
             state.step_results.append(res)
+            if step.get("observe"):
+                state.observed[step["id"]] = self._observed_payload(res)
             if res.get("checkpoint_passed"):
                 checkpoints_passed += 1
             if res["status"] in ("fail", "ambiguous", "error"):
@@ -194,6 +236,7 @@ class Runner:
                         checkpoints_passed += 1
                     continue
                 failed = (res["status"], idx, res.get("reason"))
+                state.failed_index = idx
                 break
 
         # 汇总
@@ -230,13 +273,129 @@ class Runner:
             fi = failed[1]
             result["failed_step"] = steps[fi].get("id") if fi < len(steps) else None
             result["reason"] = failed[2]
-        if verbosity in ("steps", "full") or failed or cancelled:
+        if verbosity in ("steps", "full"):
             result["steps"] = state.step_results
-        if verbosity == "full":
-            result["steps"] = state.step_results
+        elif failed or cancelled:
+            result["steps"] = [self._trim_step(s) for s in state.step_results]
+        if state.observed:
+            result["observed"] = state.observed
+        repairs = [
+            {
+                "step_id": s.get("step_id"),
+                "new_target": s.get("repaired_target"),
+                "note": "运行时局部修复成功；改 JSON 里的 target 后 workflow_save 写回",
+            }
+            for s in state.step_results
+            if s.get("repaired_target")
+        ]
+        if repairs:
+            result["proposed_repairs"] = repairs
+        if state.failed_index is not None and status in ("fail", "ambiguous", "error"):
+            result["failed_step_index"] = state.failed_index
+            result["resume_hint"] = "现场已保留：调 workflow_resume(run_id) 从失败步继续"
         state.result = result
         self._record_run(template.get("template_id"), status)
         return result
+
+    # ---- 页面引用 ----
+    def _page_for(self, ctx, step):
+        ref = step.get("page") or "page0"
+        pid = (ctx.get("page_map") or {}).get(ref)
+        if pid is None:
+            raise GavelError(
+                "page_unbound",
+                f"页面引用未绑定：{ref}",
+                hint="该步依赖前面步骤打开的页面；检查录制时该页由哪一步产生",
+            )
+        return self.runtime.page_mgr.get(pid)
+
+    @staticmethod
+    def _bind_pages(ctx, res):
+        """用本步 diff 里的 pages.opened 绑定 new:N —— 录制时写死的编号在
+        重放时必然不同，只有 diff 能给出这次的对应关系。"""
+        opened = ((res.get("diff") or {}).get("pages") or {}).get("opened") or []
+        for item in opened:
+            pid = item.get("page_id")
+            if not pid:
+                continue
+            ref = f"new:{ctx['new_count']}"
+            ctx["new_count"] += 1
+            ctx["page_map"].setdefault(ref, pid)
+
+    # ---- 静默执行：默认不吐中间结果 ----
+    _TRIM_KEYS = (
+        "step_id",
+        "status",
+        "reason",
+        "error",
+        "assertions",
+        "diff",
+        "checkpoint_passed",
+        "repaired",
+        "retried",
+    )
+
+    @classmethod
+    def _trim_step(cls, res):
+        return {k: v for k, v in res.items() if k in cls._TRIM_KEYS and v is not None}
+
+    @classmethod
+    def _observed_payload(cls, res):
+        keep = ("step_id", "action_type", "status", "execution", "assertions", "diff")
+        return {k: v for k, v in res.items() if k in keep and v is not None}
+
+    # ---- 失败续跑：从失败步继续，不重放已完成步骤 ----
+    async def resume(self, run_id):
+        rt = self.runtime
+        state = rt.runs.get(run_id)
+        if state is None:
+            raise GavelError(
+                "run_not_found",
+                f"未知 run：{run_id}",
+                hint="失败现场可能已被释放（只有 fail/ambiguous/error 会保留）",
+            )
+        if state.status not in ("fail", "ambiguous", "error"):
+            raise GavelError("not_resumable", f"该 run 当前状态不可续跑：{state.status}")
+        if state.ctx is None:
+            raise GavelError("not_resumable", "缺少运行上下文，无法续跑")
+        session = rt.session_mgr.get(state.session_id)
+        await session.acquire(run_id)
+        ctx = state.ctx
+        # 重新读取模板：失败驻留期间作者可能已经 patch 过（放宽断言/换锚点），
+        # 续跑必须用最新版本，否则改完还是按旧链跑。
+        try:
+            from . import loader
+            from . import schema as _schema
+
+            template, _p = loader.get_exact(state.template_id)
+            ctx["template"] = template
+            state.steps = _schema.substitute(
+                template.get("steps", []), ctx.get("params") or {}, template.get("parameters")
+            )
+        except Exception:
+            pass  # silent-ok: 模板不可读时退回内存中的链
+        page = rt.page_mgr.get(ctx["page_map"]["page0"])
+        page_ctx = page.context
+        await page_ctx.acquire_run(run_id)
+        start = state.failed_index if state.failed_index is not None else 0
+        state.step_results = state.step_results[:start]
+        state.failed_index = None
+        state.status = "running"
+        try:
+            return await self._execute_steps(
+                state,
+                state.steps,
+                ctx,
+                state.arts_before,
+                state.verbosity,
+                time.time(),
+                start_idx=start,
+            )
+        finally:
+            page_ctx.release_run(run_id)
+            session.release(run_id)
+            if state.status not in ("fail", "ambiguous", "error"):
+                rt.runs.pop(run_id, None)
 
     # ---- 单步 ----
     async def _run_one(self, page, step, ctx):
@@ -245,20 +404,20 @@ class Runner:
         atype = act["type"]
         wait_s = ctx.get("wait_s", 6.0)
         checks = from_checkpoint(step.get("checkpoint"))
-        before = await be.page_signature(page, target=act.get("target")) if checks else None
         started = time.perf_counter()
         entry = {"step_id": step["id"], "action_type": atype}
         try:
             exec_info = await self._dispatch(page, act)
             entry["status"] = "ok"
             entry["execution"] = exec_info
+            diff = exec_info.get("diff") if isinstance(exec_info, dict) else None
+            if diff:
+                entry["diff"] = diff
             if atype == "expect":
                 # expect 的成败就是步骤成败（此前被统一置为 ok，导致失败仍整体 pass）
                 entry["status"] = exec_info.get("status", "ok")
                 if exec_info.get("assertions") is not None:
                     entry["assertions"] = exec_info["assertions"]
-                if exec_info.get("diff") is not None:
-                    entry["diff"] = exec_info["diff"]
         except GavelError as e:
             entry["status"] = "error"
             entry["reason"] = e.code
@@ -274,7 +433,7 @@ class Runner:
         entry["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
         if checks and atype != "expect":
             ev = await be.evaluate_checks(
-                page, checks, before_sig=before, wait_s=wait_s, target=act.get("target")
+                page, checks, obs=entry.get("diff"), wait_s=wait_s, target=act.get("target")
             )
             entry["status"] = ev["status"]
             entry["assertions"] = ev["assertions"]

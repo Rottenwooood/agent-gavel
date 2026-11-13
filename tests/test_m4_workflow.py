@@ -77,8 +77,14 @@ async def test_repair_republishes(gavel_tools, webapp_server):
     await T["workflow_save"](template=tmpl)
     res = await T["workflow_run"](name_or_id="testsite_repair", verbosity="steps")
     assert res["status"] == "pass", res
-    assert res.get("republished"), res
-    assert res["republished"]["version"] == 2
+    repairs = res.get("proposed_repairs") or []
+    assert repairs, res
+    tpl = (await T["workflow_get"](name_or_id="testsite_repair"))["template"]
+    for st in tpl["steps"]:
+        if st["id"] == repairs[0]["step_id"]:
+            st["action"]["target"] = repairs[0]["new_target"]
+    acc = await T["workflow_save"](template=tpl)
+    assert acc["status"] == "ok" and acc["version"] == 2, acc
     # 修复后重发不能把刚记录的 stats 冲掉
     st = (await T["workflow_stats"]())["stats"]["testsite_repair"]
     assert st["success_count"] == 1 and st["last_status"] == "pass", st

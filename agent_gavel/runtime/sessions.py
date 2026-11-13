@@ -58,6 +58,8 @@ class Session:
             "busy_owner": self._busy_owner,
             "config": {k: v for k, v in self.config.items() if k not in ("storage_state",)},
             "has_storage_state": bool(self.storage_state),
+            # default 容器就是 profile 本体：改动会累积回磁盘，ephemeral 只影响会话生命周期
+            "writes_back_profile": (self.config.get("container") or "default") == "default",
         }
 
 

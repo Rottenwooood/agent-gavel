@@ -1,5 +1,76 @@
 # Changelog
 
+## 未发布 — 观测（diff）与模板可编辑
+
+### 统一 diff（observation）
+
+- 新增 `backends/playwright/observation.py`：动作前后四层状态差分的唯一主人，
+  只输出变化项；`act` / `goto` 统一包一层，`locator_*` 与 `page_navigate` 直接带 `diff`。
+- 修复 `pages.opened` 漏检（异步登记时序）：动作期间挂 `page` 监听并轮询 `browser_context.pages`，
+  `_blank`/`download` 链接给 1.2s 窗口，普通链接 0.15s，按钮类不等，click p95 保持 < 100ms。
+- 断言新增 `read: "diff"` + `path`；三态判据改用 `diff.dom.meaningful`。
+- 移除调用方的 `page_signature` 预取，签名只在 Observation 内采集。
+
+### 提示文案与 links 收敛
+
+- 所有错误 `hint` 改用分组调用形式（`page(op=open)`、`session(op=create)`、
+  `workflow(op=list)` 等），不再指向 0.4 的扁平工具名；新增静态门禁防止回退。
+- 删除 `page(op="links")`：同一份数据由 `page(op="text", mode="links")` 返回，
+  并补 `total`（裁剪前总数）。操作数 90 → 89。
+
+### 导航管线收敛与假阳性修复
+
+- `page(op="open")` 与 `page(op="navigate")` 入参/返回对齐；`open` 增加 `activate`。
+- `text_chars` 默认 4000：加载即回正文摘要；`compact` 下导航不再回 `diff`/`anchors`。
+- 软拦截识别：重定向到 `/auth|/login|/ipauth|...` 或极短正文带拦截词 → `page_status="blocked"`、`warning="access_restricted"`。
+- 正文 <100 字 → `warning="sparse_content"`；阈值改用去噪后正文长度，不被导航/页脚垫长。
+- 正文容器 `main/article` 需 ≥200 字才采纳，否则回退整页，避免空壳容器导致误判。
+- 导航触发下载 → 自动落盘并返回 `artifact_id`/`suggested_filename`/`mime_type`/`download_url`，
+  `final_url` 保持当前页；`hint` 按 mime 区分 `read_text` 与 `export`。
+- 省略 session/page 时惰性初始化（默认会话单例复用），去掉冷启动一轮 `session(op=create)`。
+- `snapshot` compact 为表单控件保留 `type`/`placeholder`，text 为空时用 placeholder/aria 兜底。
+- `snapshot` 元素补 `href`，`compact` 下只留 `tag/text/href/anchor`；`anchor` 键名 `kind`→`by`。
+- 正文抽取优先 `main/article`，整页时剔除 `header/nav/footer/script/style`；`<select>` 不再拼接全部 option。
+- `diff` 采样忽略 `style/script/svg/link/meta`，不再混入 `URL=/TITLE=`；静态资源 404 不再进 `errors`，只保留 document/xhr/fetch 的 4xx/5xx。
+- 截图/PDF 的 `save_to` 被路径策略拦截时降级为 `exported:false`，不再让整次调用失败；默认白名单纳入 `/tmp/opencode`。
+- `session` 返回 `writes_back_profile`，明确是否写回磁盘 profile。
+
+### 修复：Anthropic 拒绝顶层 union
+
+- 工具级 schema 不再输出顶层 `anyOf`（`page` 曾有 22 个分支）。Claude 系模型此前
+  100% 报 `input_schema does not support oneOf, allOf, or anyOf at the top level`。
+- 条件必填改由服务端 `operation.validator` 逐 op 校验，提示写进描述：
+  `navigate(url!)`、`check[checks|assertions]`。
+- 新增 `tests/test_schema_compat.py`：顶层无 union、描述带必填标记、缺参与跨 op 字段仍被拒。
+
+### 单步降轮数
+
+- `page(op="text")` 增加 `anchors`：可点元素连同可直接使用的 `target` 一起返回，
+  省掉 `text → find_text → click`。
+- `page(op="navigate", text_chars=N)` 在同一次返回里带回正文与 `anchors`。
+- 增量字段，不新增工具、不改既有 op 名。
+
+### 模板可编辑（JSON 即接口）
+
+- `workflow_record_stop` 返回草稿 `template`，录完即可改。
+- `$VAR` 覆盖 action/target/checkpoint 的全部字符串叶子，支持子串与长值优先匹配；
+  `parameters` 保留 `default`；`substitute` 三级回退，不再静默保留 `$VAR`。
+- 运行期局部修复不再自动覆盖模板，只返回 `proposed_repairs`。
+- 页面引用改为相对记号 `page0` / `new:N`，重放时按 diff 的 `pages.opened` 绑定。
+- 不新增编辑类工具：工具面仍为 14 个入口、90 个操作。
+
+### 失败驻留
+
+- 失败（fail/ambiguous/error）保留 run 与页面现场；`workflow_resume` 从失败步续跑，
+  并在续跑前重新读取模板以吸收期间的修改。
+- 默认静默：只有 `observe: true` 的步骤、或失败/取消时才返回中间结果。
+
+### 测试夹具
+
+- 补齐 `tests/webapp/files/hello.txt` 与 `tests/webapp/portal/files/invoice_A-2026-09-30.txt`
+  （`*.txt` 被 .gitignore 忽略，导致下载类用例在干净检出上必然超时）。
+
+
 ## 0.5.0 — 未发布
 
 - 95个旧入口收敛为14个规范入口、90个操作；同一系列使用op，参数与返回分别保留。

@@ -234,7 +234,9 @@ def copy_profile(
     dest = os.path.join(root, name)
     if os.path.exists(dest):
         raise GavelError(
-            "profile_exists", f"副本已存在：{name}", hint="换一个 name，或先 browser_profile_delete"
+            "profile_exists",
+            f"副本已存在：{name}",
+            hint="换一个 name，或先 browser(op=profile_delete)",
         )
     os.makedirs(dest, exist_ok=True)
 

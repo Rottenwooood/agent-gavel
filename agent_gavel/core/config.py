@@ -166,8 +166,18 @@ def allow_domains() -> set:
     return {x.lower() for x in _csv("AGENT_GAVEL_ALLOW_DOMAINS")}
 
 
+# 宿主（opencode）明确允许的临时目录；不配置白名单时无需追加
+_DEFAULT_ALLOW_PATHS = ("/tmp/opencode",)
+
+
 def allow_paths() -> list:
-    return _csv("AGENT_GAVEL_ALLOW_PATHS")
+    paths = _csv("AGENT_GAVEL_ALLOW_PATHS")
+    if not paths:
+        return paths
+    for extra in _DEFAULT_ALLOW_PATHS:
+        if extra not in paths and os.path.isdir(extra):
+            paths.append(extra)
+    return paths
 
 
 def domain_guard() -> bool:

@@ -10,6 +10,8 @@ wheels/
 .venv
 .runtime/
 *.txt
+# 测试站点夹具：下载类用例依赖这些 .txt，必须入库
+!tests/webapp/**/*.txt
 
 # Runtime debug call logs (debug=1 dumps JSON per call)
 logs/

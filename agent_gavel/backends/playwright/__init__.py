@@ -57,30 +57,37 @@ class PlaywrightBackend(LocatorMixin, ReaderMixin):
 
     # ================= 导航 / 等待 =================
     async def goto(self, handle, url, *, wait_until="domcontentloaded", timeout_s=30.0):
-        try:
-            resp = await handle.page.goto(url, wait_until=wait_until, timeout=timeout_s * 1000)
-        except Exception as e:  # noqa: BLE001
-            if "Download is starting" in str(e):
+        from .observation import Observation
+
+        async with Observation(self, handle) as obs:
+            try:
+                resp = await handle.page.goto(url, wait_until=wait_until, timeout=timeout_s * 1000)
+            except Exception as e:  # noqa: BLE001
+                if "Download is starting" in str(e):
+                    raise GavelError(
+                        "download_started",
+                        "导航触发了下载（不是页面）",
+                        detail={"url": url},
+                        retryable=False,
+                        hint="这是下载链接：改用 page(op=wait_for_download) 捕获下载，"
+                        "或用 locator(op=click) 点击后 page(op=wait_for_download)",
+                    ) from e
                 raise GavelError(
-                    "download_started",
-                    "导航触发了下载（不是页面）",
-                    detail={"url": url},
-                    retryable=False,
-                    hint="这是下载链接：改用 page_wait_for_download 捕获下载，"
-                    "或用 locator 点击后 page_wait_for_download",
+                    "navigation_failed", f"导航失败：{e}", detail={"url": url}, retryable=True
                 ) from e
-            raise GavelError(
-                "navigation_failed", f"导航失败：{e}", detail={"url": url}, retryable=True
-            ) from e
-        final = handle.page.url
-        return {
+            final = handle.page.url
+            title = await handle.page.title()
+        out = {
             "requested_url": url,
             "final_url": final,
             "navigated": True,
             "redirected": final != url,
             "status_code": resp.status if resp is not None else None,
-            "title": await handle.page.title(),
+            "title": title,
         }
+        if obs.diff:
+            out["diff"] = obs.diff
+        return out
 
     async def wait_load_state(self, handle, state="load", timeout_s=30.0):
         await handle.page.wait_for_load_state(state, timeout=timeout_s * 1000)
@@ -177,8 +184,13 @@ class PlaywrightBackend(LocatorMixin, ReaderMixin):
     # ================= 动作 =================
     async def act(self, handle, target, action, *, timeout_s=30.0, **kw):
         from .actions import handler
+        from .observation import Observation
 
-        return await handler(action)(self, handle, target, timeout_s=timeout_s, **kw)
+        async with Observation(self, handle, target=target, action=action) as obs:
+            result = await handler(action)(self, handle, target, timeout_s=timeout_s, **kw)
+        if obs.diff:
+            result["diff"] = obs.diff
+        return result
 
     async def pdf(self, handle, *, timeout_s=30.0):
         """无头用 Playwright；有头走 CDP Page.printToPDF（同一能力，不因模式缺失）。"""
@@ -219,9 +231,7 @@ class PlaywrightBackend(LocatorMixin, ReaderMixin):
 
         return diff_summary(before, after)
 
-    async def evaluate_checks(self, handle, checks, before_sig=None, wait_s=0.0, target=None):
+    async def evaluate_checks(self, handle, checks, obs=None, wait_s=0.0, target=None):
         from .assertion import evaluate
 
-        return await evaluate(
-            self, handle, checks, before_sig=before_sig, wait_s=wait_s, target=target
-        )
+        return await evaluate(self, handle, checks, obs=obs, wait_s=wait_s, target=target)

@@ -300,11 +300,11 @@ async def task_repair(gavel, base):
         "workflow_run", name_or_id="bench_repair", session_id=r["session_id"], verbosity="steps"
     )
     repaired = any(s.get("repaired") for s in res.get("steps", []))
-    ok = res["status"] == "pass" and repaired and bool(res.get("republished"))
+    ok = res["status"] == "pass" and repaired and bool(res.get("proposed_repairs"))
     record(
         "本地:页面改版→局部修复→复用",
         ok,
-        f"repaired={repaired} version={res.get('republished', {}).get('version')}",
+        f"repaired={repaired} proposals={len(res.get('proposed_repairs') or [])}",
         c,
         t0,
     )

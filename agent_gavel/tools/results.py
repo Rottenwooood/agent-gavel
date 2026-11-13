@@ -67,7 +67,8 @@ SESSION_VIEW = View(
     omit_null=("busy_owner",), omit_empty=("config",), children={"config": CONFIG_VIEW}
 )
 ELEMENT_VIEW = View(
-    omit=("bounds",), omit_null=("id", "name", "type", "placeholder", "aria", "role")
+    omit=("bounds", "candidates", "visible"),
+    omit_null=("id", "name", "type", "placeholder", "aria", "role", "href"),
 )
 ACTION_VIEW = View(children={"execution": View(same_as=(("url_before", "url_after"),))})
 
@@ -144,18 +145,21 @@ RESULT_TYPES = {
     "Location": Result("page_id:str url:str"),
     "PageClosed": Result("page_id:str closed:bool"),
     "Navigation": Result(
-        "page_id:str final_url:str navigated:bool redirected:bool title:str status_code:JSON assertions?:list warning?:str"
+        "page_id:str final_url:str navigated:bool redirected:bool title:str status_code:JSON "
+        "assertions?:list warning?:str text_len?:int text?:str text_truncated?:bool anchors?:list "
+        "page_status?:str http_error?:bool http_status?:int artifact_id?:str kind?:str hint?:str "
+        "suggested_filename?:str mime_type?:str download_url?:str diff?:map",
+        View(omit=("diff",), same_as=(("requested_url", "final_url"),)),
     ),
     "Snapshot": Result(
         "page_id:str url:str title:str ready:str counts:map elements?:list html?:str",
         untrusted=True,
     ),
     "Text": Result(
-        "text?:JSON links?:list truncated?:bool mode?:str selector?:JSON",
+        "text?:JSON links?:list anchors?:list total?:int truncated?:bool mode?:str selector?:JSON",
         View(omit_null=("selector",)),
         untrusted=True,
     ),
-    "Links": Result("items:list total:int", untrusted=True),
     "Read": Result("features:map errors?:map complete?:bool empty?:list", untrusted=True),
     "Explore": Result(
         "items:list total?:int", View(children={"items": View(items=ELEMENT_VIEW)}), untrusted=True
@@ -196,7 +200,8 @@ RESULT_TYPES = {
     "Deleted": Result("artifact_id:str deleted:bool"),
     "Cleanup": Result("removed:list count:int"),
     "Session": Result(
-        "session_id:str mode:str context_ids:list process_id:JSON has_storage_state:bool config?:map busy_owner?:JSON",
+        "session_id:str mode:str context_ids:list process_id:JSON has_storage_state:bool "
+        "writes_back_profile:bool config?:map busy_owner?:JSON",
         SESSION_VIEW,
     ),
     "CreatedSession": Result(
@@ -242,7 +247,8 @@ RESULT_TYPES = {
     "ProfileActive": Result("active:str"),
     "ProfileDeleted": Result("deleted:str active:JSON profiles:list"),
     "WorkflowSaved": Result(
-        "template_id:str version:int steps:int parameters:map warnings?:list recorded_steps?:int"
+        "template_id:str version:int steps:int parameters:map warnings?:list "
+        "recorded_steps?:int template?:JSON"
     ),
     "WorkflowDeleted": Result("template_id:str deleted:bool"),
     "Validation": Result("valid:bool errors:list warnings:list normalized:JSON"),
@@ -252,7 +258,9 @@ RESULT_TYPES = {
     "WorkflowStats": Result("stats:JSON"),
     "Recording": Result("context_id:JSON page_id:JSON keep_all:bool steps:int"),
     "WorkflowRun": Result(
-        "run_id:str template_id:str steps_completed:int steps_total:int checkpoints_passed:int artifacts?:list steps?:list",
+        "run_id:str template_id:str steps_completed:int steps_total:int checkpoints_passed:int "
+        "artifacts?:list steps?:list observed?:map proposed_repairs?:list resume_hint?:str "
+        "failed_step?:str failed_step_index?:int reason?:str version?:int",
         keep_elapsed=True,
     ),
     "RunControl": Result("run_id:str paused?:bool cancelled?:bool"),

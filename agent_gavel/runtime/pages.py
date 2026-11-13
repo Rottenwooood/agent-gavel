@@ -149,7 +149,12 @@ class PageHandle:
             )
             if len(self.responses) > self._max_responses:
                 self.responses = self.responses[-self._max_responses :]
-            self._emit("response", url=response.url, status=response.status)
+            self._emit(
+                "response",
+                url=response.url,
+                status=response.status,
+                resource_type=response.request.resource_type,
+            )
             self.runtime.network.record(
                 self.context_id,
                 {
@@ -224,7 +229,7 @@ class PageManager:
             raise GavelError(
                 "page_not_found",
                 f"未知 page：{page_id}",
-                hint="用 page_open 打开，或 page_list 查看",
+                hint="用 page(op=open) 打开，或 page(op=list) 查看",
             )
         return ph
 
@@ -237,7 +242,7 @@ class PageManager:
             return self._active_of(ctx)
         contexts = [c for c in self.runtime.contexts.values() if c.page_ids]
         if not contexts:
-            raise GavelError("no_page", "当前没有打开的 page", hint="先 page_open")
+            raise GavelError("no_page", "当前没有打开的 page", hint="先 page(op=open)")
         if len(contexts) == 1:
             return self._active_of(contexts[0])
         raise GavelError(
@@ -262,7 +267,9 @@ class PageManager:
         ]
         if len(alive) == 1:
             return alive[0]
-        raise GavelError("no_page", f"context {ctx.context_id} 没有可用页面", hint="先 page_open")
+        raise GavelError(
+            "no_page", f"context {ctx.context_id} 没有可用页面", hint="先 page(op=open)"
+        )
 
     async def register(self, ctx, pw_page, opener_page_id=None, *, activate=False):
         async with self._reg_lock:
@@ -292,9 +299,9 @@ class PageManager:
             )
             return handle
 
-    async def open(self, ctx, url=None):
+    async def open(self, ctx, url=None, *, activate=True):
         pw_page = await ctx.browser_context.new_page()
-        handle = await self.register(ctx, pw_page, activate=True)
+        handle = await self.register(ctx, pw_page, activate=activate)
         if url:
             self.runtime.policies.check_domain(url)
             await handle.actor.submit(

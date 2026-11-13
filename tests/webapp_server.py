@@ -28,6 +28,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if path == "/hang":
             time.sleep(30.0)
             return
+        if path == "/auth/ipauth":
+            self.send_response(302)
+            self.send_header("Location", "/auth/denied.html")
+            self.end_headers()
+            return
+        if path == "/attachment":
+            body = b"%PDF-1.4\n%fake pdf for tests\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", "attachment; filename=notice.pdf")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path == "/redirect302":
             self.send_response(302)
             self.send_header("Location", "/basic.html")

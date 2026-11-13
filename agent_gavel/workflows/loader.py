@@ -49,6 +49,22 @@ def _path_for(template_id):
     return os.path.join(user_dir(), f"{template_id}.json")
 
 
+def _history_dir(template_id):
+    return os.path.join(user_dir(), "history", template_id)
+
+
+def _backup(template_id, prev):
+    """写入前把旧版本留档；版本历史是"重写动作链"可回退的前提。"""
+    if not prev:
+        return
+    ver = int(prev.get("version", 1))
+    directory = _history_dir(template_id)
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, f"v{ver}.json")
+    if not os.path.isfile(path):
+        _write(path, prev)
+
+
 def _read(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
@@ -137,7 +153,7 @@ def resolve_id(name_or_id) -> str:
             hint="用完整 template_id",
         )
     raise GavelError(
-        "workflow_not_found", f"未知 workflow：{name_or_id}", hint="用 workflow_list 查看"
+        "workflow_not_found", f"未知 workflow：{name_or_id}", hint="用 workflow(op=list) 查看"
     )
 
 
@@ -147,7 +163,7 @@ def get_exact(template_id):
     path = _path_for(template_id)
     if not os.path.isfile(path):
         raise GavelError(
-            "workflow_not_found", f"未知 workflow：{template_id}", hint="用 workflow_list 查看"
+            "workflow_not_found", f"未知 workflow：{template_id}", hint="用 workflow(op=list) 查看"
         )
     return _read(path), path
 
@@ -169,6 +185,7 @@ def save(template):
         except Exception:
             prev = None
     if prev:
+        _backup(tid, prev)
         template["version"] = int(prev.get("version", 1)) + 1
         # stats 由运行时管理：覆盖保存时以已存在的 stats 为准，
         # 避免"修复后重发"把 record_run 刚写的统计冲回旧值。
@@ -236,7 +253,7 @@ def delete(template_id):
     path = _path_for(template_id)
     if not os.path.isfile(path):
         raise GavelError(
-            "workflow_not_found", f"未知 workflow：{template_id}", hint="用 workflow_list 查看"
+            "workflow_not_found", f"未知 workflow：{template_id}", hint="用 workflow(op=list) 查看"
         )
     os.remove(path)
     return {"template_id": template_id, "deleted": True}

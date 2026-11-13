@@ -174,7 +174,14 @@ async def test_task_repair_after_page_changed(gavel_tools, webapp_server):
     )
     assert res["status"] == "pass", res
     assert any(s.get("repaired") for s in res["steps"]), res
-    assert res.get("republished"), res  # 修复后发布新版本
+    repairs = res.get("proposed_repairs") or []
+    assert repairs, res
+    tpl = (await T["workflow_get"](name_or_id="portal_shop_repair"))["template"]
+    for st in tpl["steps"]:
+        if st["id"] == repairs[0]["step_id"]:
+            st["action"]["target"] = repairs[0]["new_target"]
+    acc = await T["workflow_save"](template=tpl)
+    assert acc["status"] == "ok", acc
     # 已完成的步骤不重复；修复后重跑应无需再修
     res2 = await T["workflow_run"](
         name_or_id="portal_shop_repair", session_id=r["session_id"], verbosity="steps"

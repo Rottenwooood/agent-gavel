@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from .errors import GavelError
 
-READ_KINDS = frozenset({"url", "title", "text", "value", "count", "html", "expr", "attr"})
+READ_KINDS = frozenset({"url", "title", "text", "value", "count", "html", "expr", "attr", "diff"})
 OPS = frozenset(
     {
         "eq",
@@ -33,9 +33,9 @@ OPS = frozenset(
 def documentation():
     """Compact public syntax, generated from the parser's own vocabulary."""
     return (
-        "断言支持{名称:{read?,op,value?,expected?,selector?,attr?,expr?,frame?}}、"
+        "断言支持{名称:{read?,op,value?,expected?,selector?,attr?,expr?,path?,frame?}}、"
         "{url_contains:'x'}、{title:'x',op:'contains'}及单条检查。"
-        "value/expected等价；read缺省按名称/expr/attr/selector推导，无法推导报错。"
+        "value/expected等价；read缺省按名称/expr/attr/selector推导，给path则读diff，无法推导报错。"
         "read=" + "|".join(sorted(READ_KINDS)) + ";op=" + "|".join(sorted(OPS)) + "。"
     )
 
@@ -50,6 +50,7 @@ _READ_PREFIX = {
     "expr": "expr",
     "attr": "attr",
     "selector": "text",
+    "diff": "diff",
 }
 _OP_SUFFIXES = (
     "not_contains",
@@ -67,7 +68,7 @@ _OP_SUFFIXES = (
     "gt",
     "lt",
 )
-_CHECK_FIELDS = ("read", "selector", "expr", "value", "expected")
+_CHECK_FIELDS = ("read", "selector", "expr", "value", "expected", "path")
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,7 @@ class Check:
     attr: str | None = None
     expr: str | None = None
     frame: object = None
+    path: str | None = None
 
     def to_dict(self):
         return {
@@ -93,6 +95,7 @@ class Check:
                 "attr": self.attr,
                 "expr": self.expr,
                 "frame": self.frame,
+                "path": self.path,
             }.items()
             if v is not None
         }
@@ -103,10 +106,12 @@ def _check(**kwargs):
 
 
 def read_kind(check):
-    """按显式 read、name、expr/attr/selector 顺序判定读什么。"""
+    """按显式 read、path、name、expr/attr/selector 顺序判定读什么。"""
     read = check.read
     if read is None:
-        if check.name in READ_KINDS:
+        if check.path is not None:
+            read = "diff"
+        elif check.name in READ_KINDS:
             read = check.name
         elif check.expr is not None:
             read = "expr"
@@ -134,8 +139,11 @@ def _parse_one(name, value):
         selector = item.pop("selector", None)
         attr = item.pop("attr", None)
         expr = item.pop("expr", None)
+        path = item.pop("path", None)
         if read is None:
-            if expr is not None:
+            if path is not None:
+                read = "diff"
+            elif expr is not None:
                 read = "expr"
             elif attr:
                 read = "attr"
@@ -156,6 +164,7 @@ def _parse_one(name, value):
             attr=attr,
             expr=expr,
             frame=frame,
+            path=path,
         )
     return _check(name=name, read=read, op=op, expected=value)
 
@@ -177,11 +186,14 @@ def parse(raw):
             expr = item.pop("expr", None)
             op = item.pop("op", "eq")
             frame = item.pop("frame", None)
+            path = item.pop("path", None)
             name = item.pop("name", None) or read or "check"
             if item:
                 raise GavelError("bad_check", f"未识别的断言字段：{sorted(item)}")
             if read is None:
-                if expr is not None:
+                if path is not None:
+                    read = "diff"
+                elif expr is not None:
                     read = "expr"
                 elif attr:
                     read = "attr"
@@ -197,6 +209,7 @@ def parse(raw):
                     attr=attr,
                     expr=expr,
                     frame=frame,
+                    path=path,
                 )
             ]
         if "op" in raw:
@@ -252,3 +265,13 @@ def from_checkpoint(cp):
             frame=cp.get("frame"),
         )
     ]
+
+
+def checkpoint_checks(cp):
+    """checkpoint 任意写法 → {name: check_dict}（可编辑形态）。"""
+    out = {}
+    for c in from_checkpoint(cp):
+        d = c.to_dict()
+        name = d.pop("name", None) or d.get("read") or "check"
+        out[name] = d
+    return out

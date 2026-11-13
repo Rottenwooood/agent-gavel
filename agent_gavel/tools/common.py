@@ -67,23 +67,23 @@ async def run_with_optional_assert(
     flatten=False,
     post=None,
 ):
-    """执行动作，若给断言则做三态判定（含 before 签名 diff 判 ambiguous）。"""
+    """执行动作，若给断言则做三态判定（diff 证据来自动作自身的 Observation）。"""
     be = backend()
     target = (record or {}).get("target")
-    before = await be.page_signature(handle, target=target) if assertions else None
     url_before = handle.page.url
     execution = await handle.actor.submit(action_type, fn, timeout_s=timeout_s + 5)
+    diff = execution.pop("diff", None) if isinstance(execution, dict) else None
     if flatten:
         out = {"status": "ok", **ids(handle), **execution}
     else:
         out = {"status": "ok", **ids(handle), "execution": execution}
     if post is not None:
         await post(out, execution, handle)
+    if diff:
+        out["diff"] = diff
     passed = None
     if assertions:
-        ev = await be.evaluate_checks(
-            handle, assertions, before_sig=before, wait_s=wait_s, target=target
-        )
+        ev = await be.evaluate_checks(handle, assertions, obs=diff, wait_s=wait_s, target=target)
         out["status"] = ev["status"]
         out["assertions"] = ev["assertions"]
         passed = ev["status"] == "pass"
@@ -96,6 +96,7 @@ async def run_with_optional_assert(
             url_before=url_before,
             url_after=handle.page.url,
             checkpoint=assertions if passed else None,
+            diff=diff,
         )
     return out
 
@@ -114,7 +115,7 @@ async def resolve_session(session_id=None):
     if len(rt.sessions) == 1:
         return next(iter(rt.sessions.values()))
     if not rt.sessions:
-        raise GavelError("session_required", "还没有 session", hint="先 session_create")
+        raise GavelError("session_required", "还没有 session", hint="先 session(op=create)")
     raise GavelError(
         "session_ambiguous",
         "有多个 session，请显式指定 session_id",
@@ -126,7 +127,14 @@ async def resolve_context(context_id=None, session_id=None):
     rt = get_runtime()
     if context_id:
         return rt.context_mgr.get(context_id)
-    session = await resolve_session(session_id)
+    try:
+        session = await resolve_session(session_id)
+    except GavelError as e:
+        if e.code != "session_required":
+            raise
+        # 冷启动不硬拦：默认会话惰性创建，省掉一次 session(op=create)
+        session = await rt.session_mgr.create(mode="ephemeral", container="isolated")
     if session.context_ids:
         return rt.context_mgr.get(session.context_ids[0])
-    raise GavelError("context_not_found", "该 session 下没有 context", hint="先 context_create")
+    # 冷启动：会话刚建好还没有 context，直接补一个，别让调用方多跑一轮
+    return await rt.context_mgr.create(session, {})

@@ -33,14 +33,14 @@ def register_assertion_tools(catalog):
         return {
             "status": "ok",
             "forms": {
-                "map": "{名字: {op, value?, expected?, read?, selector?, attr?, expr?, frame?}}",
+                "map": "{名字: {op, value?, expected?, read?, selector?, attr?, expr?, path?, frame?}}",
                 "flat": "{url_contains: 'x', text_eq: 'y', title_contains: 'z', count_gte: 1}",
                 "top_op": "{title: '百度', op: 'contains'}",
             },
             "read": sorted(READ_KINDS),
             "ops": sorted(OPS),
             "value_alias": "value 与 expected 等价",
-            "defaults": "read 缺省按名字（url/title/...）或 selector（元素文本）；判断不出会报错",
+            "defaults": "read 缺省按名字（url/title/...）或 selector（元素文本）；给 path 则读 diff；判断不出会报错",
             "tri_state": {
                 "pass": "满足",
                 "fail": "未满足",
@@ -51,8 +51,11 @@ def register_assertion_tools(catalog):
                 {"t": {"read": "title", "op": "contains", "value": "百度"}},
                 {"url_contains": "baidu.com"},
                 {"n": {"read": "count", "selector": ".result", "op": "count_gte", "value": 1}},
+                {"opened": {"read": "diff", "path": "pages.opened", "op": "count_eq", "value": 1}},
+                {"got_file": {"read": "diff", "path": "artifacts", "op": "count_gte", "value": 1}},
             ],
-            "note": "文本类返回（page_text/page_read 等）标 untrusted=true，注入模型时按不可信内容处理",
+            "note": "文本类返回（page(op=text)/page(op=read) 等）标 untrusted=true，"
+            "注入模型时按不可信内容处理",
         }
 
     @catalog.operation(returns="Location", required=("url",), nonempty=("url",))

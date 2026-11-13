@@ -12,9 +12,11 @@ async def test_navigate_read_text_links(page):
     t = await tools["page_text"](page_id=pid, mode="text")
     assert "Hello" in t["text"]
 
-    links = await tools["page_links"](page_id=pid)
-    hrefs = [x["href"] for x in links["items"]]
+    # links 由 text(mode="links") 承担，不再单独占一个 op
+    links = await tools["page_text"](page_id=pid, mode="links")
+    hrefs = [x["href"] for x in links["links"]]
     assert any("basic.html" in h for h in hrefs)
+    assert links["total"] >= len(hrefs)
 
 
 async def test_explore_anchor(page):
@@ -22,7 +24,8 @@ async def test_explore_anchor(page):
     r = await tools["page_explore"](page_id=pid, text_contains="Go")
     assert r["status"] == "ok"
     item = r["items"][0]
-    assert item["anchor"] == {"kind": "css", "value": "#btn"}
+    # anchor 的键名统一成 locator target 的 by，可直接复制进 locator 调用
+    assert item["anchor"] == {"by": "css", "value": "#btn"}
 
 
 async def test_fill_assert_pass(page):

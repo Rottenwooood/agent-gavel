@@ -2,19 +2,10 @@
 
 from ..runtime import get_runtime
 from .common import backend
-from .common import resolve_context as _resolve_context
 
 
 def register_page_lifecycle_tools(catalog):
     rt_get = get_runtime
-
-    @catalog.operation(returns="Page")
-    async def page_open(context_id: str = None, session_id: str = None, url: str = None):
-        """"""
-        rt = rt_get()
-        ctx = await _resolve_context(context_id, session_id)
-        handle = await rt.page_mgr.open(ctx, url)
-        return {"status": "ok", **handle.to_dict()}
 
     @catalog.operation(returns="Pages")
     async def page_list():

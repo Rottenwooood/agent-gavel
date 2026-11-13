@@ -23,6 +23,11 @@ from .schemas import error_hint, factor, request_schema
 
 SINGLE_TOOLS = frozenset({"console_get", "performance_metrics", "daemon_shutdown", "screenshot"})
 
+# 合并/迁移过的操作：调用旧名时给出新写法，别让模型猜
+MOVED_OPERATIONS = {
+    ("page", "links"): "page(op=text, mode=links)",
+}
+
 
 @dataclass
 class Operation:
@@ -34,6 +39,27 @@ class Operation:
     returns: str
     description: str
     validator: object = None
+
+
+def _operation_label(operation, name):
+    """op 的紧凑签名：必填字段带 `!`，二选一用 `[a|b]`。
+
+    这些信息过去靠工具级 schema 的 anyOf 表达；Anthropic 拒收顶层 union，
+    改写成描述文本，机器可读性让位给兼容性（校验仍在服务端逐 op 执行）。
+    """
+    label = operation.op or name
+    schema = operation.input_schema
+    required = [field for field in schema.get("required", []) if field != "op"]
+    if required:
+        label += "(" + ",".join(f"{field}!" for field in required) + ")"
+    branches = schema.get("anyOf") or []
+    if branches:
+        names = [
+            branch.get("required", ["?"])[0] for branch in branches if isinstance(branch, dict)
+        ]
+        if names:
+            label += "[" + "|".join(names) + "]"
+    return label
 
 
 class Catalog:
@@ -113,7 +139,7 @@ class Catalog:
                 operation.validator = Draft202012Validator(own)
             description_groups = defaultdict(list)
             for operation in operations:
-                label = operation.op or name
+                label = _operation_label(operation, name)
                 description_groups[operation.returns, operation.description].append(label)
             descriptions = []
             for (result_name, note), labels in description_groups.items():
@@ -162,7 +188,12 @@ class Catalog:
                 raise GavelError("bad_args", "需要字符串op参数")
             operation = self.operations.get((name, op))
             if operation is None:
-                raise GavelError(UNKNOWN_OPERATION, f"未知操作：{name}.{op}")
+                moved = MOVED_OPERATIONS.get((name, op))
+                raise GavelError(
+                    UNKNOWN_OPERATION,
+                    f"未知操作：{name}.{op}",
+                    hint=f"已迁移：改用 {moved}" if moved else None,
+                )
             if operation.validator is None:
                 self.schemas()
             error = next(operation.validator.iter_errors(arguments), None)

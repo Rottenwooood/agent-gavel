@@ -102,7 +102,9 @@ class ContextManager:
         ctx = self.runtime.contexts.get(context_id)
         if ctx is None:
             raise GavelError(
-                "context_not_found", f"未知 context：{context_id}", hint="用 context_create 新建"
+                "context_not_found",
+                f"未知 context：{context_id}",
+                hint="用 context(op=create) 新建",
             )
         return ctx
 

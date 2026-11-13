@@ -64,8 +64,9 @@ async def test_ambiguous_returns_diff_evidence(page):
     )
     assert r["status"] == "ambiguous", r
     d = r.get("diff")
-    assert d and d.get("meaningful") is True, r
-    assert d.get("samples_added") or d.get("samples_removed")
+    # diff 现在是完整观测（pages/artifacts/dom/focus/...），dom 才是 ambiguous 的判据
+    assert d and (d.get("dom") or {}).get("meaningful") is True, r
+    assert d["dom"].get("samples_added") or d["dom"].get("samples_removed")
 
 
 async def test_no_change_is_fail_without_diff(page):
@@ -78,7 +79,7 @@ async def test_no_change_is_fail_without_diff(page):
         wait_s=0.2,
     )
     assert r["status"] == "fail", r
-    assert "diff" not in r
+    assert not ((r.get("diff") or {}).get("dom") or {}).get("meaningful"), r
 
 
 # ---------------- B3 ----------------

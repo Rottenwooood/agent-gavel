@@ -71,9 +71,15 @@ def _js_compare(op, actual, expected):
 
 
 def render_js(check):
-    """单条 Check 的浏览器侧谓词；不支持时返回 None（调用方退回轮询）。"""
+    """单条 Check 的浏览器侧谓词；不支持时返回 None（调用方退回轮询）。
+
+    `read=diff` 在 Python 侧求值，浏览器侧没有可等待的谓词，恒真即可
+    （避免无谓地耗尽 wait_s）。
+    """
     if check.frame:
         return None
+    if read_kind(check) == "diff":
+        return "true"
     expr = _js_value(check, check.selector)
     if expr is None:
         return None

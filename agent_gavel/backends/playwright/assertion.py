@@ -1,4 +1,8 @@
-"""断言求值：Python 读取/比较，以及同一 IR 生成的浏览器侧谓词。"""
+"""断言求值：Python 读取/比较，以及同一 IR 生成的浏览器侧谓词。
+
+`read=diff` 读的是 Observation 采集到的变化项（`path` 为点路径，
+如 `pages.opened`、`artifacts`）。它在 Python 侧求值，浏览器侧无对应谓词。
+"""
 
 import re
 import time
@@ -7,27 +11,49 @@ from ...core.checks import Check, parse, read_kind
 from ...core.errors import GavelError
 from .frames import frame_root
 from .jsrender import predicate
-from .signature import diff_summary, page_signature
+
+_COUNT_OPS = frozenset({"count_eq", "count_gte", "count_gt", "exists", "not_exists"})
 
 
-async def _read_url(page, check, root):
-    return page.url
+def _dig(obj, path):
+    """按点路径取值；列表用数字下标。路径不存在返回 None（不是 0）。"""
+    cur = obj
+    for part in (path or "").split("."):
+        if not part:
+            continue
+        if isinstance(cur, list):
+            try:
+                cur = cur[int(part)]
+            except (ValueError, IndexError):
+                return None
+        elif isinstance(cur, dict):
+            cur = cur.get(part)
+        else:
+            return None
+        if cur is None:
+            return None
+    return cur
 
 
-async def _read_title(page, check, root):
-    return await page.title()
+async def _read_url(ctx, check, root):
+    return ctx["page"].url
 
 
-async def _read_expr(page, check, root):
-    return await page.evaluate(check.expr)
+async def _read_title(ctx, check, root):
+    return await ctx["page"].title()
 
 
-async def _read_count(page, check, root):
+async def _read_expr(ctx, check, root):
+    return await ctx["page"].evaluate(check.expr)
+
+
+async def _read_count(ctx, check, root):
     return await root.locator(check.selector or "").count()
 
 
-async def _read_text(page, check, root):
+async def _read_text(ctx, check, root):
     if not check.selector:
+        page = ctx["page"]
         return await page.evaluate("() => document.body ? document.body.innerText : ''")
     loc = root.locator(check.selector).first
     try:
@@ -36,16 +62,23 @@ async def _read_text(page, check, root):
         return (await loc.text_content() or "").strip()
 
 
-async def _read_value(page, check, root):
+async def _read_value(ctx, check, root):
     return await root.locator(check.selector or "").first.input_value()
 
 
-async def _read_attr(page, check, root):
+async def _read_attr(ctx, check, root):
     return await root.locator(check.selector or "").first.get_attribute(check.attr or "")
 
 
-async def _read_html(page, check, root):
+async def _read_html(ctx, check, root):
     return await root.locator(check.selector or "").first.inner_html()
+
+
+async def _read_diff(ctx, check, root):
+    value = _dig(ctx.get("obs") or {}, check.path or "")
+    if check.op in _COUNT_OPS and isinstance(value, (list, dict)):
+        return len(value)
+    return value
 
 
 READERS = {
@@ -57,10 +90,12 @@ READERS = {
     "html": _read_html,
     "expr": _read_expr,
     "attr": _read_attr,
+    "diff": _read_diff,
 }
 
 
-async def read_value(page, check):
+async def read_value(ctx, check):
+    page = ctx["page"]
     root = frame_root(page, check.frame)
     if check.op in ("exists", "not_exists"):
         return await root.locator(check.selector or "").count()
@@ -69,9 +104,9 @@ async def read_value(page, check):
         raise GavelError(
             "bad_check",
             f"无法判断该 check 要读什么：{check.to_dict()}",
-            hint="用 read/name 指定 url|title|text|value|count|expr|attr|html，或给 selector",
+            hint="用 read/name/path 指定 url|title|text|value|count|expr|attr|html|diff",
         )
-    return await READERS[read](page, check, root)
+    return await READERS[read](ctx, check, root)
 
 
 def _cmp_eq(actual, expected):
@@ -147,12 +182,12 @@ def compare(op, actual, expected):
         return False
 
 
-async def _run_checks(page, checks):
+async def _run_checks(ctx, checks):
     results = []
     for check in checks:
         name = check.name or check.read or "check"
         try:
-            actual = await read_value(page, check)
+            actual = await read_value(ctx, check)
             passed = compare(check.op, actual, check.expected)
             results.append(
                 {
@@ -177,7 +212,12 @@ async def _run_checks(page, checks):
     return results
 
 
-async def evaluate(backend, handle, checks, before_sig=None, wait_s=0.0, interval=0.1, target=None):
+async def evaluate(backend, handle, checks, obs=None, wait_s=0.0, interval=0.1, target=None):
+    """三态求值：pass / fail / ambiguous。
+
+    ambiguous 的证据来自 `obs["dom"]["meaningful"]` —— 由 Observation 在动作
+    期间采集，不再在这里重算签名。
+    """
     parsed = (
         checks
         if isinstance(checks, list) and all(isinstance(c, Check) for c in checks)
@@ -187,6 +227,7 @@ async def evaluate(backend, handle, checks, before_sig=None, wait_s=0.0, interva
         return {"status": "pass", "assertions": []}
 
     page = handle.page
+    ctx = {"page": page, "obs": obs}
     deadline = time.monotonic() + max(0.0, wait_s)
     if wait_s and wait_s > 0 and not (target and target.get("frame")):
         pred = predicate(parsed)
@@ -199,19 +240,15 @@ async def evaluate(backend, handle, checks, before_sig=None, wait_s=0.0, interva
 
     last = None
     while True:
-        last = await _run_checks(page, parsed)
+        last = await _run_checks(ctx, parsed)
         if all(item["passed"] for item in last) or time.monotonic() >= deadline:
             break
         await _sleep(interval)
 
     if all(item["passed"] for item in last):
         return {"status": "pass", "assertions": last}
-    if before_sig is None:
-        return {"status": "fail", "assertions": last}
-    after = await page_signature(backend, handle, target=target)
-    diff = diff_summary(before_sig, after)
-    if diff.get("meaningful"):
-        return {"status": "ambiguous", "assertions": last, "diff": diff}
+    if isinstance(obs, dict) and (obs.get("dom") or {}).get("meaningful"):
+        return {"status": "ambiguous", "assertions": last, "diff": obs}
     return {"status": "fail", "assertions": last}
 
 

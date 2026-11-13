@@ -1,7 +1,8 @@
 """工作流编译：录制步骤 → 模板草稿（docs/tech-plan.md §5.15.2）。
 
-处理：合并连续输入、固定值→参数、敏感参数、保留录制断言/补关键检查点、
-标记不可自动重试动作、评估后端需求、生成版本。
+处理：合并连续输入、固定值→参数（覆盖 action/target/checkpoint 全部字符串）、
+敏感参数、保留录制断言、按 diff 自动补关键检查点、标记不可自动重试动作、
+保留页面相对引用、生成版本。
 """
 
 from urllib.parse import urlparse
@@ -17,6 +18,71 @@ def _same_target(a, b):
     return (a or {}).get("target") == (b or {}).get("target") and a.get("target")
 
 
+def _literal(spec):
+    """parameterize 的两种写法：{NAME: "值"} 或 {NAME: {value/default: "值"}}。"""
+    if isinstance(spec, dict):
+        return spec.get("value", spec.get("default"))
+    return spec
+
+
+def _param_walk(x, pairs, key=None):
+    """递归替换所有字符串叶子里的固定值；`id` 不参与（否则模板 id 会被参数化）。"""
+    if key == "id":
+        return x
+    if isinstance(x, str):
+        for name, actual in pairs:
+            if actual and actual in x:
+                x = x.replace(actual, f"${name}")
+        return x
+    if isinstance(x, list):
+        return [_param_walk(v, pairs) for v in x]
+    if isinstance(x, dict):
+        return {k: _param_walk(v, pairs, k) for k, v in x.items()}
+    return x
+
+
+def _auto_checkpoint(step):
+    """用录到的 diff 生成可断言的检查点；没有可断言信号时退回 url_contains。
+
+    弹新页 / 下载 / 弹窗这些副作用，只有 diff 能表达——这正是自动检查点
+    过去几乎为空的原因。
+    """
+    d = step.get("diff") or {}
+    checks = {}
+    if (d.get("pages") or {}).get("opened"):
+        checks["opened_page"] = {
+            "read": "diff",
+            "path": "pages.opened",
+            "op": "count_gte",
+            "value": 1,
+        }
+    if d.get("artifacts"):
+        checks["downloaded"] = {
+            "read": "diff",
+            "path": "artifacts",
+            "op": "count_gte",
+            "value": 1,
+        }
+    if d.get("dialogs"):
+        checks["dialog_seen"] = {
+            "read": "diff",
+            "path": "dialogs",
+            "op": "count_gte",
+            "value": 1,
+        }
+    if (
+        not checks
+        and step.get("url_before")
+        and step.get("url_after")
+        and step["url_before"] != step["url_after"]
+    ):
+        p = urlparse(step["url_after"])
+        token = (p.path or "").rstrip("/").split("/")[-1] or p.netloc
+        if token:
+            checks["url_ok"] = {"read": "url", "op": "contains", "value": token}
+    return {"checks": checks} if checks else None
+
+
 def compile(
     recorded_steps,
     *,
@@ -27,7 +93,7 @@ def compile(
     sensitive=None,
     auto_checkpoint=False,
 ):
-    """recorded_steps: [{"action": {...}, "url_before", "url_after"}, ...]"""
+    """recorded_steps: [{"action", "page", "url_before", "url_after", "diff"}]"""
     parameterize = parameterize or {}
     sensitive = set(sensitive or [])
 
@@ -54,8 +120,10 @@ def compile(
             nxt = steps[i + 1]
             cur = {
                 "action": {"type": "fill", "target": act.get("target"), "value": text},
+                "page": cur.get("page"),
                 "url_before": cur.get("url_before"),
                 "url_after": nxt.get("url_after"),
+                "diff": nxt.get("diff") or cur.get("diff"),
             }
             i += 2
         else:
@@ -65,41 +133,37 @@ def compile(
 
     # 3) 参数化 + 4) 敏感标记
     params = {}
-    for name in parameterize:
+    pairs = []
+    for name, spec in parameterize.items():
+        lit = _literal(spec)
+        default = lit if lit is not None else None
         params[name] = {
             "type": "string",
             "sensitive": name in sensitive or name.upper() in sensitive,
+            "default": None if default is None else str(default),
+            "desc": spec.get("desc", "") if isinstance(spec, dict) else "",
+            "required": bool(spec.get("required", default is None))
+            if isinstance(spec, dict)
+            else default is None,
         }
-
-    def _param_value(v):
-        for name, actual in parameterize.items():
-            if str(actual) == str(v):
-                return f"${name}"
-        return v
+        if lit is not None:
+            pairs.append((name, str(lit)))
+    # 长值优先：避免 $SCHOOL 先把 $SCHOOL_ID 的前缀吃掉
+    pairs.sort(key=lambda kv: -len(kv[1]))
 
     out_steps = []
     for idx, st in enumerate(steps):
-        act = dict(_action_of(st))
-        if "value" in act:
-            act["value"] = _param_value(act["value"])
-        if "text" in act:
-            act["text"] = _param_value(act["text"])
-        if "url" in act:
-            act["url"] = _param_value(act["url"])
+        act = _param_walk(dict(_action_of(st)), pairs)
         step = {"id": f"step{idx + 1}", "action": act}
-        # 5) 保留录制时用过的断言（checkpoint）；没有则按 url 变化补 url_contains
+        if st.get("page"):
+            step["page"] = st["page"]
+        # 5) 保留录制时用过的断言；没有则按 diff 补检查点
         if st.get("checkpoint"):
-            step["checkpoint"] = st["checkpoint"]
-        elif (
-            auto_checkpoint
-            and st.get("url_before")
-            and st.get("url_after")
-            and st["url_before"] != st["url_after"]
-        ):
-            p = urlparse(st["url_after"])
-            token = (p.path or "").rstrip("/").split("/")[-1] or p.netloc
-            if token:
-                step["checkpoint"] = {"type": "url_contains", "value": token}
+            step["checkpoint"] = _param_walk(st["checkpoint"], pairs)
+        elif auto_checkpoint:
+            cp = _auto_checkpoint(st)
+            if cp:
+                step["checkpoint"] = cp
         out_steps.append(step)
 
     draft = {

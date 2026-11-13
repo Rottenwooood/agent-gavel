@@ -159,11 +159,14 @@ async def test_bad_template_id_rejected(gavel_tools):
 def test_substitute_no_prefix_conflict():
     assert S.substitute("$QUERY", {"QUERY": "hello"}) == "hello"
     # $QUERY 不得替换进 $QUERY_ID
-    assert S.substitute("$QUERY_ID", {"QUERY": "hello"}) == "$QUERY_ID"
     assert S.substitute("$QUERY_ID", {"QUERY": "hello", "QUERY_ID": "7"}) == "7"
     assert S.substitute("$QUERY x", {"QUERY": "hello"}) == "hello x"
-    # params 里没有的变量保持原样（不静默清空）
-    assert S.substitute("$MISSING", {"QUERY": "hello"}) == "$MISSING"
+    # 未提供的变量不再静默保留字面量（否则 "$SCHOOL" 会被真的填进 URL）
+    with pytest.raises(GavelError):
+        S.substitute("$MISSING", {"QUERY": "hello"})
+    # 模板里声明了 default 就可以不传 params
+    assert S.substitute("$Q", {}, {"Q": {"default": "dft"}}) == "dft"
+    assert S.substitute("$Q", {"Q": "run"}, {"Q": {"default": "dft"}}) == "run"
 
 
 # ---------------- 模板元数据（面向社区分享） ----------------

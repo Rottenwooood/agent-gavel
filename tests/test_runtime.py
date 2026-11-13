@@ -240,6 +240,7 @@ async def test_mcp_page_open_url_and_list(runtime, webapp_server):
     r = await mcp.tools["session_create"]()
     r2 = await mcp.tools["page_open"](context_id=r["context_id"], url=f"{webapp_server}/basic.html")
     assert r2["status"] == "ok"
-    assert "basic.html" in (r2["url"] or "")
+    # open 与 navigate 契约对齐：返回 Navigation 外形
+    assert "basic.html" in (r2["final_url"] or "")
     listing = await mcp.tools["page_list"]()
     assert any(p["page_id"] == r2["page_id"] for p in listing["items"])

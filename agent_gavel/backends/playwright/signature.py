@@ -16,6 +16,7 @@ _SIG_BODY = r"""
     while((e=w.nextNode())){
       if(++count>MAX)break;
       const tag=e.tagName.toLowerCase();
+      if (tag==='style'||tag==='script'||tag==='svg'||tag==='link'||tag==='meta') continue;
       let line=tag+(e.id?'#'+e.id:'');
       if(e.classList&&e.classList.length){
         const cls=Array.from(e.classList).filter(c=>!/^(sc-|jss|css-)/.test(c)).sort().join('.');
@@ -98,6 +99,6 @@ def diff_summary(before, after):
         "added": added,
         "removed": removed,
         "scope": before.get("scope") or after.get("scope"),
-        "samples_added": s_add[:6],
-        "samples_removed": s_rem[:6],
+        "samples_added": [x for x in s_add if not x.startswith(("URL=", "TITLE="))][:6],
+        "samples_removed": [x for x in s_rem if not x.startswith(("URL=", "TITLE="))][:6],
     }

@@ -180,6 +180,8 @@ agent_gavel/
 | 模板精确读写 | `loader` | `delete` / `record_run` 走模糊匹配 |
 | 断言三态判定 | `backends/playwright/assertion.py` | `runner` / 工具层各自判 |
 | 产物索引 | `ArtifactStore` | 其他模块直接读写索引文件 |
+| 动作前后状态差分（diff） | `backends/playwright/observation.py` | 工具层、runner、assertion 各自采集 |
+| 模板编辑面 | 模板 JSON 本身（`workflow_get` / `workflow_save`） | 额外的 patch/编辑工具 |
 
 ---
 
@@ -583,3 +585,54 @@ pytest -q   # 配置 pytest-timeout，单测上限 90s
 - 修改本文中的不变量、冻结契约或阶段顺序，必须在同一次变更中同时修改对应的门禁测试与文档，否则不予合并。
 - 若实现确实无法满足某条不变量，应先修改本文并说明理由，再改代码；不允许先违规后补文档。
 - 本文与 `docs/tech-plan.md` 冲突时，以本文为准；`tech-plan` 作为设计背景保留，不再作为实现约束。
+
+
+---
+
+## 13. 观测（diff）与模板编辑
+
+**diff 契约**：`backends/playwright/observation.py` 是动作前后状态差分的唯一主人。
+
+- **只输出变化项**：没有变化就没有对应 key；不需要 `unchanged` 占位。
+- 覆盖四层：context（`pages.opened/closed/active`、`artifacts`）、page 宿主（`url`、`title`、`dialogs`、`errors`、`network`）、交互态（`focus`、`values`）、DOM（`dom.added/removed/meaningful`）。
+- 时序是正确性的一部分：新页面由 `context.on("page")` 异步登记、下载产物异步落盘。Observation 在动作期间挂自己的 `page` 监听，退出时等登记落地（上限 2.5s）；只比较注册表会漏掉 `pages.opened`。
+- 锚点点击额外等副作用：`target=_blank` 或 `download` 链接给 1.2s（有头默认容器下弹窗登记实测可达 0.6s+），其余链接 0.15s，按钮/输入类不等——避免给每次点击加固定延迟（性能门禁 click p95 < 100ms）。
+- 断言新增读取类型 `read: "diff"` + `path`（点路径，如 `pages.opened`）；读取面仍由 `core/checks.py` 独占，浏览器侧谓词恒真。
+
+**工具 schema 的跨客户端兼容性**：顶层不得出现 `oneOf` / `allOf` / `anyOf`。
+
+- Anthropic 直接拒收带顶层 union 的 `input_schema`（`tools.N.custom.input_schema`），整轮 400。
+- 因此 `factor()` 只产出 `{"type":"object","properties":...,"required":["op"]}`；每个 op 的必填与二选一约束由 `catalog.call` 用 `operation.validator` 逐 op 校验。
+- 条件必填的提示改写在工具描述里：`navigate(url!)`、`check[checks|assertions]`。
+- 门禁：`tests/test_schema_compat.py` 断言任何工具顶层无 union，且 per-op 校验仍生效。
+
+**导航管线（open / navigate 共用）**
+
+- `open` 与 `navigate` 入参、返回完全一致，只有「新建标签页 vs 复用当前页」的差别；`open` 另有 `activate` 控制是否抢占 active page。
+- `text_chars` 默认 4000：加载 URL 即带回正文摘要，`0` 关闭。`compact` 下**不返回 diff、不返回 anchors**（导航必然整页替换，diff 是噪声；anchors 用 `page(op=text)` 取）。
+- 软拦截：`redirected` 且 final_url 命中 `/auth|/login|/sso|/ipauth|/error|/403|/denied`，或正文 <150 字且含「没有访问/仅限校内/请先登录/访问受限/验证码/无权限」→ `page_status="blocked"`、`warning="access_restricted"`，`status` 仍为 ok。
+- 正文 <100 字且 `text_chars>0` → `warning="sparse_content"`。阈值一律用**去噪后**的正文长度（剔除 header/nav/footer/script/style），不用整页 innerText。
+- 正文容器：`main/article/[role=main]` 的文本 ≥200 字才采纳，否则回退到去噪后的整页——避免空壳 `<main>` 导致正文为空、进而误判 sparse/blocked。
+- 导航触发下载（附件/PDF）时不再报错：落盘为 artifact，返回 `artifact_id`、`suggested_filename`、`mime_type`、`download_url`，`final_url` 保持当前页（`navigated=false`）；`hint` 按 mime 区分 `read_text` 与 `export`。
+- 省略 `page_id`/`session` 时惰性建会话、上下文与页面；**默认会话单例**：已有会话时复用其上下文，只有完全没有会话才新建，避免连续 open 产生孤立 context。
+
+**错误提示与 op 收敛**
+
+- 报错里的 `hint` 一律写 0.5 的分组形式：`page(op=open)`、`session(op=create)`、`workflow(op=list)`；不得出现 0.4 的扁平工具名（门禁：`tests/test_schema_compat.py::test_hints_use_grouped_tool_names`）。
+- `page(op="links")` 已并入 `page(op="text", mode="links")`（返回 `links` + `total`），避免 anchors/links 两份同源数据。
+
+**单步降轮数**：读与点合并在一次返回里。
+
+- `page(op="text")` 除正文外返回 `anchors`：`[{tag,text,target,href}]`，`target` 可直接喂给 `locator(op="click"|"fill")`，省掉 `text → find_text → click` 两次往返。
+- `page(op="navigate", text_chars=N)` 在同一次返回里带回正文前 N 字与 `anchors`，省掉导航后立刻补一次 `text`。
+- 两者都是**增量字段**，不新增工具、不改既有 op 名。
+
+**模板编辑**：模板就是一份 JSON，不额外长编辑工具。
+
+- `workflow_record_stop` 返回草稿 `template`；`workflow_get` 读全文，改完 `workflow_save` 写回。
+- 断言与动作里的固定值都支持 `$VAR`；`parameters` 可写 `default`，`workflow_run(params=...)` 覆盖。
+- `substitute` 按 params → default → 报错三级回退，不静默保留 `$VAR`。
+- `loader.save` 写前归档旧版本到 `history/<id>/vN.json`（无对应工具，供人工回溯）。
+- 运行期局部修复只返回 `proposed_repairs`，不自动改模板。
+- 失败（fail/ambiguous/error）保留 run 与页面现场，`workflow_resume` 从失败步续跑，并在续跑前重新读取模板。
+- 页面引用用相对记号 `page0` / `new:N`；重放时由 diff 的 `pages.opened` 绑定。

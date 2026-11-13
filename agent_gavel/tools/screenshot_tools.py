@@ -41,8 +41,18 @@ def register_screenshot_tools(catalog):
             "device_scale_factor": captured["device_scale_factor"],
         }
         if save_to:
-            exported = await asyncio.to_thread(
-                rt.artifacts.export, info["artifact_id"], save_to, policies=rt.policies
-            )
-            result.update(exported=True, exported_filename=exported["filename"])
+            try:
+                exported = await asyncio.to_thread(
+                    rt.artifacts.export, info["artifact_id"], save_to, policies=rt.policies
+                )
+            except GavelError as e:
+                # 截图已经拿到了，导出失败只降级，不让整次调用失败
+                result.update(
+                    exported=False,
+                    warning="export_path_blocked",
+                    allowed_dirs=rt.policies.allowed_paths,
+                    hint=e.message,
+                )
+            else:
+                result.update(exported=True, exported_filename=exported["filename"])
         return ToolReply(result, [Image(captured["data"])])

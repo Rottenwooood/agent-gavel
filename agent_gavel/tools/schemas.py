@@ -55,6 +55,14 @@ def error_hint(error):
     if error.validator == "additionalProperties" and isinstance(error.instance, dict):
         unknown = set(error.instance) - set(error.schema.get("properties", {}))
         return "不适用的参数：" + ", ".join(sorted(unknown))
+    if error.validator == "anyOf":
+        names = []
+        for branch in error.validator_value or []:
+            required = branch.get("required") if isinstance(branch, dict) else None
+            if required:
+                names.append(required[0])
+        if names:
+            return "需要其中之一：" + ", ".join(names)
     if error.validator in ("enum", "type", "minLength", "minItems", "minProperties"):
         return error.validator + "=" + json.dumps(error.validator_value, ensure_ascii=False)
     return error.validator + " 约束未满足"
@@ -140,30 +148,12 @@ def factor(operations):
     if operations[0].op is not None:
         merged["op"] = {"enum": [operation.op for operation in operations]}
         result["required"] = ["op"]
-        branch_groups = {}
-        for operation in operations:
-            original = operation.input_schema
-            differences = {
-                name: value
-                for name, value in original["properties"].items()
-                if merged[name] != value
-            }
-            branch = {"propertyNames": {"enum": ["op", "detail", *original["properties"]]}}
-            if original.get("required"):
-                branch["required"] = original["required"]
-            if original.get("anyOf"):
-                branch["anyOf"] = original["anyOf"]
-            if differences:
-                branch["properties"] = differences
-            branch_groups.setdefault(key(branch), (branch, []))[1].append(operation.op)
-        result["anyOf"] = []
-        for branch, names in branch_groups.values():
-            branch.setdefault("properties", {})["op"] = {"enum": names}
-            result["anyOf"].append(branch)
-    else:
-        for name in ("required", "anyOf"):
-            if name in operations[0].input_schema:
-                result[name] = operations[0].input_schema[name]
+        # 不在顶层放 anyOf/oneOf/allOf：Anthropic 会直接拒收
+        # "input_schema does not support oneOf, allOf, or anyOf at the top level"。
+        # 每个 op 的必填与二选一约束仍由 catalog.call 用 operation.validator
+        # 逐 op 校验，客户端需要的提示写进工具描述（见 catalog.schemas）。
+    elif "required" in operations[0].input_schema:
+        result["required"] = operations[0].input_schema["required"]
     if any("#/$defs/Target" in key(op.input_schema) for op in operations):
         definitions["Target"] = targets.schema()
     if definitions:

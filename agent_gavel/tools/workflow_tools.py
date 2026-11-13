@@ -162,7 +162,13 @@ def register_workflow_tools(catalog):
                 "recorded_steps": len(rec.steps),
             }
         info = loader.save(draft)
-        return {"status": "ok", **info, "warnings": warnings, "recorded_steps": len(rec.steps)}
+        return {
+            "status": "ok",
+            **info,
+            "warnings": warnings,
+            "recorded_steps": len(rec.steps),
+            "template": draft,
+        }
 
     @catalog.operation(
         returns="WorkflowRun", fields={"verbosity": {"enum": ["summary", "steps", "full"]}}
@@ -192,15 +198,7 @@ def register_workflow_tools(catalog):
             wait_s=wait_s,
             page_id=page_id,
         )
-        # 局部修复成功 → 发布新版本
-        repaired = [s for s in result.get("steps", []) if s.get("repaired")]
-        if repaired:
-            for s in repaired:
-                for st in template.get("steps", []):
-                    if st.get("id") == s.get("step_id") and s.get("repaired_target"):
-                        st.setdefault("action", {})["target"] = s["repaired_target"]
-            info = loader.save(template)
-            result["republished"] = info
+        # 局部修复只产出建议；要写回就改 JSON 再 workflow_save。
         return result
 
     @catalog.operation(returns="RunControl")
@@ -215,10 +213,11 @@ def register_workflow_tools(catalog):
 
     @catalog.operation(returns="RunControl")
     async def workflow_resume(run_id: str = None):
-        "继续未完成步骤，不重放。"
-        from ..runtime import get_runtime
-
-        st = _find_run(get_runtime(), run_id)
+        "暂停态继续；失败态从失败步续跑（不重放已完成步骤）。"
+        rt, runner = _runner()
+        st = _find_run(rt, run_id)
+        if st.status in ("fail", "ambiguous", "error"):
+            return await runner.resume(st.run_id)
         st.pause_event.set()
         if st.status == "paused":
             st.status = "running"

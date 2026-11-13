@@ -2,6 +2,9 @@
 
 录制归属以 context 为准；按需去噪与合并，避免把试探动作、hover/scroll 噪声
 或失败的断言写进模板。
+
+页面用相对引用记录（`page0` / `new:N`），不写死 page_id —— 重放时由
+runner 依据 diff 里的 `pages.opened` 重新绑定。
 """
 
 _NOISE = {"focus", "scroll", "hover"}
@@ -14,6 +17,20 @@ class Recording:
         self.page_id = page_id
         self.keep_all = keep_all
         self.steps = []
+        self.root_page_id = page_id
+        self.new_pages = {}
+
+    def page_ref(self, page_id):
+        """录制期页面 → 模板里的相对引用。"""
+        if self.root_page_id is None:
+            self.root_page_id = page_id
+        if page_id == self.root_page_id:
+            return "page0"
+        idx = self.new_pages.get(page_id)
+        if idx is None:
+            idx = len(self.new_pages)
+            self.new_pages[page_id] = idx
+        return f"new:{idx}"
 
 
 class Recorder:
@@ -32,7 +49,7 @@ class Recorder:
         self.recording = None
         return rec
 
-    def record(self, handle, action, url_before=None, url_after=None, checkpoint=None):
+    def record(self, handle, action, url_before=None, url_after=None, checkpoint=None, diff=None):
         """动作成功后调用；只录同一 context 的动作。"""
         if not self.active or self.recording is None:
             return
@@ -56,16 +73,20 @@ class Recorder:
                 last["url_after"] = url_after
                 if checkpoint:
                     last["checkpoint"] = checkpoint
+                if diff:
+                    last["diff"] = diff
                 return
             if checkpoint is None and action == last["action"]:
                 return  # 完全重复的动作直接丢弃
 
         step = {
             "action": action,
-            "page_id": handle.page_id,
+            "page": self.recording.page_ref(handle.page_id),
             "url_before": url_before,
             "url_after": url_after,
         }
         if checkpoint:
             step["checkpoint"] = checkpoint
+        if diff:
+            step["diff"] = diff
         steps.append(step)
