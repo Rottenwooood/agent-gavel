@@ -55,10 +55,14 @@ async def test_soft_block_is_flagged(gavel_tools, webapp_server):
     assert r["warning"] == "access_restricted", r
 
 
-async def test_sparse_content_is_flagged(gavel_tools, webapp_server):
+async def test_sparse_content_requires_attachment(gavel_tools, webapp_server):
+    """字少且有附件才提示 sparse；纯短页面不误报。"""
     await _session(gavel_tools)
-    r = await _call("page", op="navigate", url=f"{webapp_server}/tiny.html")
-    assert r["warning"] == "sparse_content", r
+    plain = await _call("page", op="navigate", url=f"{webapp_server}/tiny.html")
+    assert "sparse_content" not in (plain.get("warning") or ""), plain
+
+    with_file = await _call("page", op="navigate", url=f"{webapp_server}/attachment_page.html")
+    assert with_file["warning"] == "sparse_content", with_file
 
 
 async def test_snapshot_interactive_has_href_without_noise(gavel_tools, webapp_server):
@@ -104,9 +108,9 @@ async def test_thresholds_use_cleaned_length(gavel_tools, webapp_server):
     """正文长度按去噪后的内容算，不被导航/页脚垫长。"""
     await _session(gavel_tools)
     r = await _call("page", op="navigate", url=f"{webapp_server}/nav_heavy.html")
-    # 整页 innerText 有几百字导航，去噪后只剩 1 字 → sparse_content
-    assert r["warning"] == "sparse_content", r
+    # 整页 innerText 有几百字导航，去噪后只剩 1 字：长度按去噪后算，且不误报 sparse
     assert r["text_len"] < 100, r
+    assert "sparse_content" not in (r.get("warning") or ""), r
 
 
 async def test_snapshot_compact_keeps_input_affordances(gavel_tools, webapp_server):

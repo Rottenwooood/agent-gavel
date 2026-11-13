@@ -611,7 +611,7 @@ pytest -q   # 配置 pytest-timeout，单测上限 90s
 - `open` 与 `navigate` 入参、返回完全一致，只有「新建标签页 vs 复用当前页」的差别；`open` 另有 `activate` 控制是否抢占 active page。
 - `text_chars` 默认 4000：加载 URL 即带回正文摘要，`0` 关闭。`compact` 下**不返回 diff、不返回 anchors**（导航必然整页替换，diff 是噪声；anchors 用 `page(op=text)` 取）。
 - 软拦截：`redirected` 且 final_url 命中 `/auth|/login|/sso|/ipauth|/error|/403|/denied`，或正文 <150 字且含「没有访问/仅限校内/请先登录/访问受限/验证码/无权限」→ `page_status="blocked"`、`warning="access_restricted"`，`status` 仍为 ok。
-- 正文 <100 字且 `text_chars>0` → `warning="sparse_content"`。阈值一律用**去噪后**的正文长度（剔除 header/nav/footer/script/style），不用整页 innerText。
+- 正文 <100 字、`text_chars>0` 且页面存在附件/下载链接 → `warning="sparse_content"`（避免短页面误报）。阈值一律用**去噪后**的正文长度（剔除 header/nav/footer/script/style），不用整页 innerText。
 - 正文容器：`main/article/[role=main]` 的文本 ≥200 字才采纳，否则回退到去噪后的整页——避免空壳 `<main>` 导致正文为空、进而误判 sparse/blocked。
 - 导航触发下载（附件/PDF）时不再报错：落盘为 artifact，返回 `artifact_id`、`suggested_filename`、`mime_type`、`download_url`，`final_url` 保持当前页（`navigated=false`）；`hint` 按 mime 区分 `read_text` 与 `export`。
 - 省略 `page_id`/`session` 时惰性建会话、上下文与页面；**默认会话单例**：已有会话时复用其上下文，只有完全没有会话才新建，避免连续 open 产生孤立 context。

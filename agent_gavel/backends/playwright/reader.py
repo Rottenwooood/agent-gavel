@@ -105,6 +105,21 @@ class ReaderMixin:
     }
     """
 
+    _ATTACHMENT_JS = """
+    () => {
+      const ext = /\\.(pdf|docx?|xlsx?|pptx?|zip|rar|7z|txt|csv)(\\?|#|$)/i;
+      return Array.from(document.querySelectorAll('a[href]')).some((a) =>
+        a.hasAttribute('download') || ext.test(a.getAttribute('href') || ''));
+    }
+    """
+
+    async def has_attachment_links(self, handle):
+        """页面上是否有附件/下载链接：正文短但能下附件时才算 sparse。"""
+        try:
+            return bool(await handle.page.evaluate(self._ATTACHMENT_JS))
+        except Exception:
+            return False
+
     async def content_len(self, handle):
         """去噪后的正文长度：阈值判定统一用它，避免导航/页脚把短正文垫长。"""
         try:

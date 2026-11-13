@@ -132,7 +132,8 @@ async def _load(
             if min_text_chars is not None and text_len < min_text_chars:
                 out["status"] = "fail"
                 out["reason"] = "empty_page"
-            elif text_chars and text_len < 100:
+            elif text_chars and text_len < 100 and await be.has_attachment_links(handle):
+                # 字少但能下附件：真正的内容大概在文件里，这才值得提醒
                 out.setdefault("warning", "sparse_content")
             elif min_text_chars is None and text_len < 20:
                 prev = out.get("warning")
