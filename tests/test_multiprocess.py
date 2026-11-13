@@ -38,8 +38,30 @@ def _params(env):
     )
 
 
+# 0.5 把扁平入口收敛成 tool + op；这里保留旧写法方便读，集中映射一次
+_GROUPED = {
+    # 这些用例断言的是守护进程诊断字段，compact 下不返回，固定要 full
+    "browser_status": ("browser", "status", {"detail": "full"}),
+    "page_list": ("page", "list", {}),
+    "page_navigate": ("page", "navigate", {}),
+    "page_read": ("page", "read", {}),
+    "locator_fill": ("locator", "fill", {}),
+    "session_create": ("session", "create", {}),
+    "session_close": ("session", "close", {}),
+    "workflow_save": ("workflow", "save", {}),
+    "workflow_run": ("workflow", "run", {}),
+}
+
+
 async def _rpc(session, name, args=None):
-    res = await session.call_tool(name, args or {})
+    payload = dict(args or {})
+    grouped = _GROUPED.get(name)
+    if grouped:
+        name, op, defaults = grouped
+        for key, value in defaults.items():
+            payload.setdefault(key, value)
+        payload.setdefault("op", op)
+    res = await session.call_tool(name, payload)
     sc = getattr(res, "structured_content", None)
     if isinstance(sc, dict):
         return sc
@@ -79,7 +101,7 @@ async def test_one_daemon_many_adapters(data_dir, webapp_server):
         counts = {len(t.tools) for t in tool_sets}
         assert len(counts) == 1 and counts.pop() > 0
         names = {t.name for t in tool_sets[0].tools}
-        assert {"browser_status", "session_create", "workflow_run"} <= names
+        assert {"browser", "session", "workflow"} <= names
 
         statuses = await asyncio.gather(*[_rpc(s, "browser_status") for s in sessions])
         daemon_pids = {st["daemon_pid"] for st in statuses}
