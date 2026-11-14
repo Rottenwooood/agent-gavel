@@ -54,10 +54,6 @@ def _acquire_lock(path):
     return fd
 
 
-async def _tool_schemas():
-    return create_catalog().schemas()
-
-
 async def _dispatch(catalog, schemas, name, args, adapter_count):
     if name == "__describe__":
         return {"tools": schemas, "daemon_pid": os.getpid(), "tool_api_version": TOOL_API_VERSION}

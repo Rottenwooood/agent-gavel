@@ -1,75 +1,68 @@
-project: agent-gavel 文档时效性与代码包
-stage: docs-bundle-0.5.1
+project: agent-gavel 代码冗余清理与代码包
+stage: code-cleanup-0.5.1
 
 constraints:
   - id: C1
-    text: 范围是删除或改写与 0.5.1 实现矛盾的文档，并把被跟踪的当前代码导出为单个纯文本文件。不改运行时行为、不改工具契约、不改测试断言；测试脚本只修已删除操作的调用。
+    text: 范围是删除全仓零引用的函数、只被归档脚本引用的夹具、以及与 bench_tasks.py 目的重合且无引用的基准脚本。不改运行时行为、工具契约与模板 schema。
   - id: C2
-    text: 产物为仓库内 tools/export-codebase.mjs 与本阶段约束清单，以及仓库外 /home/c6h4o2/exports/agent-gavel-code-<提交>-<日期>.txt。
+    text: 产物为四个包的函数删除、三个测试文件的删除、本阶段约束清单、阶段记录，以及重新生成的仓库外单文件代码包。
   - id: C3
-    text: 验收标准是文档陈述与代码可核对（工具名、操作数、CI 步骤、模板流程、路径），端到端脚本 tests/e2e_mcp.py 真实浏览器通过，代码包往返还原逐文件字节相等且无凭据。
+    text: 验收标准是 ruff 通过、受影响测试与真实浏览器 e2e 通过、代码包往返还原逐文件字节相等且无凭据。
   - id: C4
-    text: 允许 uv、python、pytest、ruff、git 只读命令与本地提交、curl（仅校验配置 schema）、node、wc、sha256sum、secrets-audit.sh、timeout。
+    text: 允许 uv、python、pytest、ruff、git 只读命令与本地提交、node、wc、sha256sum、secrets-audit.sh、timeout。
   - id: C5
-    text: 不 push、不 reset --hard、不改写历史、不使用 pkill -f 或 killall、不回显凭据、不删除被跟踪源码与测试、不修改全局 OpenCode 配置、不操作生产服务。
+    text: 不 push、不重置或改写历史、不使用 pkill -f 或 killall、不回显凭据、不删除 legacy/ 归档实现、不改全局 OpenCode 配置。
   - id: C6
-    text: 预算 90 分钟；不调用外部模型；代码包不超过 900 KB；测试只跑 e2e_mcp.py 与受影响的静态检查。
+    text: 预算 40 分钟；不新增依赖；代码包不超过 900 KB。
 
 scope:
   in:
-    - 删除描述已冻结 legacy 通道的旧方案文档
-    - 修正文档中的旧路径、旧工具名、旧 CI 与模板流程陈述
-    - 用通过的真实浏览器 e2e 更新验收记录
-    - 导出当前代码与文档为单文件
+    - 删除 daemon/_tool_schemas、checks/checkpoint_checks、schema/var_refs、loader/migrate_old
+    - 删除只被 legacy 引用的 atomic_coverage 夹具
+    - 删除无引用的 bench_real.py
+    - 重新生成代码包
   out:
-    - 运行时与工具契约变更
-    - legacy/ 下的归档代码
-    - 历史设计文档的重写
-    - 发布与生产操作
+    - 运行时行为与工具契约变更
+    - legacy/ 归档代码
+    - 历史设计文档
 
 artifacts:
   - id: A1
-    path: docs/
-    form: 删除 2 份过期文档，修正流程、路径与状态陈述
+    path: agent_gavel/{daemon.py,core/checks.py,workflows/schema.py,workflows/loader.py}
+    form: 删除零引用函数
   - id: A2
-    path: .github/PULL_REQUEST_TEMPLATE.md + CONTRIBUTING.md
-    form: 按当前 workflow 工具与模板流程重写
+    path: tests/{atomic_coverage.json,fixtures/atomic_coverage.html,bench_real.py}
+    form: 删除孤儿夹具与重叠基准
   - id: A3
-    path: tests/e2e_mcp.py
-    form: 已删除的 page(op=links) 改回现接口
-  - id: A4
-    path: tools/export-codebase.mjs
-    form: 可复用导出与自校验脚本
+    path: /home/c6h4o2/exports/agent-gavel-code-<提交>-<日期>.txt
+    form: 单文件代码包
 
 acceptance:
   entry: bash /tmp/opencode/gavel-accept.sh
   checks:
     - id: K1
       from: C1
-      check: 文档改动只涉及陈述，运行时与契约文件未改
+      check: 四个函数与三个文件已删除，运行时代码只删不加
     - id: K2
       from: C2
-      check: A1–A4 与代码包均存在
+      check: A1–A3 存在
     - id: K3
       from: C3
-      check: e2e 真实浏览器通过；产物往返还原一致；路径集合等于被跟踪文件减排除清单
+      check: ruff、测试、e2e 通过；产物往返一致且无密钥命中
     - id: K4
       from: C4
       check: 仅使用允许命令
     - id: K5
       from: C5
-      check: 工作区干净、无凭据入库、未 push
+      check: 工作区干净、未 push、legacy 完整
     - id: K6
       from: C6
-      check: 记录运行耗时与产物体积
+      check: 记录耗时与产物体积
 
 allowed_commands:
-  - uv run / uv sync
-  - .venv/bin/python
+  - uv run / .venv/bin/python
   - git status / git diff / git add / git commit / git ls-files / git show
-  - curl
-  - node
-  - wc / sha256sum
+  - node / wc / sha256sum
   - ~/.config/opencode/scripts/secrets-audit.sh
   - timeout
 
@@ -77,9 +70,9 @@ forbidden:
   - git push、reset --hard、改写历史
   - pkill -f、killall
   - 回显凭据
-  - 删除被跟踪源码或测试
+  - 删除 legacy/ 归档实现
   - 操作生产服务与全局 OpenCode 配置
 
 budget:
-  time: 90 分钟
+  time: 40 分钟
   cost: 无外部模型调用

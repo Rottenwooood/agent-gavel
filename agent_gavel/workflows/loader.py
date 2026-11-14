@@ -13,7 +13,6 @@ import re
 
 from ..core import config as gavel_config
 from ..core.errors import GavelError
-from . import schema as _schema
 
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9_]*$")
 
@@ -89,43 +88,6 @@ def _iter_templates():
             yield _read(os.path.join(directory, name))
         except Exception:
             continue
-
-
-def migrate_old(old):
-    """旧 schema（action 字符串 + selectors + expect）→ 新 schema。"""
-    if old.get("schema_version") == _schema.SCHEMA_VERSION:
-        return old
-    steps = []
-    for i, st in enumerate(old.get("steps", [])):
-        sels = st.get("selectors", {}) or {}
-        action = st.get("action")
-        act = {"type": action}
-        if "input" in sels:
-            act["target"] = {"by": "css", "value": sels["input"]}
-        if "target" in sels:
-            act["target"] = {"by": "css", "value": sels["target"]}
-        if "value" in sels:
-            act["value"] = sels["value"]
-        if "keys" in sels:
-            act["keys"] = sels["keys"]
-        if action == "navigate":
-            act["url"] = st.get("url") or sels.get("url")
-        if action == "press_enter":
-            act = {"type": "press", "keys": "Enter", "target": act.get("target")}
-        step = {"id": f"step{i + 1}", "action": act}
-        if st.get("expected_feature"):
-            step["checkpoint"] = {"checks": st["expected_feature"]}
-        steps.append(step)
-    t = {
-        "schema_version": _schema.SCHEMA_VERSION,
-        "template_id": slugify(old.get("site", "legacy")) + "_migrated",
-        "version": 1,
-        "site": old.get("site", ""),
-        "desc": old.get("desc", ""),
-        "parameters": old.get("params") or {},
-        "steps": steps,
-    }
-    return _schema.validate(t)[0]
 
 
 def resolve_id(name_or_id) -> str:

@@ -52,30 +52,6 @@ def substitute(obj, params, parameters=None):
     return rec(obj)
 
 
-def var_refs(obj, prefix=""):
-    """`$VAR` → 引用点路径清单（`steps[1].action.url` 形式）。
-
-    这是"改一个参数前先看影响面"的唯一依据；不做存储，按需计算。
-    """
-    out = {}
-
-    def rec(x, path):
-        if isinstance(x, dict):
-            for k, v in x.items():
-                rec(v, f"{path}.{k}" if path else k)
-        elif isinstance(x, list):
-            for i, v in enumerate(x):
-                rec(v, f"{path}[{i}]")
-        elif isinstance(x, str):
-            for m in _VAR_RE.finditer(x):
-                hits = out.setdefault(m.group(1), [])
-                if path not in hits:
-                    hits.append(path)
-
-    rec(obj, prefix)
-    return out
-
-
 def extract_vars(obj):
     found = []
 

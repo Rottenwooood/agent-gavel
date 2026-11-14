@@ -265,13 +265,3 @@ def from_checkpoint(cp):
             frame=cp.get("frame"),
         )
     ]
-
-
-def checkpoint_checks(cp):
-    """checkpoint 任意写法 → {name: check_dict}（可编辑形态）。"""
-    out = {}
-    for c in from_checkpoint(cp):
-        d = c.to_dict()
-        name = d.pop("name", None) or d.get("read") or "check"
-        out[name] = d
-    return out
