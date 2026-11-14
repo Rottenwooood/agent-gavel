@@ -1,21 +1,17 @@
 # Changelog
 
-## 未发布
+## 0.5.2 — 2026-11-14
 
-### 文档
+### 变更
 
-- 删除两份过期文档：`docs/wechat-perf-optimization.md`（针对已冻结的 legacy 桌面通道）与
-  `docs/release-readiness-2026-10-02.md`（0.5 前的审计，所列缺陷已随 0.5 修复）。
-- `docs/roadmap.md` 修正后端路径（`backends/playwright/`）与模板校验陈述；`docs/internal-beta.md`
-  去掉不存在的 `agent-gavel_` 前缀；`docs/detection.md` 按现状改写 profile 默认值与
-  `attach` 模式；`CONTRIBUTING.md` 与 PR 模板改用 `workflow(op=...)` 与用户级模板流程。
-- `docs/validation/` 增记 2026-11-14 无头端到端通过；OpenCode 接入记录更新到 0.5.1，
-  区分"连接已确认"与"工具级调用未验证"。
-
-### 修复
-
-- `tests/e2e_mcp.py` 不再调用已删除的 `page(op="links")`，改用
-  `page(op="text", mode="links")`；此前该调用返回 `unknown_operation` 使黑盒验收判为失败。
+- 删除零引用实现：`daemon._tool_schemas`、`checks.checkpoint_checks`、`schema.var_refs`、
+  `loader.migrate_old`（旧模板迁移从未接线，需要时重新设计并补测试）。
+- 删除只被 legacy 归档脚本引用的 `tests/atomic_coverage.json`、`tests/fixtures/atomic_coverage.html`，
+  以及无引用的 `tests/bench_real.py`（与 `bench_tasks.py` 目的重合）。
+- 文档对齐 0.5.1：删除两份过期文档，修正 roadmap 后端路径与模板校验陈述、internal-beta 工具前缀、
+  detection 的 profile 与 attach 现状、CONTRIBUTING 与 PR 模板的模板流程、validation 的验收状态。
+- `tests/e2e_mcp.py` 改用 `page(op="text", mode="links")`，无头端到端恢复通过。
+- 新增 `tools/export-codebase.mjs` 与 `stages/` 阶段记录。
 
 ## 0.5.1 — 2026-11-13
 
