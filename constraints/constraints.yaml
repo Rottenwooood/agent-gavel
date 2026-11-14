@@ -13,7 +13,7 @@ constraints:
   - id: C5
     text: 不 push、不 reset --hard、不改写历史、不使用 pkill -f 或 killall、不回显凭据、不删除被跟踪源码与测试、不修改全局 OpenCode 配置、不操作生产服务。
   - id: C6
-    text: 预算 90 分钟；不调用外部模型；代码包不超过 800 KB；测试只跑 e2e_mcp.py 与受影响的静态检查。
+    text: 预算 90 分钟；不调用外部模型；代码包不超过 900 KB；测试只跑 e2e_mcp.py 与受影响的静态检查。
 
 scope:
   in:

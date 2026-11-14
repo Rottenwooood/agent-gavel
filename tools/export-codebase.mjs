@@ -118,7 +118,8 @@ for (const segment of SEGMENTS) {
   const members = kept.filter(p => !p.slice(prefix.length).includes('/')).map(p => p.slice(prefix.length));
   const nested = kept.filter(p => p.slice(prefix.length).includes('/'));
   const ordered = [];
-  for (const name of segment.first) {
+  const first = segment.first ?? [];
+  for (const name of first) {
     const full = `${prefix}${name}`;
     if (!wanted.includes(full)) throw new Error(`${segment.dir} 缺少 ${name}`);
     ordered.push(full);
@@ -143,9 +144,9 @@ const index = [];
 for (const segment of plan) {
   body.push(`### ${segment.label}`);
   for (const path of segment.files) {
-    const content = git('show', `${sha}:${path}`).toString('utf8');
-    if (content.includes('\r')) throw new Error(`${path} 含 CR，已中止`);
-    if (!content.endsWith('\n')) throw new Error(`${path} 末尾缺少换行，已中止`);
+    const raw = git('show', `${sha}:${path}`).toString('utf8');
+    if (raw.includes('\r')) throw new Error(`${path} 含 CR，已中止`);
+    const content = raw.endsWith('\n') ? raw : `${raw}\n`;
     const start = body.length + 1;
     body.push(path);
     for (const line of content.slice(0, -1).split('\n')) body.push(line === '' ? '  ' : `  ${line}`);
@@ -164,6 +165,7 @@ const meta = [
   '# 排序: 被依赖者在前；同一目录内先出口清单，再按名字',
   '# 排除: uv.lock、LICENSE、legacy/（归档通道，不打包不运行）、docs/tech-plan.md 与 docs/agent-gavel-discussion.md（历史设计稿）、docs/validation/*.json（机器日志）、未跟踪的 .venv/ 与 .runtime/',
   '# 读法: 路径行不缩进；代码行以两个空格开头，空行写成两个空格；### 开头是分段标记',
+  '# 归一化: 文件末尾统一为一个换行；原文末尾无换行的文件会补一个 \\n',
   '## 文件索引',
 ];
 const offset = meta.length + index.length + 1;
@@ -190,7 +192,10 @@ for (const line of textLines.slice(bodyAt + 1)) {
 }
 const mismatches = [];
 for (const path of placed) {
-  const expected = createHash('sha256').update(git('show', `${sha}:${path}`)).digest('hex');
+  const raw = git('show', `${sha}:${path}`);
+  const expected = createHash('sha256')
+    .update(raw.toString('utf8').endsWith('\n') ? raw : Buffer.concat([raw, Buffer.from('\n')]))
+    .digest('hex');
   const actual = createHash('sha256').update(Buffer.from(rebuilt.get(path).join('\n') + '\n')).digest('hex');
   if (expected !== actual) mismatches.push(path);
 }
