@@ -1,30 +1,36 @@
 ## 贡献的模板
 
-> 本 PR 贡献一个验证过的操作模板，不是代码改动。
+> 本 PR 贡献一个在真实站点上跑通并验证过的操作模板，不是代码改动。
 
 **站点 / 功能**
 
-<!-- 例：bing 搜索，site=bing，文件 bing_search.json -->
+<!-- 例：bing 搜索，template_id=bing_search，文件名 bing_search.json -->
 
 **模板文件**
 
-- [ ] 位于 `agent_gavel/channels/dom/templates/<site>_<func>.json`（或 desktop 对应目录）
-- [ ] `site`（DOM）/ `app`（desktop）是纯站名，文件名 `站名_功能`
-- [ ] 步骤含断言（`page_features` + `expected_feature`），非只发动作
+- [ ] `template_id` 为 `站点_功能`，小写、下划线
+- [ ] 步骤尽量带 `checkpoint`，不是只发动作
+- [ ] 敏感输入用 `$VAR` 占位，并在 `parameters` 里标 `{"sensitive": true}`
+- [ ] 侧效应步骤保留 `requires_confirmation=true` / `safe_to_retry=false`
+- [ ] 定位用 role/label/placeholder/text/testid，css 只作兜底，无写死坐标
 
-**实测结果（必填）**
+**校验与实测（必填）**
 
-<!-- 贴 dom_run_template / desktop_run_template 的 pass 输出，说明测过的关键词/参数 -->
+<!-- 贴 workflow(op=validate) 的 valid 结果，以及 workflow(op=run) 的 verbosity="full" 摘要 -->
 
+```json
+{"valid": true}
 ```
+
+```text
+steps_completed: 3
 status: pass
 ```
 
-**锚点稳定性**
+**运行环境**
 
-- [ ] 用稳定锚点（`#id` / `input[name=x]` / `__text__:`），无写死易变路径
-- [ ] 涉及登录/个人数据时用假凭据
+<!-- 浏览器与系统版本、有头/无头、是否需要登录态或代理 -->
 
 **备注**
 
-<!-- 依赖的登录态、站点特殊处理、可能失效点等 -->
+<!-- 站点特殊处理、可能失效点、相关 issue -->

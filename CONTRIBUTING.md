@@ -51,7 +51,7 @@ uv run python tests/mcp_live_smoke.py # 真实 MCP 协议联调
 
 ### 生成与校验
 
-先在你的本地会话里跑通，用 `workflow_record_start` → 操作 → `workflow_record_stop`
+先在你的本地会话里跑通，用 `workflow(op=record_start)` → 操作 → `workflow(op=record_stop)`
 生成草稿，再：
 
 ```
@@ -59,8 +59,10 @@ workflow(op=validate, template=...)   # 必须 valid
 workflow(op=publish, template_id=...) # 产出干净 JSON（无本地路径/凭据）
 ```
 
-把导出的 JSON 放进包内模板目录后提 PR。CI 会对提交的模板跑 `workflow(op=validate)`，
-不通过不允许合并。
+模板由 loader 唯一管理，默认存 `~/.config/agent-gavel/workflows/`；仓库不内置模板目录。
+提 PR 时把 `workflow(op=publish)` 导出的 JSON 贴在 PR 里，并附 `workflow(op=validate)`
+的 valid 结果与一次 `workflow(op=run)` 的实测输出。CI 目前跑测试、打包与联调冒烟，
+不对提交的模板自动校验，合并前由维护者按上述证据人工确认。
 
 ### 失效处理
 

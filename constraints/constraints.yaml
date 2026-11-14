@@ -1,0 +1,85 @@
+project: agent-gavel 文档时效性与代码包
+stage: docs-bundle-0.5.1
+
+constraints:
+  - id: C1
+    text: 范围是删除或改写与 0.5.1 实现矛盾的文档，并把被跟踪的当前代码导出为单个纯文本文件。不改运行时行为、不改工具契约、不改测试断言；测试脚本只修已删除操作的调用。
+  - id: C2
+    text: 产物为仓库内 tools/export-codebase.mjs 与本阶段约束清单，以及仓库外 /home/c6h4o2/exports/agent-gavel-code-<提交>-<日期>.txt。
+  - id: C3
+    text: 验收标准是文档陈述与代码可核对（工具名、操作数、CI 步骤、模板流程、路径），端到端脚本 tests/e2e_mcp.py 真实浏览器通过，代码包往返还原逐文件字节相等且无凭据。
+  - id: C4
+    text: 允许 uv、python、pytest、ruff、git 只读命令与本地提交、curl（仅校验配置 schema）、node、wc、sha256sum、secrets-audit.sh、timeout。
+  - id: C5
+    text: 不 push、不 reset --hard、不改写历史、不使用 pkill -f 或 killall、不回显凭据、不删除被跟踪源码与测试、不修改全局 OpenCode 配置、不操作生产服务。
+  - id: C6
+    text: 预算 90 分钟；不调用外部模型；代码包不超过 800 KB；测试只跑 e2e_mcp.py 与受影响的静态检查。
+
+scope:
+  in:
+    - 删除描述已冻结 legacy 通道的旧方案文档
+    - 修正文档中的旧路径、旧工具名、旧 CI 与模板流程陈述
+    - 用通过的真实浏览器 e2e 更新验收记录
+    - 导出当前代码与文档为单文件
+  out:
+    - 运行时与工具契约变更
+    - legacy/ 下的归档代码
+    - 历史设计文档的重写
+    - 发布与生产操作
+
+artifacts:
+  - id: A1
+    path: docs/
+    form: 删除 2 份过期文档，修正流程、路径与状态陈述
+  - id: A2
+    path: .github/PULL_REQUEST_TEMPLATE.md + CONTRIBUTING.md
+    form: 按当前 workflow 工具与模板流程重写
+  - id: A3
+    path: tests/e2e_mcp.py
+    form: 已删除的 page(op=links) 改回现接口
+  - id: A4
+    path: tools/export-codebase.mjs
+    form: 可复用导出与自校验脚本
+
+acceptance:
+  entry: bash /tmp/opencode/gavel-accept.sh
+  checks:
+    - id: K1
+      from: C1
+      check: 文档改动只涉及陈述，运行时与契约文件未改
+    - id: K2
+      from: C2
+      check: A1–A4 与代码包均存在
+    - id: K3
+      from: C3
+      check: e2e 真实浏览器通过；产物往返还原一致；路径集合等于被跟踪文件减排除清单
+    - id: K4
+      from: C4
+      check: 仅使用允许命令
+    - id: K5
+      from: C5
+      check: 工作区干净、无凭据入库、未 push
+    - id: K6
+      from: C6
+      check: 记录运行耗时与产物体积
+
+allowed_commands:
+  - uv run / uv sync
+  - .venv/bin/python
+  - git status / git diff / git add / git commit / git ls-files / git show
+  - curl
+  - node
+  - wc / sha256sum
+  - ~/.config/opencode/scripts/secrets-audit.sh
+  - timeout
+
+forbidden:
+  - git push、reset --hard、改写历史
+  - pkill -f、killall
+  - 回显凭据
+  - 删除被跟踪源码或测试
+  - 操作生产服务与全局 OpenCode 配置
+
+budget:
+  time: 90 分钟
+  cost: 无外部模型调用

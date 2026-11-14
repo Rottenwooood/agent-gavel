@@ -106,8 +106,9 @@ async def exercise(client, env, options, report):
         snapshot = await client.ok("page", op="snapshot", page_id=pid, level=level)
         if level != "summary":
             assert snapshot["elements"]
-    for op in ("get", "meta", "text", "links", "explore"):
+    for op in ("get", "meta", "text", "explore"):
         await client.ok("page", op=op, page_id=pid)
+    await client.ok("page", op="text", mode="links", page_id=pid)
     await client.ok("page", op="find_text", page_id=pid, text="Go")
     for op in ("wait_for_load", "wait_for_url", "wait_for_selector", "wait_for_text"):
         args = {"op": op, "page_id": pid, "timeout_s": 2}

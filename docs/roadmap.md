@@ -15,7 +15,7 @@ agent 核心（外部：opencode / 任意 MCP 客户端）
   └─ agent_gavel.main（MCP server, stdio）
        └─ tools/*（MCP 工具）
             └─ runtime/*（session/context/page/队列/产物/策略/事件/指标）
-                 └─ backends/playwright_backend.py（Playwright 驱动系统 Chrome）
+                 └─ backends/playwright/（Playwright 驱动系统 Chrome：actions/locator/reader/observation）
                       └─ workflows/*（模板 schema/编译/录制/执行）
 
 legacy/  旧裸 CDP 网页通道 + AT-SPI 桌面通道：归档，不打包、不注册、不运行
@@ -65,5 +65,6 @@ legacy/  旧裸 CDP 网页通道 + AT-SPI 桌面通道：归档，不打包、�
 - 格式刚冻结（schema v2），且失败/重试/diff 语义近期仍在动，此时开社区会让贡献者建在移动靶上。
 - 模板天然脆（反爬、DOM 漂移），在"失效检测/局部修复"未经真实规模验证前，社区会攒死模板。
 - 还没有 5 分钟安装/发布渠道（Docker/README 刚补），贡献无处落地。
-- 先做：冻结格式契约 + CI 校验提交模板（`workflow_validate`）+ 贡献指南（已写）。
+- 先做：冻结格式契约 + 模板校验入口（`workflow(op=validate)`）+ 贡献指南（已写）。
+  CI 目前只跑测试、打包与联调冒烟，提交模板的自动校验尚未实现；
   待真实模板验证跑通、发布渠道就绪，再开模板仓库征集。

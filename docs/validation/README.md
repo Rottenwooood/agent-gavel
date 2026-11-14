@@ -1,6 +1,26 @@
 # 0.5 接口改造验收记录
 
-实现提交：`b1359b2`；黑盒验收脚本提交：`6d59ecd`。本记录不代表发布或端到端验收通过。
+实现提交：`b1359b2`；黑盒验收脚本提交：`6d59ecd`。
+
+## 2026-11-14：无头端到端复验通过
+
+命令：
+
+```sh
+.venv/bin/python tests/e2e_mcp.py --headless --output docs/validation/e2e-headless-2026-11-14.json
+```
+
+结果：`status=passed`、`stage=complete`、`browser_checks=passed`、`protocol_checks=passed`；
+工具面 14 个入口、契约 25,773 字节；环境报告 `tcp_loopback=available`、`unix_socket=available`。
+完整调用序列（136 条，含预期失败分支）见 [e2e-headless-2026-11-14.json](e2e-headless-2026-11-14.json)。
+
+该次复验同时修掉黑盒脚本对已删除操作的调用：`page(op="links")` 在 0.5.0 已并入
+`page(op="text", mode="links")`，脚本原先仍按旧操作探测，导致 `unknown_operation` 并把
+`status` 判为 failed。
+
+预期失败分支不在通过判据内：`bad_args`、`locator_not_found`、`not_a_download`、
+`session_busy`，以及工作流被取消时的 `internal`。
+
 
 ## 源码导出测量
 
@@ -23,7 +43,7 @@
 uv run python -m agent_gavel.tools.describe > /tmp/agent-gavel-tools.json
 ```
 
-## 真实端到端验收：阻塞
+## 2026-11-12 环境记录：端到端验收被环境阻塞
 
 实际尝试了两种模式，均在传输环境检查阶段退出，返回码为 1：
 

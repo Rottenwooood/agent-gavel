@@ -37,13 +37,15 @@
 
 ## 3. 仍未解决 / 需要决策
 
-- **全新 profile**：默认共享浏览器是临时上下文，没有历史与 cookie，本身就是可疑信号。
-  登录类真实任务建议用 `session(op=create, mode="persistent", user_data_dir=...)` 复用真实
-  profile。是否把"持久真实 profile"设为默认，需要权衡（会牺牲上下文隔离模型的简洁性）。
+- **profile 的历史累积**：managed 模式已默认使用持久资料目录（`_default_profile_dir()`），
+  不再每次从空 profile 启动；临时上下文只出现在 `container="isolated"` 等显式隔离场景。
+  仍待解决的是资料副本之间的登录态与 cookie 是否可审计、可迁移（`browser(op=profile_*)` 提供
+  复制/切换/删除，但不做内容审计）。
 - **无头 WebGL**：无 GPU 时只能软件渲染，属无头固有特征；对风控敏感的站点应使用**有头**。
-- **接管用户自己的浏览器**（旧版最强的一点）：Playwright 的 `connect_over_cdp` **不支持
-  新建 context**，与本项目的多 context 模型冲突。要用它，需要一次架构取舍（例如牺牲
-  context 隔离，或用浏览器内置的多 profile 机制）。**这是最有效的下一步，但需要先定架构。**
+- **接管用户自己的浏览器**：已实现为 `browser_mode="attach"` / `AGENT_GAVEL_CDP_ENDPOINT`：
+  只连接用户已启动的 Chrome，不拥有进程、不负责关闭，默认复用其第一个 context，没有 context
+  时才新建；调用前必须取得授权。与 managed 的区别是资料目录与启动参数由用户决定，本工具
+  不再为其做加固。
 - **CDP `Runtime.enable` 泄漏**：本机探针未触发；需要用 creepjs 之类的真实检测页做
   L4 层度量。
 - **真实站点 A/B 度量**：同一站、同一任务，对比"Playwright 启动 / 手动启动+CDP /
@@ -57,3 +59,6 @@
 | `AGENT_GAVEL_CHROME_CHANNEL` | 指定 Chrome 通道；空 = 用自带 chromium |
 | `AGENT_GAVEL_DISABLE_GPU=1` | 加回 `--disable-gpu`（软件渲染） |
 | `AGENT_GAVEL_EXTRA_ARGS` | 追加自定义启动参数（空格分隔） |
+| `AGENT_GAVEL_BROWSER_MODE` | `managed`（默认，自起加固 Chrome + 持久资料）/ `attach`（连已有 Chrome）/ `playwright`（Playwright 直接 launch） |
+| `AGENT_GAVEL_CDP_ENDPOINT` | 已有 Chrome 的调试地址；设置后走 attach 语义 |
+| `AGENT_GAVEL_BROWSER_PROFILE` | managed 模式使用的资料目录 |
