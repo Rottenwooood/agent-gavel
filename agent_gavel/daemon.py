@@ -71,6 +71,21 @@ async def _dispatch(catalog, schemas, name, args, adapter_count):
     return reply
 
 
+async def _idle_watch(state, idle_seconds, stop):
+    """最后一个 adapter 断开后，空闲超过阈值就让 daemon 退出，别留孤儿进程和浏览器。"""
+    if idle_seconds <= 0:
+        return
+    idle_since = asyncio.get_running_loop().time()
+    while not stop.is_set():
+        await asyncio.sleep(1.0)
+        now = asyncio.get_running_loop().time()
+        if state["adapters"] > 0:
+            idle_since = now
+        elif now - idle_since >= idle_seconds:
+            stop.set()
+            return
+
+
 async def _serve(paths, token, registry, schemas, stop):
     state = {"adapters": 0}
     tasks = set()
@@ -179,7 +194,9 @@ async def _serve(paths, token, registry, schemas, stop):
         os.chmod(paths["info"], 0o600)
     except OSError:
         pass
+    watchdog = asyncio.create_task(_idle_watch(state, config.idle_exit(), stop))
     await stop.wait()
+    watchdog.cancel()
 
     server.close()
     # 主动断开 adapter，否则 wait_closed 会一直等现存连接

@@ -24,6 +24,20 @@ from .schemas import error_hint, factor, request_schema
 SINGLE_TOOLS = frozenset({"console_get", "performance_metrics", "daemon_shutdown", "screenshot"})
 
 # 合并/迁移过的操作：调用旧名时给出新写法，别让模型猜
+# 目录条目第一行里点名的常用操作：模型据此直接发起第一次调用，不必先查文档
+COMMON_OPS = {
+    "browser": ("launch", "status", "close", "profile_list"),
+    "session": ("create", "get", "export_state", "import_state", "close"),
+    "context": ("create", "cookies_get", "cookies_set", "set_headers", "close"),
+    "page": ("open", "navigate", "text", "snapshot", "read"),
+    "locator": ("click", "fill", "type", "press", "select"),
+    "assertion": ("check", "schema"),
+    "artifact": ("list", "get", "export", "read_text", "cleanup"),
+    "workflow": ("run", "save", "get", "record_start", "record_stop"),
+    "trace": ("start", "stop"),
+    "network": ("start", "stop"),
+}
+
 MOVED_OPERATIONS = {
     ("page", "links"): "page(op=text, mode=links)",
 }
@@ -147,9 +161,21 @@ class Catalog:
                 descriptions.append(f"{'|'.join(labels)}→{result_name}{suffix}")
             result_names = list(dict.fromkeys(operation.returns for operation in operations))
             results = "; ".join(f"{n}={RESULT_TYPES[n].shape}" for n in result_names)
-            description = (
-                self.purposes.get(name, "") + "\n" + "\n".join(descriptions) + "\n" + results
-            )
+            # 目录条目只露出第一行；把 op 清单和常用签名压进第一行，模型才能不查文档直接调
+            op_index = "|".join(operation.op or name for operation in operations)
+            by_op = {operation.op: operation for operation in operations if operation.op}
+            picked = [by_op[op] for op in COMMON_OPS.get(name, ()) if op in by_op]
+            if not picked:
+                picked = operations[:4]
+            common = " · ".join(_operation_label(operation, name) for operation in picked)
+            if name in SINGLE_TOOLS or not op_index:
+                headline = self.purposes.get(name, "")
+            else:
+                purpose = self.purposes.get(name) or name
+                headline = f"{purpose} op: {op_index}"
+                if common:
+                    headline += f" 常用: {common}"
+            description = headline + "\n" + "\n".join(descriptions) + "\n" + results
             if (
                 any(
                     {"checks", "assertions"} & set(operation.input_schema["properties"])

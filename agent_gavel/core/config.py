@@ -33,6 +33,17 @@ def data_dir() -> Path:
     return Path(_env("AGENT_GAVEL_DATA_DIR") or Path.home() / ".config" / "agent-gavel")
 
 
+def idle_exit() -> float:
+    """没有任何 adapter 连接多久后 daemon 自行退出（秒）。0 表示不退出。"""
+    raw = _env("AGENT_GAVEL_IDLE_EXIT")
+    if raw is None:
+        return 120.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 120.0
+
+
 def profile_dir() -> Path:
     """独立 session 使用的资料目录根。"""
     return Path(_env("AGENT_GAVEL_PROFILE_DIR") or data_dir() / "profiles")

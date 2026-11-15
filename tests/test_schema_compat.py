@@ -126,3 +126,24 @@ async def test_links_is_part_of_text(gavel_tools, webapp_server):
     assert gone["status"] == "error", gone
     assert gone["reason"] == "unknown_operation", gone
     assert "text, mode=links" in (gone.get("hint") or ""), gone
+
+
+def test_headline_lists_ops_so_no_lookup_is_needed():
+    """目录条目只露第一行；第一行必须带全 op，模型才能不查文档直接调。"""
+    from agent_gavel.tools import create_catalog
+    from agent_gavel.tools.catalog import COMMON_OPS
+
+    catalog = create_catalog()
+    tools = catalog.schemas()
+    from agent_gavel.tools.catalog import SINGLE_TOOLS
+
+    for tool in tools:
+        if tool["name"] in SINGLE_TOOLS:
+            continue
+        headline = tool["description"].split("\n")[0]
+        assert "op: " in headline, (tool["name"], headline[:80])
+        ops = [operation.op for operation in catalog.groups[tool["name"]] if operation.op]
+        for op in ops:
+            assert op in headline, (tool["name"], op)
+        for op in COMMON_OPS.get(tool["name"], ()):
+            assert op in ops, (tool["name"], op)
