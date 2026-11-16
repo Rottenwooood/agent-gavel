@@ -20,8 +20,11 @@ async def test_close_single_profile_keeps_others(gavel_tools, tmp_path, monkeypa
 
     closed = await T["browser_close"](profile="a")
     assert closed["closed"] is True
-    st2 = await T["browser_status"]()
+    st2 = await T["browser_status"](detail="full")
     assert [d.rsplit("/", 1)[-1] for d in dirs_of(st2)] == ["b"], st2["processes"]
+    # 关掉的浏览器不得留下悬空 context
+    assert st2["counts"]["contexts"] == 1, st2["counts"]
+    assert len(st2["active_pages"]) == 1, st2["active_pages"]
 
 
 async def test_headless_mismatch_is_error(gavel_tools, tmp_path, monkeypatch):

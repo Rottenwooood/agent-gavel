@@ -164,7 +164,11 @@ class BrowserRuntime:
             await self.processes.stop_all()
 
     async def close_profile(self, profile):
-        """只关掉某个资料目录的浏览器，其它 profile 不受影响。"""
+        """只关掉某个资料目录的浏览器，其它 profile 不受影响。
+
+        浏览器消失后，它名下的 context/page 也必须一起摘掉，否则会留下
+        指向已关闭浏览器的悬空 context。
+        """
         from .profiles import resolve_dir
 
         udd = resolve_dir(profile=profile)
@@ -174,9 +178,25 @@ class BrowserRuntime:
             return False
         await self.processes.close(handle)
         self.processes._by_udd.pop(key, None)
+        self._drop_handle_state(handle)
         if self._default_handle is handle:
             self._default_handle = None
         return True
+
+    def _drop_handle_state(self, handle):
+        """摘掉某个浏览器句柄名下的 context 与 page 注册。"""
+        dropped = {
+            cid for cid, ctx in self.contexts.items() if ctx.browser_handle is handle
+        }
+        for cid in dropped:
+            ctx = self.contexts.pop(cid, None)
+            if ctx is not None:
+                ctx.detach()
+                self.context_mgr._by_bc.pop(id(ctx.browser_context), None)
+        for pid, ph in list(self.pages.items()):
+            if ph.context.context_id in dropped:
+                self.pages.pop(pid, None)
+                self.page_mgr._by_key.pop(id(ph.page), None)
 
     def mark_open(self):
         self._closed = False
