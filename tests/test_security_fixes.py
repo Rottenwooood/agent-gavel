@@ -16,9 +16,9 @@ from agent_gavel.runtime.policies import PolicyManager
 
 
 async def _session_on(tools, base, path="/basic.html"):
-    r = await tools["session_create"]()
-    await tools["page_navigate"](page_id=r["page_id"], url=f"{base}{path}")
-    return r["session_id"], r["context_id"], r["page_id"]
+    r = await tools["context_create"]()
+    await tools["page_navigate"](page_id=r["active_page_id"], url=f"{base}{path}")
+    return r["context_id"], r["context_id"], r["active_page_id"]
 
 
 # ---------------- #1 preconditions ----------------
@@ -177,8 +177,7 @@ async def test_domain_guard_blocks_disallowed_navigation(monkeypatch, webapp_ser
     rt = BrowserRuntime()
     try:
         assert rt.policies.domain_restricted
-        s = await rt.session_mgr.create(mode="ephemeral")
-        ctx = await rt.context_mgr.create(s, {})
+        ctx = await rt.context_mgr.ensure()
         bc = ctx.browser_context
         # 白名单内可正常导航
         ok = await bc.new_page()

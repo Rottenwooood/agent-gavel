@@ -13,7 +13,7 @@ _BLOCK_TEXT_HINTS = ("没有访问", "仅限校内", "请先登录", "访问受�
 
 
 async def _handle_or_open(page_id=None):
-    """省略 page_id 时惰性建会话/上下文/页面，省掉一次 session.create 冷启动。"""
+    """省略 page_id 时惰性建上下文/页面，落在默认资料目录的默认容器。"""
     from ..runtime import get_runtime
 
     rt = get_runtime()
@@ -24,17 +24,7 @@ async def _handle_or_open(page_id=None):
     except GavelError as e:
         if e.code != "no_page":
             raise
-    # 没有页面时优先复用现有会话的上下文；只有完全没有会话才新建（默认会话单例）
-    for session in list(rt.sessions.values()):
-        if not session.context_ids:
-            continue
-        ctx = rt.context_mgr.get(session.context_ids[0])
-        try:
-            return rt.page_mgr.resolve(None, context_id=ctx.context_id)
-        except GavelError:
-            return await rt.page_mgr.open(ctx)
-    session = await rt.session_mgr.create(mode="ephemeral", container="isolated")
-    ctx = await rt.context_mgr.create(session, {"container": "isolated"})
+    ctx = await rt.context_mgr.ensure()
     return rt.page_mgr.resolve(None, context_id=ctx.context_id)
 
 
@@ -213,7 +203,8 @@ def register_page_tools(catalog):
     )
     async def page_open(
         context_id: str = None,
-        session_id: str = None,
+        profile: str = None,
+        isolated: bool = None,
         url: str = None,
         activate: bool = True,
         wait_until: str = "domcontentloaded",
@@ -227,7 +218,7 @@ def register_page_tools(catalog):
     ):
         "新建标签页并加载；入参与返回同 navigate，activate=False不抢active。"
         rt = get_runtime()
-        ctx = await _resolve_context(context_id, session_id)
+        ctx = await _resolve_context(context_id, profile=profile, isolated=isolated)
         handle = await rt.page_mgr.open(ctx, None, activate=activate)
         if not url:
             return {
@@ -428,7 +419,7 @@ def register_page_tools(catalog):
             kind="pdf",
             mime_type="application/pdf",
             source_url=handle.page.url,
-            session_id=handle.context.lease_session_id(),
+            context_id=handle.context_id,
             page_id=handle.page_id,
         )
         out = {

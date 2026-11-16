@@ -16,6 +16,7 @@
 import datetime
 import json
 import os
+import re
 import shutil
 import time
 
@@ -28,34 +29,33 @@ def profiles_root():
 
 
 def default_profile_dir():
-    """没有任何副本时，C1 用的自有可累计目录。"""
+    """默认资料目录（不传 profile 时的落点）。"""
     return str(gavel_config.default_browser_profile())
 
 
-def _active_file():
-    return os.path.join(profiles_root(), "ACTIVE")
+DEFAULT_PROFILE = "primary"
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
-def active_name():
-    try:
-        with open(_active_file(), encoding="utf-8") as f:
-            return f.read().strip() or None
-    except Exception:
-        return None
+def profile_dir(name=None):
+    """按名字取资料目录；不传就是 primary。"""
+    name = (name or DEFAULT_PROFILE).strip()
+    if not _NAME_RE.match(name):
+        raise GavelError("bad_args", f"资料目录名非法：{name!r}", hint="只允许字母/数字/._-")
+    return os.path.join(profiles_root(), name)
 
 
-def active_profile_dir():
-    name = active_name()
-    if not name:
-        return None
-    d = os.path.join(profiles_root(), name)
-    return d if os.path.isdir(d) else None
+def resolve_dir(explicit=None, profile=None):
+    """启动时该用哪个资料目录：显式目录 > 命名 profile > 默认(primary)。
 
+    没有 ACTIVE 指针：默认永远是 primary，多环境靠显式名字。
+    """
+    if explicit:
+        return str(explicit)
+    if profile:
+        return profile_dir(profile)
+    return default_profile_dir()
 
-def set_active(name):
-    os.makedirs(profiles_root(), exist_ok=True)
-    with open(_active_file(), "w", encoding="utf-8") as f:
-        f.write(name)
 
 
 def default_source():
@@ -186,6 +186,53 @@ def _skip(rel, *, tier, include_history, include_extensions):
     return False
 
 
+def _cookie_count(db):
+    import sqlite3
+
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
+        n = con.execute("select count(*) from cookies").fetchone()[0]
+        con.close()
+        return n
+    except Exception:
+        return 0
+
+
+def _point_last_used_to_login(dest):
+    """把 Local State.last_used 指到 cookie 最多的那个 profile 目录。"""
+    import json
+
+    state_path = os.path.join(dest, "Local State")
+    best, best_n = None, 0
+    try:
+        for entry in os.listdir(dest):
+            db = os.path.join(dest, entry, "Cookies")
+            if os.path.isfile(db):
+                n = _cookie_count(db)
+                if n > best_n:
+                    best, best_n = entry, n
+    except Exception:
+        return
+    if not best:
+        return
+    try:
+        with open(state_path, encoding="utf-8") as f:
+            state = json.load(f)
+    except Exception:
+        return
+    profile = state.setdefault("profile", {})
+    profile["last_used"] = best
+    profile["last_active_profiles"] = [best]
+    info = profile.setdefault("info_cache", {})
+    if best not in info:
+        info[best] = {"name": best}
+    try:
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False)
+    except Exception:
+        pass  # silent-ok: 写 Local State 失败不影响复制结果
+
+
 def _sanitize_json(path, drop_keys):
     try:
         with open(path, encoding="utf-8") as f:
@@ -210,7 +257,7 @@ def copy_profile(
     include_extensions=False,
     force=False,
 ) -> dict:
-    """从用户资料目录复制一份新副本；无副本时自动设为当前。"""
+    """从用户资料目录复制一份新副本，名字即目录名（默认 primary）。"""
     if tier not in _TIERS:
         raise GavelError("bad_args", f"tier 取 {list(_TIERS)}")
     source = source or default_source()
@@ -233,11 +280,14 @@ def copy_profile(
     root = profiles_root()
     dest = os.path.join(root, name)
     if os.path.exists(dest):
-        raise GavelError(
-            "profile_exists",
-            f"副本已存在：{name}",
-            hint="换一个 name，或先 browser(op=profile_delete)",
-        )
+        has_cookies = os.path.isfile(os.path.join(dest, "Default", "Cookies"))
+        if not force:
+            raise GavelError(
+                "profile_exists",
+                f"资料目录已存在：{name}" + ("（含登录态）" if has_cookies else ""),
+                hint="换一个 name；确实要覆盖请显式传 force=True",
+            )
+        shutil.rmtree(dest, ignore_errors=True)
     os.makedirs(dest, exist_ok=True)
 
     copied = skipped = 0
@@ -277,6 +327,10 @@ def copy_profile(
             except Exception:
                 skipped += 1
 
+    # 用户可能有多个 profile 目录，而 Local State 的 last_used 未必是登录所在的那个；
+    # 按 cookie 数量重设，否则复制出来的 Chrome 会打开一个没登录的空 profile。
+    _point_last_used_to_login(dest)
+
     # 清洗会绑定账号/设备的字段（保留 cookies 解密所需的 os_crypt）
     _sanitize_json(
         os.path.join(dest, "Local State"),
@@ -315,15 +369,9 @@ def copy_profile(
     with open(os.path.join(dest, "profile.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
-    became_active = False
-    if active_name() is None:
-        set_active(name)
-        became_active = True
     return {
         "status": "ok",
         "created": name,
-        "became_active": became_active,
-        "active": active_name(),
         "profiles": list_profiles(),
         "manifest": manifest,
     }
@@ -334,7 +382,6 @@ def list_profiles() -> list:
     out: list = []
     if not os.path.isdir(root):
         return out
-    active = active_name()
     for d in sorted(os.listdir(root)):
         p = os.path.join(root, d)
         if not os.path.isdir(p):
@@ -348,7 +395,7 @@ def list_profiles() -> list:
         out.append(
             {
                 "name": d,
-                "active": d == active,
+                "default": d == DEFAULT_PROFILE,
                 "tier": man.get("tier"),
                 "created_at": man.get("created_at"),
                 "size_bytes": man.get("size_bytes") or _dir_size(p),
@@ -360,6 +407,35 @@ def list_profiles() -> list:
     return out
 
 
+def ensure_profile(
+    *,
+    source=None,
+    name=None,
+    tier="default",
+    include_history=True,
+    include_extensions=False,
+    force=False,
+) -> dict:
+    """幂等入口：目录已存在就直接返回，不存在才复制。"""
+    if name and _safe_name(name) and os.path.isdir(os.path.join(profiles_root(), name)):
+        return {
+            "status": "ok",
+            "created": None,
+            "reused": True,
+            "profiles": list_profiles(),
+        }
+    out = copy_profile(
+        source=source,
+        name=name,
+        tier=tier,
+        include_history=include_history,
+        include_extensions=include_extensions,
+        force=force,
+    )
+    out["reused"] = False
+    return out
+
+
 def delete_profile(name) -> dict:
     if not _safe_name(name):
         raise GavelError("bad_args", f"副本名非法：{name!r}")
@@ -367,16 +443,7 @@ def delete_profile(name) -> dict:
     if not os.path.isdir(p):
         raise GavelError("profile_not_found", f"副本不存在：{name}")
     shutil.rmtree(p, ignore_errors=True)
-    if active_name() == name:
-        remaining = [x["name"] for x in list_profiles()]
-        if remaining:
-            set_active(remaining[0])
-        else:
-            try:
-                os.remove(_active_file())
-            except Exception:
-                pass  # silent-ok: best-effort，失败不影响主流程
-    return {"status": "ok", "deleted": name, "active": active_name(), "profiles": list_profiles()}
+    return {"status": "ok", "deleted": name, "profiles": list_profiles()}
 
 
 def _safe_name(name) -> bool:

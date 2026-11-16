@@ -90,8 +90,9 @@ class Observation:
 
     _GRACE_ACTIONS = frozenset({"click", "press"})
 
-    def __init__(self, backend, handle, *, target=None, action=None):
+    def __init__(self, backend, handle, *, target=None, action=None, follow_popup=True):
         self.backend = backend
+        self._follow_popup = follow_popup
         self.handle = handle
         self.target = target
         self.action = action
@@ -239,6 +240,18 @@ class Observation:
             if pid not in before.get("pages", set())
         ]
         closed = [pid for pid in before.get("pages", set()) if pid not in now_pages]
+        # 点击/按键弹出的新页：opener 是当前页就跟随，避免"眼见在新页、动作落在老页"
+        if (
+            opened
+            and self.action in ("click", "press")
+            and self._follow_popup
+            and self.handle.context is not None
+        ):
+            for item in opened:
+                if item.get("opener_page_id") == self.handle.page_id:
+                    self.handle.context.active_page_id = item["page_id"]
+                    out["switched_to_new_tab"] = True
+                    break
         active = self.handle.context.active_page_id
         pages = {}
         if opened:

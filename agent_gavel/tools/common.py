@@ -1,7 +1,7 @@
 """工具层公共：runtime/backend 解析、id 拼装。"""
 
 from ..backends.playwright import PlaywrightBackend
-from ..core.errors import STATUS_VALUES, GavelError
+from ..core.errors import STATUS_VALUES
 from ..runtime import get_runtime
 
 _BACKEND = None
@@ -36,11 +36,7 @@ def envelope(result, *, operation_id=None, elapsed_ms=None):
 
 
 def ids(handle):
-    out = {"context_id": handle.context_id, "page_id": handle.page_id}
-    lease = handle.context.lease_session_id()
-    if lease:
-        out["session_id"] = lease
-    return out
+    return {"context_id": handle.context_id, "page_id": handle.page_id}
 
 
 def rec(action_type, target=None, **kw):
@@ -108,33 +104,9 @@ ATTACH_WARNING = (
 )
 
 
-async def resolve_session(session_id=None):
-    rt = get_runtime()
-    if session_id:
-        return rt.session_mgr.get(session_id)
-    if len(rt.sessions) == 1:
-        return next(iter(rt.sessions.values()))
-    if not rt.sessions:
-        raise GavelError("session_required", "还没有 session", hint="先 session(op=create)")
-    raise GavelError(
-        "session_ambiguous",
-        "有多个 session，请显式指定 session_id",
-        detail={"sessions": list(rt.sessions)},
-    )
-
-
-async def resolve_context(context_id=None, session_id=None):
+async def resolve_context(context_id=None, profile=None, isolated=None):
+    """取 context：显式 id > 已有默认容器 > 按 profile 新建/复用。"""
     rt = get_runtime()
     if context_id:
         return rt.context_mgr.get(context_id)
-    try:
-        session = await resolve_session(session_id)
-    except GavelError as e:
-        if e.code != "session_required":
-            raise
-        # 冷启动不硬拦：默认会话惰性创建，省掉一次 session(op=create)
-        session = await rt.session_mgr.create(mode="ephemeral", container="isolated")
-    if session.context_ids:
-        return rt.context_mgr.get(session.context_ids[0])
-    # 冷启动：会话刚建好还没有 context，直接补一个，别让调用方多跑一轮
-    return await rt.context_mgr.create(session, {})
+    return await rt.context_mgr.ensure(profile=profile, isolated=bool(isolated))

@@ -1,8 +1,10 @@
 """容器工具。"""
 
+import asyncio
+import pathlib
+
 from ..core.errors import GavelError
 from ..runtime import get_runtime
-from .common import resolve_session as _resolve_session
 
 
 def register_context_tools(catalog):
@@ -10,7 +12,7 @@ def register_context_tools(catalog):
 
     @catalog.operation(returns="Context", fields={"container": {"enum": ["default", "isolated"]}})
     async def context_create(
-        session_id: str = None,
+        profile: str = None,
         locale: str = None,
         timezone_id: str = None,
         viewport: dict = None,
@@ -18,11 +20,11 @@ def register_context_tools(catalog):
         permissions: list = None,
         extra_http_headers: dict = None,
         storage_state: dict = None,
-        container: str = "isolated",
+        container: str = "default",
+        isolated: bool = None,
     ):
         "container默认isolated，继承profile登录态但不写回；default复用并写回。"
         rt = rt_get()
-        session = await _resolve_session(session_id)
         config = dict(
             locale=locale,
             timezone_id=timezone_id,
@@ -31,9 +33,13 @@ def register_context_tools(catalog):
             permissions=permissions,
             extra_http_headers=extra_http_headers,
             storage_state=storage_state,
-            container=container,
+            container="isolated" if isolated else container,
         )
-        ctx = await rt.context_mgr.create(session, config)
+        ctx = await rt.context_mgr.ensure(
+            profile=profile,
+            isolated=(config.get("container") or "isolated") == "isolated",
+            config=config,
+        )
         return {"status": "ok", **ctx.to_dict()}
 
     @catalog.operation(returns="ContextClosed")
@@ -99,3 +105,28 @@ def register_context_tools(catalog):
         else:
             await ctx.browser_context.clear_permissions()
         return {"status": "ok", "context_id": context_id, "permissions": permissions or []}
+
+    @catalog.operation(returns="StorageExport")
+    async def context_export_state(context_id: str, path: str = None):
+        "导出 storage state（cookie/localStorage）。"
+        rt = rt_get()
+        ctx = rt.context_mgr.get(context_id)
+        state = await ctx.browser_context.storage_state()
+        if path:
+            rt.policies.check_local_path(path, purpose="导出 storage state")
+            import json
+
+            payload = json.dumps(state, ensure_ascii=False, indent=2)
+            await asyncio.to_thread(pathlib.Path(path).write_text, payload, encoding="utf-8")
+            return {"status": "ok", "context_id": context_id, "path": path}
+        return {"status": "ok", "context_id": context_id, "storage_state": state}
+
+    @catalog.operation(returns="Context", required=("path",))
+    async def context_import_state(path: str, profile: str = None):
+        "path为可信storage_state文件；导入成新的隔离容器。"
+        rt = rt_get()
+        rt.policies.check_local_path(path, purpose="导入 storage state")
+        ctx = await rt.context_mgr.ensure(
+            profile=profile, isolated=True, config={"storage_state": path}
+        )
+        return {"status": "ok", **ctx.to_dict()}

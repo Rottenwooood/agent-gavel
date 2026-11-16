@@ -26,8 +26,7 @@ SINGLE_TOOLS = frozenset({"console_get", "performance_metrics", "daemon_shutdown
 # 合并/迁移过的操作：调用旧名时给出新写法，别让模型猜
 # 目录条目第一行里点名的常用操作：模型据此直接发起第一次调用，不必先查文档
 COMMON_OPS = {
-    "browser": ("launch", "status", "close", "profile_list"),
-    "session": ("create", "get", "export_state", "import_state", "close"),
+    "browser": ("launch", "status", "close", "profile_ensure", "profile_list"),
     "context": ("create", "cookies_get", "cookies_set", "set_headers", "close"),
     "page": ("open", "navigate", "text", "snapshot", "read"),
     "locator": ("click", "fill", "type", "press", "select"),

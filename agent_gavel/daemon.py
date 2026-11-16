@@ -1,6 +1,6 @@
 """单实例运行时守护进程。
 
-所有浏览器、session/context/page、队列、事件与产物只存在于本进程。
+所有浏览器、context/page、队列、事件与产物只存在于本进程。
 MCP 适配器（main.py）通过本地 socket 转发工具调用，不再各自持有运行时。
 
 单实例由 <数据根>/daemon.lock 的 flock 保证：内核在进程崩溃时自动释放，
@@ -71,8 +71,19 @@ async def _dispatch(catalog, schemas, name, args, adapter_count):
     return reply
 
 
+_IDLE_EXIT = False
+
+
+def _idle_flag():
+    return _IDLE_EXIT
+
+
 async def _idle_watch(state, idle_seconds, stop):
-    """最后一个 adapter 断开后，空闲超过阈值就让 daemon 退出，别留孤儿进程和浏览器。"""
+    """最后一个 adapter 断开后，空闲超过阈值就让 daemon 退出。
+
+    退出时只断开 Playwright 连接，保留受管 Chrome：登录态在磁盘上，
+    下次启动按 state 文件重新接上，避免每次都冷启动重新过风控。
+    """
     if idle_seconds <= 0:
         return
     idle_since = asyncio.get_running_loop().time()
@@ -82,6 +93,8 @@ async def _idle_watch(state, idle_seconds, stop):
         if state["adapters"] > 0:
             idle_since = now
         elif now - idle_since >= idle_seconds:
+            global _IDLE_EXIT
+            _IDLE_EXIT = True
             stop.set()
             return
 
@@ -245,7 +258,9 @@ async def _run(lock_fd):
         try:
             from .runtime import shutdown_runtime
 
-            await asyncio.wait_for(shutdown_runtime(), timeout=8)
+            await asyncio.wait_for(
+                shutdown_runtime(keep_browsers=bool(stop.is_set() and _idle_flag())), timeout=8
+            )
         except Exception:
             pass  # silent-ok: best-effort，失败不影响主流程
         try:

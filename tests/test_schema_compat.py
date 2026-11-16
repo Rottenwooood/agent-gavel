@@ -113,16 +113,16 @@ async def test_missing_page_hint_points_at_grouped_op(gavel_tools):
 
 async def test_links_is_part_of_text(gavel_tools, webapp_server):
     """links 不再单独占一个 op；text(mode=links) 同时给 items 与 total。"""
-    r = await gavel_tools["session_create"]()
-    await gavel_tools["page_navigate"](page_id=r["page_id"], url=f"{webapp_server}/basic.html")
+    r = await gavel_tools["context_create"]()
+    await gavel_tools["page_navigate"](page_id=r["active_page_id"], url=f"{webapp_server}/basic.html")
 
-    ok = await gavel_tools["page_text"](page_id=r["page_id"], mode="links")
+    ok = await gavel_tools["page_text"](page_id=r["active_page_id"], mode="links")
     assert ok["status"] == "ok", ok
     assert ok["links"] and ok["total"] >= len(ok["links"]), ok
 
     from agent_gavel.tools import create_catalog
 
-    gone = (await create_catalog().call("page", {"op": "links", "page_id": r["page_id"]})).result
+    gone = (await create_catalog().call("page", {"op": "links", "page_id": r["active_page_id"]})).result
     assert gone["status"] == "error", gone
     assert gone["reason"] == "unknown_operation", gone
     assert "text, mode=links" in (gone.get("hint") or ""), gone

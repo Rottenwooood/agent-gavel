@@ -33,3 +33,28 @@ async def test_idle_exit_zero_disables():
     await asyncio.sleep(0.4)
     assert not stop.is_set()
     task.cancel()
+
+
+async def test_idle_exit_keeps_browser_alive(monkeypatch, tmp_path):
+    """空闲退出只断连接：受管 Chrome 必须活着，下次直接重连。"""
+    import os
+    import signal
+
+    from agent_gavel.runtime.browser_runtime import BrowserRuntime
+
+    monkeypatch.setenv("AGENT_GAVEL_BROWSER_PROFILES", str(tmp_path / "profiles"))
+    rt = BrowserRuntime()
+    await rt.ensure_browser()
+    pids = [p["pid"] for p in rt.processes.list() if p.get("pid")]
+    assert pids, "没有启动受管 Chrome"
+
+    await rt.shutdown(keep_browsers=True)
+    await asyncio.sleep(0.5)
+    alive = [p for p in pids if os.path.exists(f"/proc/{p}")]
+    assert alive == pids, f"空闲退出杀掉了 Chrome：{pids} -> {alive}"
+
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass

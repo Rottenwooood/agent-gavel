@@ -45,26 +45,7 @@ def serialize(value, view):
 
 PAGE_VIEW = View(
     omit_null=("opener_page_id",),
-    same_as=(("creator_session_id", "session_id"),),
     equals_value_of=(("closed", "page_status", "closed"),),
-)
-CONFIG_VIEW = View(
-    omit_null=(
-        "headless",
-        "proxy",
-        "channel",
-        "locale",
-        "timezone_id",
-        "viewport",
-        "device",
-        "user_data_dir",
-        "browser_mode",
-        "cdp_endpoint",
-        "container",
-    )
-)
-SESSION_VIEW = View(
-    omit_null=("busy_owner",), omit_empty=("config",), children={"config": CONFIG_VIEW}
 )
 ELEMENT_VIEW = View(
     omit=("bounds", "candidates", "visible"),
@@ -138,7 +119,7 @@ class Result:
 
 RESULT_TYPES = {
     "Page": Result(
-        "page_id:str context_id:str url:JSON page_status:str creator_session_id?:str session_id?:str opener_page_id?:JSON closed?:bool",
+        "page_id:str context_id:str url:JSON page_status:str opener_page_id?:JSON closed?:bool",
         PAGE_VIEW,
     ),
     "Pages": Result("items:Page[]", View(children={"items": View(items=PAGE_VIEW)})),
@@ -199,22 +180,11 @@ RESULT_TYPES = {
     ),
     "Deleted": Result("artifact_id:str deleted:bool"),
     "Cleanup": Result("removed:list count:int"),
-    "Session": Result(
-        "session_id:str mode:str context_ids:list process_id:JSON has_storage_state:bool "
-        "writes_back_profile:bool config?:map busy_owner?:JSON",
-        SESSION_VIEW,
-    ),
-    "CreatedSession": Result(
-        "context_id:JSON page_id:JSON shared_container:bool", SESSION_VIEW, base="Session"
-    ),
-    "Sessions": Result("items:Session[]", View(children={"items": View(items=SESSION_VIEW)})),
-    "SessionDetail": Result("contexts:list", SESSION_VIEW, base="Session"),
-    "SessionClosed": Result("session_id:str closed:bool"),
-    "StorageExport": Result("session_id:str path?:str storage_state?:map"),
     "Context": Result(
-        "context_id:str creator_session_id:str session_ids:list container:str page_ids:list active_page_id:JSON busy_owner:JSON"
+        "context_id:str container:str page_ids:list active_page_id:JSON "
+        "busy_owner:JSON ephemeral_warning?:str"
     ),
-    "ContextClosed": Result("context_id:str container:str closed?:bool detached?:bool leases?:int"),
+    "ContextClosed": Result("context_id:str container:str closed?:bool detached?:bool"),
     "Cookies": Result("context_id:str cookies:list count:int"),
     "CookiesAdded": Result("context_id:str added:int"),
     "CookiesCleared": Result("context_id:str cleared:bool"),
@@ -222,7 +192,8 @@ RESULT_TYPES = {
     "Permissions": Result("context_id:str permissions:list"),
     "Browser": Result("process_id:str mode:str alive:bool headless?:JSON"),
     "BrowserStatus": Result(
-        "counts:map active_pages:map processes:list domain_restricted:bool recording:bool runs:map",
+        "counts:map active_pages:map processes:list domain_restricted:bool "
+        "recording:bool runs:map profile:map",
         View(
             keep=(
                 "status",
@@ -232,6 +203,7 @@ RESULT_TYPES = {
                 "domain_restricted",
                 "recording",
                 "runs",
+                "profile",
                 "warning",
             ),
             children={
@@ -240,12 +212,10 @@ RESULT_TYPES = {
         ),
     ),
     "BrowserClosed": Result("closed:bool"),
-    "ProfileCopied": Result(
-        "created:str became_active:bool active:JSON profiles:list manifest:map"
-    ),
-    "Profiles": Result("active:JSON items:list"),
-    "ProfileActive": Result("active:str"),
-    "ProfileDeleted": Result("deleted:str active:JSON profiles:list"),
+    "ProfileCopied": Result("created:str profiles:list manifest:map reused?:bool"),
+    "Profiles": Result("default:str items:list"),
+    "ProfileDeleted": Result("deleted:str profiles:list"),
+    "StorageExport": Result("context_id:str path?:str storage_state?:map"),
     "WorkflowSaved": Result(
         "template_id:str version:int steps:int parameters:map warnings?:list "
         "recorded_steps?:int template?:JSON"

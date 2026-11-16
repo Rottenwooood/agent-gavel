@@ -83,7 +83,7 @@ class ArtifactStore:
         kind="file",
         mime_type=None,
         source_url=None,
-        session_id=None,
+        context_id=None,
         page_id=None,
         meta=None,
     ) -> dict:
@@ -94,7 +94,7 @@ class ArtifactStore:
                 kind=kind,
                 mime_type=mime_type,
                 source_url=source_url,
-                session_id=session_id,
+                context_id=context_id,
                 page_id=page_id,
                 meta=meta,
             )
@@ -107,7 +107,7 @@ class ArtifactStore:
         kind="file",
         mime_type=None,
         source_url=None,
-        session_id=None,
+        context_id=None,
         page_id=None,
         meta=None,
     ) -> dict:
@@ -123,7 +123,7 @@ class ArtifactStore:
             "size_bytes": len(data),
             "sha256": hashlib.sha256(data).hexdigest(),
             "source_url": source_url,
-            "session_id": session_id,
+            "context_id": context_id,
             "page_id": page_id,
             "path": dest,
             "created_at": _now(),
@@ -182,7 +182,7 @@ class ArtifactStore:
                 raise GavelError(reason, f"{artifact_id} 不是 {expected_kind} 产物")
             return dict(info)
 
-    def list(self, *, kind=None, run_id=None, session_id=None, page_id=None) -> list:
+    def list(self, *, kind=None, run_id=None, context_id=None, page_id=None) -> list:
         out = []
         with self._lock:
             items = list(self._load().values())
@@ -193,7 +193,7 @@ class ArtifactStore:
                 continue
             if run_id and info.get("run_id") != run_id:
                 continue
-            if session_id and info.get("session_id") != session_id:
+            if context_id and info.get("context_id") != context_id:
                 continue
             if page_id and info.get("page_id") != page_id:
                 continue
@@ -267,7 +267,7 @@ class ArtifactStore:
 
     # ---- 下载捕获（page.on("download") 调用）----
     async def capture_download(
-        self, download, *, session_id=None, page_id=None, policies=None, events=None
+        self, download, *, context_id=None, page_id=None, policies=None, events=None
     ):
         aid = None
         try:
@@ -277,7 +277,7 @@ class ArtifactStore:
                     events.emit(
                         {
                             "event": "download_failed",
-                            "session_id": session_id,
+                            "context_id": context_id,
                             "page_id": page_id,
                             "error": failure,
                             "suggested_filename": download.suggested_filename,
@@ -294,7 +294,7 @@ class ArtifactStore:
                         events.emit(
                             {
                                 "event": "download_rejected",
-                                "session_id": session_id,
+                                "context_id": context_id,
                                 "page_id": page_id,
                                 "error": e.message,
                                 "size_bytes": size,
@@ -313,7 +313,7 @@ class ArtifactStore:
                 "size_bytes": size,
                 "sha256": await asyncio.to_thread(_sha256, dest),
                 "source_url": download.url,
-                "session_id": session_id,
+                "context_id": context_id,
                 "page_id": page_id,
                 "path": dest,
                 "created_at": _now(),
@@ -323,7 +323,7 @@ class ArtifactStore:
                 events.emit(
                     {
                         "event": "download_completed",
-                        "session_id": session_id,
+                        "context_id": context_id,
                         "page_id": page_id,
                         "artifact_id": aid,
                         "suggested_filename": filename,
@@ -342,7 +342,7 @@ class ArtifactStore:
                 events.emit(
                     {
                         "event": "download_failed",
-                        "session_id": session_id,
+                        "context_id": context_id,
                         "page_id": page_id,
                         "error": str(e),
                     }

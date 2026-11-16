@@ -53,10 +53,9 @@ def rss_mb():
 
 
 async def _new_page(rt, url=None):
-    session = await rt.session_mgr.create(mode="ephemeral")
-    ctx = rt.contexts[session.context_ids[0]]
+    ctx = await rt.context_mgr.ensure(isolated=True)
     handle = await rt.page_mgr.open(ctx, url)
-    return session, ctx, handle
+    return ctx, ctx, handle
 
 
 async def run_suite(rt, base, n=30):
@@ -140,11 +139,10 @@ async def run_suite(rt, base, n=30):
 
     # ---- 多 session 并行 ----
     async def session_work():
-        s = await rt.session_mgr.create(mode="ephemeral")
-        c = rt.contexts[s.context_ids[0]]
+        c = await rt.context_mgr.ensure(isolated=True)
         pg = await rt.page_mgr.open(c, f"{base}/basic.html")
         await pg.actor.submit("title", lambda: pg.page.title())
-        await rt.session_mgr.close(s.session_id)
+        await rt.context_mgr.close(c.context_id)
 
     t0 = time.perf_counter()
     await asyncio.gather(session_work(), session_work(), session_work())
@@ -175,9 +173,9 @@ async def run_suite(rt, base, n=30):
     report["crash_recovery_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
     # 收尾
-    for s in list(rt.sessions.values()):
+    for c in list(rt.contexts.values()):
         try:
-            await rt.session_mgr.close(s.session_id)
+            await rt.context_mgr.close(c.context_id)
         except Exception:
             pass
     return report

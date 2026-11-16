@@ -5,8 +5,8 @@
 
 
 async def _open(T, base, path="/basic.html"):
-    r = await T["session_create"]()
-    pid = r["page_id"]
+    r = await T["context_create"]()
+    pid = r["active_page_id"]
     await T["page_navigate"](page_id=pid, url=f"{base}{path}")
     return pid
 
@@ -32,8 +32,8 @@ async def test_text_returns_clickable_anchors(gavel_tools, webapp_server):
 
 async def test_navigate_can_return_text_and_anchors(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
-    r = await T["session_create"]()
-    pid = r["page_id"]
+    r = await T["context_create"]()
+    pid = r["active_page_id"]
     nav = await T["page_navigate"](page_id=pid, url=f"{base}/basic.html", text_chars=2000)
     assert nav["status"] == "ok", nav
     assert "Hello" in (nav.get("text") or ""), nav

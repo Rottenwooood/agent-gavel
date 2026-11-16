@@ -95,7 +95,7 @@ def record(name, ok, detail, c: Caller, t0):
 async def task_invoice(gavel, base, tmpdir):
     c = Caller(gavel)
     t0 = time.perf_counter()
-    r = await c("session_create")
+    r = await c("context_create")
     pid = r["page_id"]
     nav = await c(
         "page_navigate",
@@ -146,7 +146,7 @@ async def task_invoice(gavel, base, tmpdir):
 async def task_shop(gavel, base):
     c = Caller(gavel)
     t0 = time.perf_counter()
-    r = await c("session_create")
+    r = await c("context_create")
     pid = r["page_id"]
     await c("page_navigate", page_id=pid, url=f"{base}/portal/shop.html")
     await c("locator_fill", page_id=pid, target={"by": "css", "value": "#q"}, value="widget")
@@ -177,7 +177,7 @@ async def task_shop(gavel, base):
 async def task_replay(gavel, base):
     c = Caller(gavel)
     t0 = time.perf_counter()
-    r = await c("session_create")
+    r = await c("context_create")
     pid = r["page_id"]
     await c("page_navigate", page_id=pid, url=f"{base}/portal/shop.html")
     await c("locator_fill", page_id=pid, target={"by": "css", "value": "#q"}, value="widget")
@@ -241,7 +241,7 @@ async def task_replay(gavel, base):
     res = await rc(
         "workflow_run",
         name_or_id="bench_shop_search",
-        session_id=r["session_id"],
+        context_id=r["context_id"],
         params={"QUERY": "widget"},
     )
     ok = res["status"] == "pass" and explore_calls >= 4 and rc.calls == 1
@@ -263,7 +263,7 @@ async def task_repair(gavel, base):
     """页面改版（按钮 id 变）→ 模板定位失败 → 局部修复换锚点 → 通过并发布新版。"""
     c = Caller(gavel)
     t0 = time.perf_counter()
-    r = await c("session_create")
+    r = await c("context_create")
     await gavel["workflow_save"](
         template={
             "template_id": "bench_repair",
@@ -297,7 +297,7 @@ async def task_repair(gavel, base):
         }
     )
     res = await c(
-        "workflow_run", name_or_id="bench_repair", session_id=r["session_id"], verbosity="steps"
+        "workflow_run", name_or_id="bench_repair", context_id=r["context_id"], verbosity="steps"
     )
     repaired = any(s.get("repaired") for s in res.get("steps", []))
     ok = res["status"] == "pass" and repaired and bool(res.get("proposed_repairs"))
@@ -313,7 +313,7 @@ async def task_repair(gavel, base):
 async def task_real_example(gavel):
     c = Caller(gavel)
     t0 = time.perf_counter()
-    r = await c("session_create", proxy=_proxy_arg())
+    r = await c("context_create", proxy=_proxy_arg())
     pid = r["page_id"]
     nav = await c(
         "page_navigate",
@@ -334,7 +334,7 @@ async def task_real_example(gavel):
 async def task_real_wikipedia(gavel):
     c = Caller(gavel)
     t0 = time.perf_counter()
-    r = await c("session_create", proxy=_proxy_arg())
+    r = await c("context_create", proxy=_proxy_arg())
     pid = r["page_id"]
     nav = await c(
         "page_navigate", page_id=pid, url="https://en.wikipedia.org/wiki/Main_Page", timeout_s=40

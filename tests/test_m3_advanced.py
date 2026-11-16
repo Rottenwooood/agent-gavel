@@ -10,8 +10,8 @@ import pytest_asyncio
 
 @pytest_asyncio.fixture
 async def sess(gavel_tools, webapp_server):
-    r = await gavel_tools["session_create"]()
-    return (gavel_tools, r["session_id"], r["context_id"], r["page_id"], webapp_server)
+    r = await gavel_tools["context_create"]()
+    return (gavel_tools, r["context_id"], r["context_id"], r["active_page_id"], webapp_server)
 
 
 async def test_select_check_uncheck(sess):
@@ -259,48 +259,46 @@ async def test_artifact_cleanup(sess):
     assert (await tools["artifact_list"]())["total"] == 0
 
 
-async def test_session_state_context_and_reset(gavel_tools, webapp_server, tmp_path):
+async def test_context_state_export_import(gavel_tools, webapp_server, tmp_path):
     tools = gavel_tools
-    r = await tools["session_create"]()
-    sid, cid = r["session_id"], r["context_id"]
+    r = await tools["context_create"]()
+    sid, cid = r["context_id"], r["context_id"]
     await tools["context_cookies_set"](
         context_id=cid, cookies=[{"name": "auth", "value": "1", "url": webapp_server}]
     )
     path = str(tmp_path / "state.json")
-    ex = await tools["session_export_state"](session_id=sid, path=path)
+    ex = await tools["context_export_state"](context_id=sid, path=path)
     assert ex["status"] == "ok" and (tmp_path / "state.json").exists()
 
-    imp = await tools["session_import_state"](path=path)
+    imp = await tools["context_import_state"](path=path)
     assert imp["status"] == "ok"
     ck = await tools["context_cookies_get"](context_id=imp["context_id"], url=webapp_server)
     assert any(c["name"] == "auth" for c in ck["cookies"])
 
-    c2 = await tools["context_create"](session_id=imp["session_id"])
+    c2 = await tools["context_create"](isolated=True)
     assert c2["status"] == "ok" and c2["context_id"] != imp["context_id"]
 
-    rs = await tools["session_reset"](session_id=sid)
-    assert rs["status"] == "ok"
-    assert rs["session_id"] != sid
-    assert rs["context_ids"]
 
-
-async def test_persistent_profile_login_persists(gavel_tools, webapp_server, tmp_path):
+async def test_profile_dir_persists_local_storage(
+    gavel_tools, webapp_server, tmp_path, monkeypatch
+):
+    """同一个 profile 目录跨浏览器重启保留 localStorage。"""
+    monkeypatch.setenv("AGENT_GAVEL_BROWSER_PROFILES", str(tmp_path / "profiles"))
     T, base = gavel_tools, webapp_server
-    udd = str(tmp_path / "profile")
-    r = await T["session_create"](mode="persistent", user_data_dir=udd)
-    await T["page_navigate"](page_id=r["page_id"], url=f"{base}/basic.html")
+    r = await T["context_create"](profile="p1")
+    await T["page_navigate"](page_id=r["active_page_id"], url=f"{base}/basic.html")
     await T["page_read"](
-        page_id=r["page_id"], page_features={"s": "localStorage.setItem('login','yes')"}
+        page_id=r["active_page_id"], page_features={"s": "localStorage.setItem('login','yes')"}
     )
-    await T["session_close"](session_id=r["session_id"])
+    await T["browser_close"]()
 
-    r2 = await T["session_create"](mode="persistent", user_data_dir=udd)
-    await T["page_navigate"](page_id=r2["page_id"], url=f"{base}/basic.html")
+    r2 = await T["context_create"](profile="p1")
+    await T["page_navigate"](page_id=r2["active_page_id"], url=f"{base}/basic.html")
     rd = await T["page_read"](
-        page_id=r2["page_id"], page_features={"v": "localStorage.getItem('login')"}
+        page_id=r2["active_page_id"], page_features={"v": "localStorage.getItem('login')"}
     )
     assert rd["features"]["v"] == "yes"  # 关会话重开，登录态仍在
-    await T["session_close"](session_id=r2["session_id"])
+    await T["context_close"](context_id=r2["context_id"])
 
 
 def test_docx_text_extraction():

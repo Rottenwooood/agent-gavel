@@ -28,7 +28,7 @@ class RunState:
         self.step_results = []
         self.result = None
         # 失败驻留所需：恢复时要能回到同一条链、同一个现场
-        self.session_id = None
+        self.context_id = None
         self.steps = []
         self.ctx = None
         self.arts_before = set()
@@ -48,7 +48,7 @@ class Runner:
         template,
         params,
         *,
-        session_id=None,
+        context_id=None,
         verbosity="summary",
         run_id=None,
         confirm=False,
@@ -59,13 +59,11 @@ class Runner:
         run_id = run_id or rt.next_id("run")
         t0 = time.perf_counter()
 
-        session, owned = await self._resolve_session(session_id)
         page_ctx = None
-        await session.acquire(run_id)
         state = RunState(run_id, template.get("template_id"))
         rt.runs[run_id] = state
         try:
-            page = await self._resolve_page(session, page_id)
+            page = await self._resolve_page(context_id, page_id)
             page_ctx = page.context
             await page_ctx.acquire_run(run_id)
             # preconditions：不满足立即阻断，绝不在错误页面上执行步骤
@@ -101,7 +99,7 @@ class Runner:
                 "page_map": {"page0": page.page_id},
                 "new_count": 0,
             }
-            state.session_id = session.session_id
+            state.context_id = page_ctx.context_id
             state.steps = steps
             state.ctx = ctx
             state.arts_before = arts_before
@@ -111,16 +109,10 @@ class Runner:
         finally:
             if page_ctx is not None:
                 page_ctx.release_run(run_id)
-            session.release(run_id)
             # 失败必须驻留：runs 被 pop 掉，workflow_resume 就找不到现场了。
             # 只有"跑完/取消"才释放；失败留给 LLM 接手。
             if state.status not in ("fail", "ambiguous", "error"):
                 rt.runs.pop(run_id, None)
-            if owned and state.status not in ("fail", "ambiguous", "error"):
-                try:
-                    await rt.session_mgr.close(session.session_id)
-                except Exception:
-                    pass  # silent-ok: best-effort，失败不影响主流程
 
     @staticmethod
     def _record_run(template_id, status):
@@ -132,40 +124,13 @@ class Runner:
             pass  # silent-ok: best-effort，失败不影响主流程
 
     # ---- 会话/页面 ----
-    async def _resolve_session(self, session_id):
-        rt = self.runtime
-        if session_id:
-            return rt.session_mgr.get(session_id), False
-        if len(rt.sessions) == 1:
-            return next(iter(rt.sessions.values())), False
-        if not rt.sessions:
-            s = await rt.session_mgr.create(mode="ephemeral")
-            return s, True
-        raise GavelError(
-            "session_ambiguous",
-            "有多个 session，请指定 session_id",
-            detail={"sessions": list(rt.sessions)},
-        )
-
-    async def _resolve_page(self, session, page_id=None):
+    async def _resolve_page(self, context_id=None, page_id=None):
         rt = self.runtime
         if page_id:
             return rt.page_mgr.get(page_id)
-        contexts = [
-            rt.contexts[c]
-            for c in session.context_ids
-            if c in rt.contexts and rt.contexts[c].page_ids
-        ]
-        if not contexts:
-            ctx = await rt.context_mgr.create(session, {})
-            return rt.page_mgr.resolve(None, context_id=ctx.context_id)
-        if len(contexts) > 1:
-            raise GavelError(
-                "ambiguous_page",
-                "该会话有多个 context 持有页面，请指定 page_id",
-                detail={"contexts": [c.context_id for c in contexts]},
-            )
-        return rt.page_mgr.resolve(None, context_id=contexts[0].context_id)
+        if context_id:
+            return rt.page_mgr.resolve(None, context_id=context_id)
+        return rt.page_mgr.resolve()
 
     # ---- 主循环 ----
     async def _execute_steps(self, state, steps, ctx, arts_before, verbosity, t0, start_idx=0):
@@ -358,8 +323,6 @@ class Runner:
             raise GavelError("not_resumable", f"该 run 当前状态不可续跑：{state.status}")
         if state.ctx is None:
             raise GavelError("not_resumable", "缺少运行上下文，无法续跑")
-        session = rt.session_mgr.get(state.session_id)
-        await session.acquire(run_id)
         ctx = state.ctx
         # 重新读取模板：失败驻留期间作者可能已经 patch 过（放宽断言/换锚点），
         # 续跑必须用最新版本，否则改完还是按旧链跑。
@@ -393,7 +356,6 @@ class Runner:
             )
         finally:
             page_ctx.release_run(run_id)
-            session.release(run_id)
             if state.status not in ("fail", "ambiguous", "error"):
                 rt.runs.pop(run_id, None)
 
@@ -526,7 +488,7 @@ class Runner:
             kind="screenshot",
             mime_type="image/png",
             page_id=page.page_id,
-            session_id=page.context.lease_session_id(),
+            context_id=page.context_id,
         )
         return {"action": "screenshot", "artifact_id": info["artifact_id"]}
 
@@ -540,7 +502,7 @@ class Runner:
             kind="pdf",
             mime_type="application/pdf",
             page_id=page.page_id,
-            session_id=page.context.lease_session_id(),
+            context_id=page.context_id,
         )
         return {"action": "pdf", "artifact_id": info["artifact_id"]}
 

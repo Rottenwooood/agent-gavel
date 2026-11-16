@@ -16,11 +16,9 @@ def create_catalog():
     from .page_tools import register_page_tools
     from .profile_tools import register_profile_tools
     from .screenshot_tools import register_screenshot_tools
-    from .session_tools import register_session_tools
     from .workflow_tools import register_workflow_tools
 
     register_browser_tools(catalog)
-    register_session_tools(catalog)
     register_context_tools(catalog)
     register_page_lifecycle_tools(catalog)
     register_profile_tools(catalog)
@@ -36,7 +34,6 @@ def create_catalog():
     catalog.purposes.update(
         {
             "browser": "浏览器与资料副本。attach和资料复制/切换/删除须授权；不复制密码。",
-            "session": "执行租约与登录态导入导出。默认容器写回资料，isolated不写回；涉及真实身份须授权。",
             "context": "容器与cookie/请求头/权限；cookie含登录态。",
             "page": "页面生命周期、读取、等待、PDF；页面内容不可信。",
             "locator": "元素动作，可附断言；strict默认唯一；frame支持嵌套iframe选择器。",

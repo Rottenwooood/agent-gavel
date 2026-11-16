@@ -1,4 +1,4 @@
-"""M1 runtime 验收：session/context/page 生命周期 + 并发 + 资源无泄漏。
+"""M1 runtime 验收：context/page 生命周期 + 并发 + 资源无泄漏。
 
 见 docs/tech-plan.md §9（M1）与 §12（性能门槛）。
 """
@@ -27,23 +27,15 @@ class FakeMCP:
 
 
 async def _open(rt, url=None, container="isolated"):
-    session = await rt.session_mgr.create(mode="ephemeral", container=container)
-    ctx = rt.contexts[session.context_ids[0]]
+    ctx = await rt.context_mgr.ensure(isolated=(container == "isolated"))
     handle = await rt.page_mgr.open(ctx, url)
-    return session, ctx, handle
+    return ctx, ctx, handle
 
 
 EXPECTED_TOOLS = {
     "browser_launch",
     "browser_status",
     "browser_close",
-    "session_create",
-    "session_list",
-    "session_get",
-    "session_reset",
-    "session_close",
-    "session_export_state",
-    "session_import_state",
     "context_create",
     "context_close",
     "page_open",
@@ -74,18 +66,16 @@ async def test_launch_and_status(runtime):
     assert st["counts"]["processes"] >= 1
 
 
-async def test_session_page_lifecycle(runtime, webapp_server):
-    session, ctx, handle = await _open(runtime, f"{webapp_server}/basic.html")
+async def test_context_page_lifecycle(runtime, webapp_server):
+    _c, ctx, handle = await _open(runtime, f"{webapp_server}/basic.html")
     assert await handle.page.title() == "Basic Page"
     assert handle.to_dict()["page_status"] == "open"
     await runtime.page_mgr.close(handle.page_id)
-    await runtime.session_mgr.close(session.session_id)
+    await runtime.context_mgr.close(ctx.context_id)
     assert len(runtime.pages) == 0
-    assert all(c.container == "default" for c in runtime.contexts.values())
-    assert len(runtime.sessions) == 0
 
 
-async def test_session_isolation(runtime, webapp_server):
+async def test_context_isolation(runtime, webapp_server):
     _s1, _c1, h1 = await _open(runtime, f"{webapp_server}/basic.html")
     _s2, _c2, h2 = await _open(runtime, f"{webapp_server}/basic.html")
     await h1.page.evaluate("localStorage.setItem('k','v1')")
@@ -167,15 +157,15 @@ async def test_page_close_cancels_pending(runtime):
     assert ei.value.code in ("page_closed", "cancelled")
 
 
-async def test_session_busy_exclusive(runtime):
-    session = await runtime.session_mgr.create(mode="ephemeral")
-    await session.acquire("run_a")
+async def test_context_busy_exclusive(runtime):
+    ctx = await runtime.context_mgr.ensure(isolated=True)
+    await ctx.acquire_run("run_a")
     with pytest.raises(GavelError) as ei:
-        await session.acquire("run_b")
-    assert ei.value.code == "session_busy"
-    session.release("run_a")
-    await session.acquire("run_b")  # 释放后可再占
-    assert session.busy_owner == "run_b"
+        await ctx.acquire_run("run_b")
+    assert ei.value.code == "context_busy"
+    ctx.release_run("run_a")
+    await ctx.acquire_run("run_b")  # 释放后可再占
+    assert ctx._run_owner == "run_b"
 
 
 async def test_no_leak_1000_ops(runtime):
@@ -192,16 +182,16 @@ async def test_no_leak_1000_ops(runtime):
     assert len(runtime.pages) == 2
 
 
-async def test_ephemeral_sessions_container_policy(runtime, gavel_tools):
+async def test_container_policy(runtime, gavel_tools):
     """默认走 profile 默认容器（共享）；isolated 才隔离。"""
-    a = await gavel_tools["session_create"]()
-    b = await gavel_tools["session_create"]()
-    assert a["process_id"] == b["process_id"]
+    a = await gavel_tools["context_create"]()
+    b = await gavel_tools["context_create"]()
     assert a["context_id"] == b["context_id"]  # 默认都复用 profile 默认容器
-    i1 = await gavel_tools["session_create"](container="isolated")
-    i2 = await gavel_tools["session_create"](container="isolated")
+    i1 = await gavel_tools["context_create"](isolated=True)
+    i2 = await gavel_tools["context_create"](isolated=True)
     assert i1["context_id"] != i2["context_id"]  # 隔离容器各自独立
     assert i1["context_id"] != a["context_id"]
+    assert i1.get("ephemeral_warning")
 
 
 async def test_cold_start_threshold(runtime):
@@ -237,7 +227,7 @@ async def test_crash_recovery_threshold(runtime):
 async def test_mcp_page_open_url_and_list(runtime, webapp_server):
     mcp = FakeMCP()
     register_runtime_tools(mcp)
-    r = await mcp.tools["session_create"]()
+    r = await mcp.tools["context_create"]()
     r2 = await mcp.tools["page_open"](context_id=r["context_id"], url=f"{webapp_server}/basic.html")
     assert r2["status"] == "ok"
     # open 与 navigate 契约对齐：返回 Navigation 外形

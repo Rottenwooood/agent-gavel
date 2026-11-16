@@ -1,4 +1,4 @@
-"""进阶/边界覆盖：多 context 隔离、重定向、导航超时、多 session 并行。
+"""进阶/边界覆盖：多 context 隔离、重定向、导航超时、多 context 并行。
 
 （需 M3 的下载/上传/popup/iframe/dialog/storage state 用例在其里程碑补齐。）
 """
@@ -13,16 +13,14 @@ from agent_gavel.tools.common import backend
 
 
 async def _open(rt, url=None):
-    session = await rt.session_mgr.create(mode="ephemeral", container="isolated")
-    ctx = rt.contexts[session.context_ids[0]]
+    ctx = await rt.context_mgr.ensure(isolated=True)
     handle = await rt.page_mgr.open(ctx, url)
-    return session, ctx, handle
+    return ctx, ctx, handle
 
 
 async def test_multi_context_cookie_isolation(runtime, webapp_server):
-    session = await runtime.session_mgr.create()
-    c1 = await runtime.context_mgr.create(session, {"container": "isolated"})
-    c2 = await runtime.context_mgr.create(session, {"container": "isolated"})
+    c1 = await runtime.context_mgr.ensure(isolated=True)
+    c2 = await runtime.context_mgr.ensure(isolated=True)
     await c1.browser_context.add_cookies([{"name": "k", "value": "v1", "url": webapp_server}])
     ck1 = await c1.browser_context.cookies(webapp_server)
     ck2 = await c2.browser_context.cookies(webapp_server)
@@ -60,11 +58,10 @@ async def test_navigation_timeout(runtime, webapp_server):
 
 async def test_multi_session_parallel_work(runtime, webapp_server):
     async def work():
-        session = await runtime.session_mgr.create(mode="ephemeral", container="isolated")
-        ctx = runtime.contexts[session.context_ids[0]]
+        ctx = await runtime.context_mgr.ensure(isolated=True)
         pg = await runtime.page_mgr.open(ctx, f"{webapp_server}/basic.html")
         title = await pg.page.title()
-        await runtime.session_mgr.close(session.session_id)
+        await runtime.context_mgr.close(ctx.context_id)
         return title
 
     t0 = time.perf_counter()
@@ -72,7 +69,7 @@ async def test_multi_session_parallel_work(runtime, webapp_server):
     dt = time.perf_counter() - t0
     assert titles == ["Basic Page"] * 3
     assert dt < 5.0
-    assert len(runtime.sessions) == 0  # 都已清理
+    assert not [c for c in runtime.contexts.values() if c.container == 'isolated']
 
 
 async def test_browser_crash_recovery(runtime):
@@ -81,6 +78,6 @@ async def test_browser_crash_recovery(runtime):
     runtime._default_handle = None
     h2 = await runtime.ensure_default_browser()
     assert h2.alive
-    # 恢复后还能建会话/开页面
-    session = await runtime.session_mgr.create()
-    assert session.context_ids
+    # 恢复后还能建上下文/开页面
+    ctx = await runtime.context_mgr.ensure()
+    assert ctx.context_id

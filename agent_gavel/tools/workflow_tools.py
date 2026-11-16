@@ -104,7 +104,7 @@ def register_workflow_tools(catalog):
 
     @catalog.operation(returns="Recording")
     async def workflow_record_start(
-        session_id: str = None, context_id: str = None, page_id: str = None, keep_all: bool = False
+        context_id: str = None, page_id: str = None, keep_all: bool = False
     ):
         "录制后续元素动作和导航。"
         from ..runtime import get_runtime
@@ -176,7 +176,7 @@ def register_workflow_tools(catalog):
     async def workflow_run(
         name_or_id: str,
         params: dict = None,
-        session_id: str = None,
+        context_id: str = None,
         verbosity: str = "summary",
         run_id: str = None,
         confirm: bool = False,
@@ -191,7 +191,7 @@ def register_workflow_tools(catalog):
         result = await runner.run(
             template,
             params or {},
-            session_id=session_id,
+            context_id=context_id,
             verbosity=verbosity,
             run_id=run_id,
             confirm=confirm,

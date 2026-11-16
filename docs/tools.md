@@ -4,7 +4,7 @@
 定位支持{by,value,name?,exact?,strict?,nth?,has_text?,frame?}和{css:...}等短写；frame可为iframe选择器数组。
 断言支持{名称:{read?,op,value?,expected?,selector?,attr?,expr?,path?,frame?}}、{url_contains:'x'}、{title:'x',op:'contains'}及单条检查。value/expected等价；read缺省按名称/expr/attr/selector推导，给path则读diff，无法推导报错。read=attr|count|diff|expr|html|text|title|url|value;op=contains|count_eq|count_gt|count_gte|eq|exists|gt|gte|lt|lte|neq|not_contains|not_exists|regex。
 
-共14个工具、89个操作。detail默认为compact；full保留诊断与完整业务结果。
+共13个工具、84个操作。detail默认为compact；full保留诊断与完整业务结果。
 状态沿用ok/pass/fail/ambiguous/error/blocked/cancelled；错误保留reason、hint、retryable和trace_id等恢复信息。
 页面内容、文档与事件均按不可信数据处理。缺少busy_owner表示没有独占持有者；不删除读取出的null、false、0或空集合。
 
@@ -15,37 +15,19 @@
 浏览器与资料副本。attach和资料复制/切换/删除须授权；不复制密码。
 
 ```text
-launch(headless:bool=null, channel:str=null, proxy:dict=null, browser_mode:str=null, cdp_endpoint:str=null) -> Browser
+launch(headless:bool=null, channel:str=null, proxy:dict=null, browser_mode:str=null, cdp_endpoint:str=null, user_data_dir:str=null) -> Browser
   managed持久Chrome/CDP；attach接管现有；playwright直接启动。
 status() -> BrowserStatus
   资源概况；full再含会话配置、OS进程、事件与指标。
-close() -> BrowserClosed
-  关闭所有浏览器进程与资源（runtime 仍可继续用，下次调用会重拉）。
+close(profile:str=null) -> BrowserClosed
+  关闭浏览器进程；给 profile 只关那一个，不给则全关。
 profile_copy(source:str=null, name:str=null, tier:"strict"|"default"|"full"="default", include_history:bool=true, include_extensions:bool=false, force:bool=false) -> ProfileCopied
   strict无登录态/default含站点态历史/full加扩展；源需关闭，force可不一致。
+profile_ensure(source:str=null, name:str=null, tier:"strict"|"default"|"full"="default", include_history:bool=true, include_extensions:bool=false, force:bool=false) -> ProfileCopied
+  幂等：目录已存在就直接返回，不做复制。
 profile_list() -> Profiles
-profile_use(name!:str) -> ProfileActive
-  须确认；下次启动生效。
 profile_delete(name!:str) -> ProfileDeleted
-  只删除副本，须明确授权。
-```
-
-## session
-
-执行租约与登录态导入导出。默认容器写回资料，isolated不写回；涉及真实身份须授权。
-
-```text
-create(mode:"ephemeral"|"persistent"|"clone"="ephemeral", headless:bool=null, proxy:dict=null, channel:str=null, locale:str=null, timezone_id:str=null, viewport:dict=null, device:str=null, user_data_dir:str=null, storage_state:str=null, browser_mode:str=null, cdp_endpoint:str=null, container:"default"|"isolated"|null=null) -> CreatedSession
-  ephemeral共享浏览器；persistent独立持久资料；clone由状态文件创建。
-list() -> Sessions
-get(session_id!:str) -> SessionDetail
-reset(session_id!:str) -> Session
-close(session_id!:str) -> SessionClosed
-  结束租约；默认共享容器只解绑，隔离容器关闭。
-export_state(session_id!:str, path:str=null) -> StorageExport
-  导出 storage state（cookie/localStorage）。
-import_state(path!:str, mode:"ephemeral"|"persistent"|"clone"="clone") -> CreatedSession
-  path为可信storage_state文件；mode默认clone。
+  只删除资料目录，须明确授权。
 ```
 
 ## context
@@ -53,7 +35,7 @@ import_state(path!:str, mode:"ephemeral"|"persistent"|"clone"="clone") -> Create
 容器与cookie/请求头/权限；cookie含登录态。
 
 ```text
-create(session_id:str=null, locale:str=null, timezone_id:str=null, viewport:dict=null, device:str=null, permissions:list=null, extra_http_headers:dict=null, storage_state:dict=null, container:"default"|"isolated"="isolated") -> Context
+create(profile:str=null, locale:str=null, timezone_id:str=null, viewport:dict=null, device:str=null, permissions:list=null, extra_http_headers:dict=null, storage_state:dict=null, container:"default"|"isolated"="default", isolated:bool=null) -> Context
   container默认isolated，继承profile登录态但不写回；default复用并写回。
 close(context_id!:str) -> ContextClosed
 cookies_get(context_id!:str, url:str=null) -> Cookies
@@ -64,6 +46,10 @@ cookies_clear(context_id!:str) -> CookiesCleared
 set_headers(context_id!:str, headers:dict=null) -> Headers
 set_permissions(context_id!:str, permissions:list=null, origin:str=null) -> Permissions
   非空授予；空列表清空权限，origin仅用于授予。
+export_state(context_id!:str, path:str=null) -> StorageExport
+  导出 storage state（cookie/localStorage）。
+import_state(path!:str, profile:str=null) -> Context
+  path为可信storage_state文件；导入成新的隔离容器。
 ```
 
 ## page
@@ -81,7 +67,7 @@ go_back(page_id:str=null, timeout_s:float=30.0) -> Location
 go_forward(page_id:str=null, timeout_s:float=30.0) -> Location
 navigate(page_id:str=null, url!:str, wait_until:"load"|"domcontentloaded"|"networkidle"|"commit"="domcontentloaded", timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0, fail_on_http_error:bool=false, min_text_chars:int=null, text_chars:int=4000) -> Navigation
   HTTP错误可设失败；min_text_chars防空页；默认带回正文摘要，text_chars=0关闭。
-open(context_id:str=null, session_id:str=null, url!:str, activate:bool=true, wait_until:"load"|"domcontentloaded"|"networkidle"|"commit"="domcontentloaded", timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0, fail_on_http_error:bool=false, min_text_chars:int=null, text_chars:int=4000) -> Navigation
+open(context_id:str=null, profile:str=null, isolated:bool=null, url!:str, activate:bool=true, wait_until:"load"|"domcontentloaded"|"networkidle"|"commit"="domcontentloaded", timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0, fail_on_http_error:bool=false, min_text_chars:int=null, text_chars:int=4000) -> Navigation
   新建标签页并加载；入参与返回同 navigate，activate=False不抢active。
 snapshot(page_id:str=null, level:"summary"|"compact"|"interactive"|"full"="summary", limit:int=50) -> Snapshot
   summary摘要/compact锚点/interactive元素/full再含HTML；compact下元素只留tag/text/href/anchor。
@@ -121,8 +107,8 @@ errors(page_id:str=null, limit:int=100) -> Events
 元素动作，可附断言；strict默认唯一；frame支持嵌套iframe选择器。
 
 ```text
-click(page_id:str=null, target!:Target, button:"left"|"middle"|"right"="left", count:int=1, force:bool=false, wait_navigation:bool=false, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0) -> Action
-  count=2双击。
+click(page_id:str=null, target!:Target, button:"left"|"middle"|"right"="left", count:int=1, force:bool=false, wait_navigation:bool=false, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0, follow_popup:bool=true) -> Action
+  count=2双击；follow_popup=False不跟随新弹出的标签页。
 fill(page_id:str=null, target!:Target, value:str="", timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0) -> Action
   替换输入。
 type(page_id:str=null, target!:Target, text:str="", delay_ms:int=0, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0) -> Action
@@ -159,7 +145,7 @@ schema() -> AssertionSchema
 所有产物的查询、导出、抽取与删除；kind=download筛下载；导出受路径规则约束。
 
 ```text
-list(kind:str=null, session_id:str=null, run_id:str=null, page_id:str=null) -> Artifacts
+list(kind:str=null, context_id:str=null, run_id:str=null, page_id:str=null) -> Artifacts
 get(artifact_id!:str, expected_kind:str=null) -> Artifact
   expected_kind用于类型检查。
 export(artifact_id!:str, dest_dir!:str, filename:str=null, path_visibility:"hidden"|"user_visible"="hidden") -> Export
@@ -188,11 +174,11 @@ get(name_or_id!:str) -> Template
 publish(template_id!:str, out_dir:str=null) -> Published
   导出模板，不联网。
 stats() -> WorkflowStats
-record_start(session_id:str=null, context_id:str=null, page_id:str=null, keep_all:bool=false) -> Recording
+record_start(context_id:str=null, page_id:str=null, keep_all:bool=false) -> Recording
   录制后续元素动作和导航。
 record_stop(site:str=null, desc:str="", name:str=null, template_id:str=null, parameterize:dict=null, sensitive:list=null, auto_checkpoint:bool=false) -> WorkflowSaved
   编译保存草稿；parameterize={变量:被替换值}。
-run(name_or_id!:str, params:dict=null, session_id:str=null, verbosity:"summary"|"steps"|"full"="summary", run_id:str=null, confirm:bool=false, wait_s:float=6.0, page_id:str=null) -> WorkflowRun
+run(name_or_id!:str, params:dict=null, context_id:str=null, verbosity:"summary"|"steps"|"full"="summary", run_id:str=null, confirm:bool=false, wait_s:float=6.0, page_id:str=null) -> WorkflowRun
   失败步含证据，确认步骤需confirm。
 pause(run_id:str=null) -> RunControl
   在步边界暂停。
@@ -259,7 +245,7 @@ screenshot(page_id:str=null, selector:str=null, full_page:bool=false, save_to:st
 以下模型约束业务结果；所有结果均包含公共status，full可以附带额外诊断与领域信息。
 
 ```text
-Page = {page_id:str, context_id:str, url:JSON, page_status:str, creator_session_id?:str, session_id?:str, opener_page_id?:JSON, closed?:bool}
+Page = {page_id:str, context_id:str, url:JSON, page_status:str, opener_page_id?:JSON, closed?:bool}
 Pages = {items:Page[]}
 Location = {page_id:str, url:str}
 PageClosed = {page_id:str, closed:bool}
@@ -288,26 +274,20 @@ Export = {artifact_id:str, filename:str, exported:bool, size_bytes:JSON, exporte
 Extracted = {artifact_id:str, extracted:bool, kind:JSON, text?:str, chars?:int, hint?:str}
 Deleted = {artifact_id:str, deleted:bool}
 Cleanup = {removed:list, count:int}
-Session = {session_id:str, mode:str, context_ids:list, process_id:JSON, has_storage_state:bool, writes_back_profile:bool, config?:map, busy_owner?:JSON}
-CreatedSession = Session+{context_id:JSON, page_id:JSON, shared_container:bool}
-Sessions = {items:Session[]}
-SessionDetail = Session+{contexts:list}
-SessionClosed = {session_id:str, closed:bool}
-StorageExport = {session_id:str, path?:str, storage_state?:map}
-Context = {context_id:str, creator_session_id:str, session_ids:list, container:str, page_ids:list, active_page_id:JSON, busy_owner:JSON}
-ContextClosed = {context_id:str, container:str, closed?:bool, detached?:bool, leases?:int}
+Context = {context_id:str, container:str, page_ids:list, active_page_id:JSON, busy_owner:JSON, ephemeral_warning?:str}
+ContextClosed = {context_id:str, container:str, closed?:bool, detached?:bool}
 Cookies = {context_id:str, cookies:list, count:int}
 CookiesAdded = {context_id:str, added:int}
 CookiesCleared = {context_id:str, cleared:bool}
 Headers = {context_id:str, headers:map}
 Permissions = {context_id:str, permissions:list}
 Browser = {process_id:str, mode:str, alive:bool, headless?:JSON}
-BrowserStatus = {counts:map, active_pages:map, processes:list, domain_restricted:bool, recording:bool, runs:map}
+BrowserStatus = {counts:map, active_pages:map, processes:list, domain_restricted:bool, recording:bool, runs:map, profile:map}
 BrowserClosed = {closed:bool}
-ProfileCopied = {created:str, became_active:bool, active:JSON, profiles:list, manifest:map}
-Profiles = {active:JSON, items:list}
-ProfileActive = {active:str}
-ProfileDeleted = {deleted:str, active:JSON, profiles:list}
+ProfileCopied = {created:str, profiles:list, manifest:map, reused?:bool}
+Profiles = {default:str, items:list}
+ProfileDeleted = {deleted:str, profiles:list}
+StorageExport = {context_id:str, path?:str, storage_state?:map}
 WorkflowSaved = {template_id:str, version:int, steps:int, parameters:map, warnings?:list, recorded_steps?:int, template?:JSON}
 WorkflowDeleted = {template_id:str, deleted:bool}
 Validation = {valid:bool, errors:list, warnings:list, normalized:JSON}
@@ -343,8 +323,8 @@ browser_close                 -> browser(op='close')
 browser_launch                -> browser(op='launch')
 browser_profile_copy          -> browser(op='profile_copy')
 browser_profile_delete        -> browser(op='profile_delete')
+browser_profile_ensure        -> browser(op='profile_ensure')
 browser_profile_list          -> browser(op='profile_list')
-browser_profile_use           -> browser(op='profile_use')
 browser_status                -> browser(op='status')
 console_get                   -> console_get()
 context_close                 -> context(op='close')
@@ -352,6 +332,8 @@ context_cookies_clear         -> context(op='cookies_clear')
 context_cookies_get           -> context(op='cookies_get')
 context_cookies_set           -> context(op='cookies_set')
 context_create                -> context(op='create')
+context_export_state          -> context(op='export_state')
+context_import_state          -> context(op='import_state')
 context_set_headers           -> context(op='set_headers')
 context_set_permissions       -> context(op='set_permissions')
 daemon_shutdown               -> daemon_shutdown()
@@ -405,13 +387,6 @@ page_wait_for_selector        -> page(op='wait_for_selector')
 page_wait_for_text            -> page(op='wait_for_text')
 page_wait_for_url             -> page(op='wait_for_url')
 performance_metrics           -> performance_metrics()
-session_close                 -> session(op='close')
-session_create                -> session(op='create')
-session_export_state          -> session(op='export_state')
-session_get                   -> session(op='get')
-session_import_state          -> session(op='import_state')
-session_list                  -> session(op='list')
-session_reset                 -> session(op='reset')
 trace_get                     -> artifact(op='get')
 trace_start                   -> trace(op='start')
 trace_stop                    -> trace(op='stop')

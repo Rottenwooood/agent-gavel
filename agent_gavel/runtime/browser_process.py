@@ -16,6 +16,7 @@ import os
 import re
 import signal
 import socket
+import shutil
 import subprocess
 import sys
 import time
@@ -36,10 +37,26 @@ def _find_chrome_binary():
     return config.chrome_bin()
 
 
-def _default_profile_dir():
-    from .profiles import active_profile_dir, default_profile_dir
+def _guard_primary_headless(udd, headless):
+    """主资料目录禁止无头：同一份登录资料被 headless 摸过一次，指纹就脏了。"""
+    if not headless or not config.primary_headless_guard():
+        return
+    from .profiles import default_profile_dir
 
-    return config.browser_profile_override() or active_profile_dir() or default_profile_dir()
+    if os.path.normcase(os.path.abspath(udd)) == os.path.normcase(
+        os.path.abspath(default_profile_dir())
+    ):
+        raise GavelError(
+            "headless_forbidden_on_primary",
+            "默认资料目录禁止无头启动（会污染登录指纹）",
+            hint="无头任务请显式传 profile 名或 container=isolated",
+        )
+
+
+def _default_profile_dir(profile=None, explicit=None):
+    from .profiles import resolve_dir
+
+    return resolve_dir(explicit=explicit, profile=profile)
 
 
 def _launch_args():
@@ -59,6 +76,10 @@ def _launch_args():
     ]
     if sys.platform.startswith("linux"):
         args += ["--no-sandbox", "--disable-dev-shm-usage"]
+        # 复制来的资料里 cookie 是钥匙串密钥加密的（v10/v11）；不显式指定
+        # 密码存储，Chrome 会按默认探测失败并静默丢弃这批 cookie —— 登录态就没了。
+        if shutil.which("secret-tool"):
+            args.append("--password-store=gnome-libsecret")
     if config.disable_gpu():
         args.append("--disable-gpu")
     extra = config.extra_args()
@@ -335,6 +356,7 @@ class BrowserProcessManager:
     def __init__(self):
         self._pw = None
         self._handles = {}
+        self._by_udd = {}
         self._lock = asyncio.Lock()
         self._n = 0
 
@@ -397,6 +419,9 @@ class BrowserProcessManager:
         args.append("about:blank")
         logf = await asyncio.to_thread(open, os.path.join(udd, "chrome.log"), "ab")
         kwargs = {"stdout": logf, "stderr": logf}
+        child_env = config.chrome_child_env()
+        if child_env:
+            kwargs["env"] = child_env
         if sys.platform.startswith("win"):
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
@@ -471,6 +496,10 @@ class BrowserProcessManager:
     async def launch(self, **opts):
         return await self._start(None, **opts)
 
+    def profile_dir(self, profile=None, explicit=None):
+        """本次启动将使用的资料目录：显式 > 命名 profile > 默认(primary)。"""
+        return _default_profile_dir(profile=profile, explicit=explicit)
+
     async def launch_persistent(self, user_data_dir, **opts):
         return await self._start(user_data_dir, **opts)
 
@@ -542,6 +571,7 @@ class BrowserProcessManager:
             # managed：自起加固 Chrome（持久资料目录）+ Playwright 连接
             headless = self._resolve_headless(opts.get("headless"))
             udd = persistent_dir or opts.get("user_data_dir") or _default_profile_dir()
+            _guard_primary_headless(udd, headless)
             proc, port = await self._spawn_managed(udd, _free_port(), headless)
             browser = await self._connect(pw, port)
             ctx = None
@@ -620,11 +650,12 @@ class BrowserProcessManager:
             if u:
                 udds.add(u)
         try:
-            from .profiles import active_profile_dir, default_profile_dir
+            from .profiles import default_profile_dir, list_profiles
 
-            for u in (active_profile_dir(), default_profile_dir()):
-                if u:
-                    udds.add(u)
+            if default_profile_dir():
+                udds.add(default_profile_dir())
+            for item in list_profiles():
+                udds.add(str(config.browser_profiles_root() / item["name"]))
         except Exception:
             pass  # silent-ok: best-effort，失败不影响主流程
         registered = {h.owned_pid for h in self._handles.values() if h.owned_pid}
@@ -680,6 +711,41 @@ class BrowserProcessManager:
                 await asyncio.wait_for(handle.browser.close(), timeout=5)
         except Exception:
             pass  # silent-ok: best-effort，失败不影响主流程
+
+    def _udd_key(self, udd):
+        return os.path.normcase(os.path.abspath(udd))
+
+    async def ensure(self, udd, **opts):
+        """按资料目录取浏览器：内存里有活句柄就复用，否则启动/重连。"""
+        key = self._udd_key(udd)
+        hit = self._by_udd.get(key)
+        if hit is not None and hit.alive:
+            want = opts.get("headless")
+            if want is not None and bool((hit.opts or {}).get("headless")) != bool(want):
+                raise GavelError(
+                    "headless_mismatch",
+                    f"资料目录 {udd} 已有{'无头' if hit.opts.get('headless') else '有头'}浏览器在运行，"
+                    f"不能再以{'无头' if want else '有头'}方式启动",
+                    hint="先 browser(op=close, profile=...) 再换模式",
+                )
+            if self.matches(hit, **opts):
+                return hit
+        handle = await self.launch(user_data_dir=udd, **opts)
+        self._by_udd[key] = handle
+        return handle
+
+    async def disconnect_all(self):
+        """只断开连接、保留受管 Chrome 进程（空闲退出用）。"""
+        for handle in list(self._handles.values()):
+            handle._closed = True
+        self._handles.clear()
+        self._by_udd.clear()
+        if self._pw is not None:
+            try:
+                await asyncio.wait_for(self._pw.stop(), timeout=5)
+            except Exception:
+                pass  # silent-ok: best-effort，失败不影响主流程
+            self._pw = None
 
     async def stop_all(self):
         for handle in list(self._handles.values()):

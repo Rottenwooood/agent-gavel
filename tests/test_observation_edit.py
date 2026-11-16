@@ -10,9 +10,9 @@
 
 
 async def _session_on(T, base, path="/basic.html"):
-    r = await T["session_create"]()
-    await T["page_navigate"](page_id=r["page_id"], url=f"{base}{path}")
-    return r["session_id"], r["context_id"], r["page_id"]
+    r = await T["context_create"]()
+    await T["page_navigate"](page_id=r["active_page_id"], url=f"{base}{path}")
+    return r["context_id"], r["context_id"], r["active_page_id"]
 
 
 # ---------------- 1. diff 的观测面 ----------------
@@ -102,6 +102,8 @@ async def test_record_popup_rebinds_page(gavel_tools, webapp_server):
     assert refs == ["page0", "new:0"], tpl
 
     await T["page_navigate"](page_id=pid, url=f"{base}/popup.html")
+    # 点击弹过新页后 active 已跟随到新页；重放前必须显式指回要跑的页
+    await T["page_select"](page_id=pid)
     res = await T["workflow_run"](name_or_id=stop["template_id"])
     assert res["status"] == "pass", res
 

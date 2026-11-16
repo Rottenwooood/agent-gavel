@@ -18,7 +18,6 @@ from mcp_scenarios import capture_images, interactions, profile_copy, workflow_c
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
     "browser",
-    "session",
     "context",
     "page",
     "locator",
@@ -47,7 +46,6 @@ async def exercise(client, env, options, report):
     assert invalid["status"] == "error" and wire.get("isError"), invalid
     wrong, wire = await client.call("locator", op="fill", target={"css": "#q"}, files=["wrong"])
     assert wrong["status"] == "error" and wire.get("isError"), wrong
-    assert (await client.ok("session", op="list"))["items"] == []
     assert (await client.ok("page", op="list"))["items"] == []
     for name, args in (
         ("browser", {"op": "status"}),
@@ -69,9 +67,8 @@ async def exercise(client, env, options, report):
     report["stage"] = "browser_launch"
     await client.ok("browser", op="launch", headless=options.headless)
     report["browser_started"] = True
-    config = {"op": "create", "headless": options.headless}
-    created = await client.ok("session", **config)
-    sid, pid, cid = created["session_id"], created["page_id"], created["context_id"]
+    created = await client.ok("context", op="create")
+    sid, pid, cid = created["context_id"], created["page_id"], created["context_id"]
     report["browser_created"] = True
     base = (ROOT / "tests" / "webapp").as_uri()
     await client.ok("page", op="navigate", page_id=pid, url=f"{base}/basic.html")
@@ -153,7 +150,7 @@ async def exercise(client, env, options, report):
     await client.ok("workflow", op="validate", template=template)
     await client.ok("workflow", op="save", template=template)
     run = await client.ok(
-        "workflow", op="run", name_or_id="e2e_flow", params={"QUERY": "replayed"}, session_id=sid
+        "workflow", op="run", name_or_id="e2e_flow", params={"QUERY": "replayed"}, context_id=sid
     )
     assert run["steps_completed"] == 3
     value = await client.ok(
@@ -185,15 +182,11 @@ async def exercise(client, env, options, report):
     await client.ok("artifact", op="get", artifact_id=trace["artifact_id"])
     await client.ok("context", op="set_headers", context_id=cid, headers={"X-E2E": "1"})
     await client.ok("context", op="set_permissions", context_id=cid, permissions=[])
-    context = await client.ok("context", op="create", session_id=sid, container="isolated")
+    context = await client.ok("context", op="create", isolated=True)
     await client.ok("context", op="close", context_id=context["context_id"])
-    leases = await client.ok("session", op="get", session_id=sid)
-    assert context["context_id"] not in leases["context_ids"], leases
     await client.ok("workflow", op="delete", template_id="e2e_flow")
     await client.ok("artifact", op="delete", artifact_id=aid)
-    await client.ok("session", op="get", session_id=sid)
-    reset = await client.ok("session", op="reset", session_id=sid)
-    await client.ok("session", op="close", session_id=reset["session_id"])
+    await client.ok("context", op="close", context_id=sid)
     await client.ok("artifact", op="cleanup", max_bytes=0)
     if options.browser_mode != "playwright":
         await profile_copy(client, env["AGENT_GAVEL_DATA_DIR"])
@@ -216,9 +209,8 @@ async def main(options):
                 "AGENT_GAVEL_DATA_DIR": data,
                 "AGENT_GAVEL_ARTIFACT_DIR": f"{data}/artifacts",
                 "AGENT_GAVEL_WORKFLOWS_DIR": f"{data}/workflows",
-                "AGENT_GAVEL_BROWSER_PROFILE": f"{data}/browser-profile",
                 "AGENT_GAVEL_BROWSER_PROFILES": f"{data}/browser-profiles",
-                "AGENT_GAVEL_PROFILE_DIR": f"{data}/session-profiles",
+                "AGENT_GAVEL_PROFILE_DIR": f"{data}/profiles",
                 "AGENT_GAVEL_ALLOW_DOMAINS": "",
                 "AGENT_GAVEL_DOMAIN_GUARD": "0",
                 "AGENT_GAVEL_EXTRA_ARGS": "",

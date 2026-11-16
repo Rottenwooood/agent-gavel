@@ -75,4 +75,4 @@ def test_checkpoint_forms():
 
 async def test_tool_count_snapshot(gavel_tools):
     """工具面是契约的一部分：新增/删除必须显式更新快照。"""
-    assert len(gavel_tools) == 14
+    assert len(gavel_tools) == 13

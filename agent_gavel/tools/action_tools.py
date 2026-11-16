@@ -57,8 +57,9 @@ def register_action_tools(catalog):
         timeout_s: float = 30.0,
         assertions: dict = None,
         wait_s: float = 6.0,
+        follow_popup: bool = True,
     ):
-        "count=2双击。"
+        "count=2双击；follow_popup=False不跟随新弹出的标签页。"
         return await _run_target(
             page_id,
             "click",
@@ -71,6 +72,7 @@ def register_action_tools(catalog):
             count=count,
             force=force,
             wait_navigation=wait_navigation,
+            follow_popup=follow_popup,
         )
 
     @catalog.operation(returns="Action", action="fill")

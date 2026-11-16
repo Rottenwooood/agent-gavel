@@ -15,13 +15,13 @@ def _public(info):
 def register_artifact_tools(catalog):
     @catalog.operation(returns="Artifacts")
     async def artifact_list(
-        kind: str = None, session_id: str = None, run_id: str = None, page_id: str = None
+        kind: str = None, context_id: str = None, run_id: str = None, page_id: str = None
     ):
         """"""
         from ..runtime import get_runtime
 
         rt = get_runtime()
-        items = rt.artifacts.list(kind=kind, session_id=session_id, run_id=run_id, page_id=page_id)
+        items = rt.artifacts.list(kind=kind, context_id=context_id, run_id=run_id, page_id=page_id)
         return {"status": "ok", "items": [_public(i) for i in items], "total": len(items)}
 
     @catalog.operation(returns="Artifact")

@@ -19,9 +19,9 @@ def _shape(resp, *required):
 async def test_contract_main_flow(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
 
-    s = await T["session_create"]()
-    _shape(s, "session_id", "context_id", "page_id")
-    pid, sid = s["page_id"], s["session_id"]
+    s = await T["context_create"]()
+    _shape(s, "context_id", "active_page_id")
+    pid, sid = s["active_page_id"], s["context_id"]
 
     n = await T["page_navigate"](page_id=pid, url=f"{base}/basic.html")
     _shape(n, "page_id", "final_url", "navigated", "title", "status_code")
@@ -75,7 +75,7 @@ async def test_contract_main_flow(gavel_tools, webapp_server):
     assert va["valid"] is True, va
 
     run = await T["workflow_run"](
-        name_or_id="contract_flow", params={"QUERY": "world"}, session_id=sid
+        name_or_id="contract_flow", params={"QUERY": "world"}, context_id=sid
     )
     _shape(run, "run_id", "steps_completed", "steps_total", "checkpoints_passed", "elapsed_ms")
     assert run["status"] == "pass", run
@@ -91,14 +91,14 @@ async def test_contract_main_flow(gavel_tools, webapp_server):
     _shape(art, "items")
 
     st = await T["browser_status"]()
-    _shape(st, "counts", "sessions")
+    _shape(st, "counts")
     assert st["counts"]["pages"] >= 1
 
 
 async def test_contract_errors(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
-    s = await T["session_create"]()
-    pid, sid = s["page_id"], s["session_id"]
+    s = await T["context_create"]()
+    pid, sid = s["active_page_id"], s["context_id"]
     await T["page_navigate"](page_id=pid, url=f"{base}/basic.html")
 
     nf = await T["locator_click"](page_id=pid, target={"by": "css", "value": "#does-not-exist"})
@@ -113,17 +113,17 @@ async def test_contract_errors(gavel_tools, webapp_server):
         "preconditions": [{"type": "selector_exists", "selector": "#missing"}],
     }
     await T["workflow_save"](template=tmpl)
-    run = await T["workflow_run"](name_or_id="contract_precondition", session_id=sid)
+    run = await T["workflow_run"](name_or_id="contract_precondition", context_id=sid)
     _shape(run, "reason", "failed_preconditions")
     assert run["status"] == "blocked"
     assert run["reason"] == "precondition_failed"
 
 
-async def test_contract_session_busy(gavel_tools, webapp_server):
+async def test_contract_context_busy(gavel_tools, webapp_server):
     """同一 session 上的两个 run：一个执行，另一个必须明确报 busy。"""
     T, base = gavel_tools, webapp_server
-    s = await T["session_create"]()
-    sid = s["session_id"]
+    s = await T["context_create"]()
+    sid = s["context_id"]
     tmpl = {
         "template_id": "contract_slow",
         "steps": [
@@ -140,11 +140,11 @@ async def test_contract_session_busy(gavel_tools, webapp_server):
     }
     await T["workflow_save"](template=tmpl)
     r1, r2 = await asyncio.gather(
-        T["workflow_run"](name_or_id="contract_slow", session_id=sid),
-        T["workflow_run"](name_or_id="contract_slow", session_id=sid),
+        T["workflow_run"](name_or_id="contract_slow", context_id=sid),
+        T["workflow_run"](name_or_id="contract_slow", context_id=sid),
     )
     reasons = {r1.get("reason"), r2.get("reason")}
-    assert "session_busy" in reasons, (r1, r2)
-    busy = r1 if r1.get("reason") == "session_busy" else r2
+    assert "context_busy" in reasons, (r1, r2)
+    busy = r1 if r1.get("reason") == "context_busy" else r2
     _shape(busy, "detail")
     assert busy["detail"]["owner"]

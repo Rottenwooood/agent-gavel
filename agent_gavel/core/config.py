@@ -30,7 +30,27 @@ def _flag(name):
 
 
 def data_dir() -> Path:
-    return Path(_env("AGENT_GAVEL_DATA_DIR") or Path.home() / ".config" / "agent-gavel")
+    return Path(_env("AGENT_GAVEL_DATA_DIR") or user_data_root())
+
+
+def user_data_root() -> Path:
+    """跨平台的用户级数据根；不写死绝对路径。
+
+    优先级：AGENT_GAVEL_DATA_DIR > 平台标准目录。
+    - Windows：%LOCALAPPDATA%\\agent-gavel
+    - macOS：~/Library/Application Support/agent-gavel
+    - 其他：$XDG_DATA_HOME/agent-gavel 或 ~/.local/share/agent-gavel
+    """
+    override = _env("AGENT_GAVEL_DATA_DIR")
+    if override:
+        return Path(override)
+    if sys.platform.startswith("win"):
+        base = _env("LOCALAPPDATA") or Path.home() / "AppData" / "Local"
+        return Path(base) / "agent-gavel"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "agent-gavel"
+    base = _env("XDG_DATA_HOME") or Path.home() / ".local" / "share"
+    return Path(base) / "agent-gavel"
 
 
 def idle_exit() -> float:
@@ -44,24 +64,44 @@ def idle_exit() -> float:
         return 120.0
 
 
-def profile_dir() -> Path:
-    """独立 session 使用的资料目录根。"""
-    return Path(_env("AGENT_GAVEL_PROFILE_DIR") or data_dir() / "profiles")
-
-
 def browser_profiles_root() -> Path:
-    """资料副本存放目录。"""
-    return Path(_env("AGENT_GAVEL_BROWSER_PROFILES") or data_dir() / "browser-profiles")
+    """命名资料目录的根：profiles/<name>/。"""
+    return Path(_env("AGENT_GAVEL_BROWSER_PROFILES") or user_data_root() / "profiles")
 
 
 def default_browser_profile() -> Path:
-    """没有任何副本时，C1 使用的可累计资料目录。"""
-    return Path(_env("AGENT_GAVEL_BROWSER_PROFILE") or data_dir() / "browser-profile")
+    """默认资料目录：固定 <profiles 根>/primary，不受任何环境变量影响。"""
+    return browser_profiles_root() / "primary"
 
 
-def browser_profile_override():
-    """显式指定的资料目录（优先于当前副本）。"""
-    return _env("AGENT_GAVEL_BROWSER_PROFILE")
+def primary_headless_guard() -> bool:
+    """主资料目录是否禁止无头启动；只有测试隔离模式豁免（CI 需要无头）。"""
+    return not _flag("AGENT_GAVEL_TEST_ISOLATED")
+
+
+def chrome_bus_env():
+    """Linux 下给 Chrome 补 session bus；不需要补时返回 None。
+
+    没有 session bus 就拿不到钥匙串密钥，v10/v11 cookie 解不开会被静默丢弃。
+    """
+    import sys  # noqa: PLC0415
+
+    if not sys.platform.startswith("linux"):
+        return None
+    if _env("DBUS_SESSION_BUS_ADDRESS"):
+        return None
+    bus = f"/run/user/{os.getuid()}/bus"
+    if not os.path.exists(bus):
+        return None
+    return {"DBUS_SESSION_BUS_ADDRESS": f"unix:path={bus}"}
+
+
+def chrome_child_env():
+    """Chrome 子进程环境：需要补 bus 时返回完整 env，否则 None（继承父进程）。"""
+    bus = chrome_bus_env()
+    if not bus:
+        return None
+    return {**os.environ, **bus}
 
 
 def workflows_dir() -> Path:
@@ -70,8 +110,7 @@ def workflows_dir() -> Path:
         return Path(override)
     # 不要改 XDG_CONFIG_HOME 来隔离模板：Chrome 会读它，指向空目录会导致
     # 后续外网导航 net::ERR_NETWORK_CHANGED / 超时（已实测）。
-    base = _env("XDG_CONFIG_HOME") or Path.home() / ".config"
-    return Path(base) / "agent-gavel" / "workflows"
+    return user_data_root() / "workflows"
 
 
 def artifacts_dir() -> Path:

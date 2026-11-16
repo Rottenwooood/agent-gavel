@@ -10,16 +10,27 @@
 
 本节记录经用户授权的0.5接口变更，取代下文历史阶段计划中“保留旧工具名”的冻结条款。
 
-- 公共入口固定为14个：browser、session、context、page、locator、workflow、artifact、assertion、trace、network、console_get、performance_metrics、daemon_shutdown、screenshot；共89个操作。95个旧操作的能力通过操作合并或迁移保留，不注册旧名。
+- 公共入口固定为13个：browser、context、page、locator、workflow、artifact、assertion、trace、network、console_get、performance_metrics、daemon_shutdown、screenshot。95个旧操作的能力通过操作合并或迁移保留，不注册旧名。
 - `tools/catalog.py` 是操作声明、路由及错误封装的唯一入口；`tools/schemas.py` 从声明生成公共参数类型和操作差异约束。操作选择不实现领域行为。
 - `tools/results.py` 是结果类型和精简视图的唯一主人。请求和完整业务结果在执行时校验；默认只省略契约明确允许省略的字段，读取值中的null、false、0、空集合与失败证据不递归清理。detail=full保留原业务字段与诊断信息。
 - `core/targets.py` 拥有定位输入格式与归一；动作业务要求继续来自core/actions.py。工具特有的必填要求不改变工作流模板原有的required_fields。
-- 下载仍由ArtifactStore捕获与持久化。它也是kind/page/session过滤与expected_kind校验的主人；下载管理统一通过artifact，保留not_a_download错误。
+- 下载仍由ArtifactStore捕获与持久化。它也是kind/page/context过滤与expected_kind校验的主人；下载管理统一通过artifact，保留not_a_download错误。
 - screenshot复用页面队列和截图后端；一次捕获后存产物并通过daemon返回图片。adapter只把传输中的图片封装为ImageContent，不访问浏览器、文件或产物存储。
 - 输出中的status仍由common.envelope归一。图像与元数据使用core/results.py的传输无关值，core不依赖MCP或Playwright。
 - 模板、断言三态、权限、资源id、daemon锁与同页串行机制不变。写路径删除模板修正为精确id，不在工具层执行宽松resolve_id。
 - `docs/tools.md` 由`python -m agent_gavel.tools.describe --markdown docs/tools.md`生成。公开schema与文档来自同一操作声明，禁止维护第二份参数默认值表。
 - 对外工具数量快照改为14；本轮验收使用`tests/e2e_mcp.py`通过真实MCP stdio和独立daemon调用真实浏览器。内部函数测试和语法检查不能作为端到端通过的证据。环境拒绝socket绑定或无法打开显示会话时，验收必须记录失败，不能宣告浏览器路径通过。
+
+## 0.6 资料目录与默认落点（2026-11-16）
+
+取代此前的"多副本 + ACTIVE 指针"模型。
+
+- **唯一数据根**：`AGENT_GAVEL_DATA_DIR` 优先；否则按平台取标准目录（Windows `%LOCALAPPDATA%\agent-gavel`、macOS `~/Library/Application Support/agent-gavel`、Linux `$XDG_DATA_HOME` 或 `~/.local/share/agent-gavel`）。发行包不硬编码绝对路径。
+- **资料目录按名字寻址**：`profiles/<name>/`，默认名固定为 `primary`。没有 `ACTIVE` 文件，`profile_use` 操作随之取消；解析顺序为"显式 `user_data_dir` > 命名 `profile` > `primary`"。
+- **默认零参数可用**：不传 profile/容器时，惰性会话落在 `primary` 的默认容器（`browser.contexts[0]`），登录态直接读写磁盘。`isolated` 仅在显式要求时创建，且不写回。
+- **主资料目录禁止无头**：目标是 `primary` 且请求 headless 时抛 `headless_forbidden_on_primary`；显式指定资料目录或 `AGENT_GAVEL_TEST_ISOLATED=1` 时豁免（CI 需要）。
+- **弹窗跟随**：`click`/`press` 产生的新页，若 opener 是当前页，自动把该 context 的 `active_page_id` 切到新页，并在结果顶层给 `switched_to_new_tab: true`；显式传 `page_id` 的动作不受影响。
+- **三层语义**：profile 决定用哪个 Chrome 进程与磁盘目录；context 是 cookie 分区；page 是标签页。没有 session 这一层——并发独占由 context 的 run 锁承担。不同 profile 各自一个 Chrome 进程，`ensure_browser` 按资料目录缓存句柄，互不驱逐。
 
 ## 0. 适用范围
 
@@ -54,7 +65,7 @@
 | I7 | async 调用链禁止同步阻塞 I/O | AST 扫描 async 函数体 + 阻塞入口清单双向核对（见第 9 节） |
 | I8 | 包依赖单向 | 导入图检查：`runtime` 不得 import `workflows` / `backends` / `tools`；`core` 不得 import 其他包 |
 | I9 | 一个数据根在任意时刻只有一个运行时守护进程（daemon）持有浏览器与可变状态 | 进程模型检查：`flock(<数据根>/daemon.lock)`；任何 adapter 不得创建浏览器、不得持有注册表 |
-| I10 | 所有资源 id（session/context/page/run/artifact）只由 daemon 分配；跨 adapter 必须一致 | 集成测试：多个 adapter 并发 `page(op=list)` / `browser(op=status)` 看到同一组 id |
+| I10 | 所有资源 id（context/page/run/artifact）只由 daemon 分配；跨 adapter 必须一致 | 集成测试：多个 adapter 并发 `page(op=list)` / `browser(op=status)` 看到同一组 id |
 
 ### 2.1 进程模型的定义
 
@@ -62,7 +73,7 @@ MCP 客户端（opencode 等）会为同一用户拉起**多个** agent-gavel �
 
 - **daemon**：唯一持有浏览器、注册表、队列、事件、产物索引与所有锁的进程。
 - **adapter**：面向 MCP 客户端的 stdio 进程。不导入 Playwright、不持有任何运行时状态，只负责把工具调用转发给 daemon 并回传结果。
-- **串行化只发生在 daemon 内部**：PageActor 负责同页串行，session 锁负责 run 独占。因此不存在"跨进程动作交错"这一类别的问题。
+- **串行化只发生在 daemon 内部**：PageActor 负责同页串行，context 的 run 锁负责独占。因此不存在"跨进程动作交错"这一类别的问题。
 - **并行发生在 daemon 内部的 context/page 之间**；adapter 数量不影响浏览器数量。
 - **资源预算**：一个数据根一个 Chrome；context 与 page 是廉价并行单位；adapter 必须保持轻量（不得因导入工具模块而加载 Playwright）。
 
@@ -108,7 +119,6 @@ agent_gavel/
 
   runtime/
     browser_process.py # 进程：ensure / close / reconcile（全异步）
-    sessions.py        # 租约：配置 + 独占锁
     contexts.py        # 窗口：cookie 空间 + active page 的唯一真相
     pages.py           # 标签页：事件绑定 + actor
     queue.py           # 每页串行队列
@@ -143,7 +153,6 @@ agent_gavel/
     results.py         # 结果契约和精简视图
     common.py          # backend() / envelope() / run_with_optional_assert()
     browser_tools.py       # 浏览器进程
-    session_tools.py       # 会话
     context_tools.py       # 容器
     page_lifecycle.py      # 页面打开/选择/关闭/等待/前进后退
     page_tools.py          # 导航/读取/快照/探索/截图/PDF
@@ -172,9 +181,9 @@ agent_gavel/
 | 动作类型、必填字段、幂等性、副作用判定 | `core/actions.py` | `schema`、`runner`、`backend`、`recorder` |
 | 断言读取类型、比较操作、解析 | `core/checks.py` | `schema`、`backend`、`assertion_schema` 工具 |
 | active page | `Context.active_page_id` | `BrowserRuntime` |
-| 页面归属 | `PageHandle.context_id` | `PageHandle.session_id` |
+| 页面归属 | `PageHandle.context_id` | — |
 | 响应中的会话标识 | `tools/common.envelope`（按本次调用解析） | 页面对象、backend |
-| session 归属 | `Session`（租约） | `Context.session` |
+| 运行独占 | `Context.acquire_run` | — |
 | 默认容器复用 | `ContextManager`（按浏览器分槽） | 单槽全局变量 |
 | 进程启动幂等 | `BrowserProcessManager.ensure()` | 工具层 |
 | 模板精确读写 | `loader` | `delete` / `record_run` 走模糊匹配 |
@@ -195,10 +204,10 @@ agent_gavel/
 | 保留工具名 | 0.5使用第0.5节的14个规范入口；旧名仅见迁移文档，不在服务端注册 |
 | 错误码 | 现有 `GavelError.code` 字符串不得重命名；新增错误码集中登记在 `core/errors.py` |
 | 断言三态 | `pass` / `fail` / `ambiguous` 的判定条件不变；`ambiguous` 必须附带有意义的变化证据 |
-| 并发语义 | 同页串行、跨页并行；`session_busy` 语义不变 |
+| 并发语义 | 同页串行、跨页并行；`context_busy` |
 | 安全 | 域名白名单覆盖 popup 与重定向；导出路径二次包含校验；文件白名单；下载大小上限 |
 | 资料副本 | `strict` / `default` / `full` 三档语义与剔除清单不变 |
-| 资源 id | session/context/page/run/artifact id 只由 daemon 分配并在所有 adapter 间一致 |
+| 资源 id | context/page/run/artifact id 只由 daemon 分配并在所有 adapter 间一致 |
 | 文本等待 | `page_wait_for_text` 使用首个文本命中（`first`）是定义行为；strict 唯一性只约束 locator 解析，不约束文本等待 |
 
 ---
@@ -214,9 +223,9 @@ agent_gavel/
 **改动**
 
 1. 新增 `tests/test_contract_snapshot.py`
-   - 固定场景：`session(op=create)` → `page(op=navigate)` → `locator(op=fill)` → `locator(op=click)`（带断言）→ `assertion(op=check)` → `workflow(op=save)` → `workflow(op=validate)` → `workflow(op=run)` → `artifact(op=list)` → `browser(op=status)`
+   - 固定场景：`context(op=create)` → `page(op=navigate)` → `locator(op=fill)` → `locator(op=click)`（带断言）→ `assertion(op=check)` → `workflow(op=save)` → `workflow(op=validate)` → `workflow(op=run)` → `artifact(op=list)` → `browser(op=status)`
    - 断言每个响应的字段集合与 `status` 取值，不比对易变值（URL、时间戳、资源 id）
-   - 覆盖错误路径：`locator_not_found`、`ambiguous_page`、`session_busy`、`precondition_failed`
+   - 覆盖错误路径：`locator_not_found`、`ambiguous_page`、`context_busy`、`precondition_failed`
 2. 新增 `tests/test_invariants.py`：按第 2 节实现八条检查
 3. 新增 `tests/test_vocabulary.py` 骨架：阶段 3 填充断言
 
@@ -240,7 +249,7 @@ agent_gavel/
    - 新建 `core/config.py`，提供函数而非常量：
      `data_dir`、`profile_dir`、`profiles_root`、`workflows_dir`、`artifacts_dir`、`headless`、`browser_mode`、`cdp_endpoint`、`chrome_bin`、`chrome_user_data`、`allow_domains`、`domain_guard`、`allow_paths`、`max_download_bytes`、`artifact_ttl_days`、`artifact_max_bytes`
    - 统一语义：`os.environ.get(k) or default`，空字符串视为未设置
-2. 替换所有直接环境变量读取：`runtime/sessions.py`、`runtime/profiles.py`、`runtime/browser_process.py`、`runtime/policies.py`、`runtime/artifacts.py`、`workflows/loader.py`、`tools/browser_tools.py`。
+2. 替换所有直接环境变量读取：`runtime/profiles.py`、`runtime/browser_process.py`、`runtime/policies.py`、`runtime/artifacts.py`、`workflows/loader.py`、`tools/browser_tools.py`。
    删除模块级常量 `PROFILE_DIR`、`USER_DIR` 等。
 3. 进程操作异步化（`runtime/browser_process.py`）：
    - `kill_tree` 改为 async，用 `os.killpg` + `await asyncio.sleep`
@@ -277,11 +286,11 @@ agent_gavel/
 
 ### 阶段 2：进程模型、身份与产物一致性
 
-**目的**：先解决"多个 MCP 进程共享一个浏览器"的结构性问题，再解决 session/context/page 的归属二义性，最后修掉产物索引的并发丢项。
+**目的**：先解决"多个 MCP 进程共享一个浏览器"的结构性问题，再解决 context/page 的归属二义性，最后修掉产物索引的并发丢项。
 
 #### 2A. 进程模型：单 daemon + 多 adapter
 
-**背景**：MCP 客户端会为同一用户拉起多个 agent-gavel 进程。当前每个进程各自持有运行时并连到同一个 Chrome，导致注册表分裂、id 冲突、`session_busy` 失效、同页动作跨进程交错。这不是配置问题，必须在架构层解决。
+**背景**：MCP 客户端会为同一用户拉起多个 agent-gavel 进程。当前每个进程各自持有运行时并连到同一个 Chrome，导致注册表分裂、id 冲突、`context_busy` 失效、同页动作跨进程交错。这不是配置问题，必须在架构层解决。
 
 **改动**
 
@@ -290,7 +299,7 @@ agent_gavel/
    - 启动时对 `<数据根>/daemon.lock` 取 `flock`；取不到即退出（单实例由内核保证）
    - 监听本地 socket（POSIX 为 `<数据根>/daemon.sock`；Windows 为 127.0.0.1 随机端口），协议为逐行 JSON：`{"id", "token", "tool", "args"}` → `{"id", "result"}` 或 `{"id", "error"}`；token 写入 0600 的 `daemon.json`
    - 提供 `describe` 请求，返回工具名与 JSON Schema（供 adapter 注册）
-   - 进程内的工具调用与现在完全一致，串行化仍由 PageActor 与 session 锁负责
+   - 进程内的工具调用与现在完全一致，串行化仍由 PageActor 与 context 锁负责
 2. 新增 `agent_gavel/remote.py`（adapter 侧，不得 import playwright / runtime / tools）：
    - 连接 daemon；不存在时以 detached 方式拉起 `python -m agent_gavel.daemon`，等待 socket 就绪
    - 向 daemon 请求工具清单，用 MCP 低层接口动态注册同名工具；每个 handler 只做转发
@@ -309,7 +318,7 @@ agent_gavel/
 
 - 在同一父进程下启动 4 个 adapter：进程表中有 1 个 daemon、4 个 adapter，且只有 daemon 派生了 Chrome
 - 4 个 adapter 并发调用 `page(op=list)` / `browser(op=status)`：返回完全相同的 page id 集合与 daemon pid
-- 从两个不同 adapter 对同一 session 并发发起 `workflow(op=run)`：一个执行，另一个得到 `session_busy`
+- 从两个不同 adapter 对同一 context 并发发起 `workflow(op=run)`：一个执行，另一个得到 `context_busy`
 - 杀掉 daemon：下一次调用要么成功拉起新 daemon，要么返回 `daemon_unavailable` 并说明原因；不得出现两个 daemon 同时持有浏览器
 - 全过程中 `ps` 里该数据根的 Chrome 数量恒为 1
 
@@ -322,28 +331,25 @@ agent_gavel/
    - `record()` 按 `context_id` 过滤
    - 每个步骤记录 `page_id`（为将来的多标签预留，不改变当前执行模型）
 2. `runtime/pages.py`：
-   - `PageHandle` 删除 `session_id` 属性，只保留 `context_id`
+   - `PageHandle` 只保留 `context_id`，不存在会话级字段
    - `PageManager.resolve(page_id=None, *, context_id=None)`：显式作用域；有歧义时报 `ambiguous_page` 并列出候选；禁止回落到全局 active
    - 新增 `find_by_pw_page(pw_page)`；删除对 `_by_key` 的外部访问
    - `register()` 只写 `ctx.active_page_id`，不再改写全局状态
 3. `runtime/contexts.py`：
-   - `Context` 的 `session` 改为 `creator_session_id`；`session_ids` 改为集合
-   - 删除 `refcount`，租约数量由 `session_ids` 表达
+   - `Context` 只保留 `context_id` / `browser_handle` / `container` / `page_ids` / `active_page_id` / run 锁
    - `_default_ctx` / `_default_browser` 单槽改为按浏览器实例分槽的字典
-   - `close()` 语义写死：`default` 为解除租约，`isolated` 为销毁
+   - `close()` 语义写死：`default` 为解绑（保留窗口与磁盘身份），`isolated` 为销毁
 4. `runtime/browser_runtime.py`：删除 `active_page_id`；`status()` 输出每个 context 的 active page。
-5. `workflows/runner.py`：页面解析改为 `page_id` → `context_id` → 会话内唯一 context，否则报 `ambiguous_page`。
-6. 工具层：`session(op=create)` 响应增加 `shared_container`；共享默认容器时明确告知该会话与其他会话共用同一标签页。
-7. 响应中的身份字段：页面归属只到 `context_id`。`session_id` 表示**本次调用所属会话**（由解析路径确定），不是页面的固有属性；当页面来自多会话共享的默认容器且调用未指定会话时，响应省略 `session_id`，只给 `context_id`，避免伪造归属。
-8. `runtime/artifacts.py`：索引读改写加锁（或用追加式索引），新增并发下载测试。
+5. `workflows/runner.py`：页面解析改为 `page_id` → `context_id` → 默认容器，否则报 `ambiguous_page`。
+6. 响应中的身份字段：页面归属只到 `context_id`，不存在会话级身份字段。
+7. `runtime/artifacts.py`：索引读改写加锁（或用追加式索引），新增并发下载测试。
 
 **验收**
 
 - 新增 `tests/test_identity.py`：
-  - 两个会话共享默认容器时，`page(op=list)` 的归属正确，且在第二个会话中录制不丢步
-  - 同一默认容器上的并发 workflow 不得交错执行，第二个应得到 `session_busy` 或明确的页面占用错误
+  - 两次 `context(op=create)` 共享默认容器时，`page(op=list)` 的归属正确
+  - 同一默认容器上的并发 workflow 不得交错执行，第二个应得到 `context_busy`
   - 打开 popup 后未显式选择页面时，解析应报歧义，不得静默选中
-  - 共享容器且未指定会话时，响应不含伪造的 `session_id`
 - 契约快照通过（字段变化需在快照中显式更新）
 - I8 检查通过：`runtime` 不再依赖 `workflows`
 - 并发下载不会再丢失索引项
@@ -452,7 +458,7 @@ agent_gavel/
    - 删除 `locator_set_files`，保留 `locator_upload`
    - 删除 0.4 的 `workflow_replay`，统一用 `workflow(op=run)`
 7. backend 拆分落位：`__init__.py` 只保留入口与编排；`actions` / `locator` / `reader` / `assertion` / `signature` 各自独立。
-8. 工具文件按资源拆分：browser / session / context / page_lifecycle / page；每个文件少于 300 行。
+8. 工具文件按资源拆分：browser / context / page_lifecycle / page；每个文件少于 300 行。
 9. 异常审计：逐处检查 `except Exception: pass`，能删的删；必须保留的写 `# silent-ok: 理由`，并由不变量测试要求存在该标注。
 10. 工具数量快照：删除三个别名后为 94 个；新增或删除工具必须同步更新快照并说明理由。
 11. 工程门禁：
@@ -614,11 +620,11 @@ pytest -q   # 配置 pytest-timeout，单测上限 90s
 - 正文 <100 字、`text_chars>0` 且页面存在附件/下载链接 → `warning="sparse_content"`（避免短页面误报）。阈值一律用**去噪后**的正文长度（剔除 header/nav/footer/script/style），不用整页 innerText。
 - 正文容器：`main/article/[role=main]` 的文本 ≥200 字才采纳，否则回退到去噪后的整页——避免空壳 `<main>` 导致正文为空、进而误判 sparse/blocked。
 - 导航触发下载（附件/PDF）时不再报错：落盘为 artifact，返回 `artifact_id`、`suggested_filename`、`mime_type`、`download_url`，`final_url` 保持当前页（`navigated=false`）；`hint` 按 mime 区分 `read_text` 与 `export`。
-- 省略 `page_id`/`session` 时惰性建会话、上下文与页面；**默认会话单例**：已有会话时复用其上下文，只有完全没有会话才新建，避免连续 open 产生孤立 context。
+- 省略 `page_id` 时惰性建上下文与页面；**默认容器单例**：已有默认容器就复用，只有完全没有才新建，避免连续 open 产生孤立 context。
 
 **错误提示与 op 收敛**
 
-- 报错里的 `hint` 一律写 0.5 的分组形式：`page(op=open)`、`session(op=create)`、`workflow(op=list)`；不得出现 0.4 的扁平工具名（门禁：`tests/test_schema_compat.py::test_hints_use_grouped_tool_names`）。
+- 报错里的 `hint` 一律写 0.5 的分组形式：`page(op=open)`、`context(op=create)`、`workflow(op=list)`；不得出现 0.4 的扁平工具名（门禁：`tests/test_schema_compat.py::test_hints_use_grouped_tool_names`）。
 - `page(op="links")` 已并入 `page(op="text", mode="links")`（返回 `links` + `total`），避免 anchors/links 两份同源数据。
 
 **单步降轮数**：读与点合并在一次返回里。

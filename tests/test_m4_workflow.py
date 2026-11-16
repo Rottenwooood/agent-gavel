@@ -9,9 +9,9 @@ from agent_gavel.runtime import get_runtime
 
 
 async def _session_on(gavel_tools, base, path="/basic.html"):
-    r = await gavel_tools["session_create"]()
-    await gavel_tools["page_navigate"](page_id=r["page_id"], url=f"{base}{path}")
-    return r["session_id"], r["context_id"], r["page_id"]
+    r = await gavel_tools["context_create"]()
+    await gavel_tools["page_navigate"](page_id=r["active_page_id"], url=f"{base}{path}")
+    return r["context_id"], r["context_id"], r["active_page_id"]
 
 
 async def test_record_compile_run(gavel_tools, webapp_server):

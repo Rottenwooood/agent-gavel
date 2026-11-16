@@ -11,8 +11,8 @@ async def _call(tool, **payload):
 
 
 async def _session(gavel_tools):
-    r = await gavel_tools["session_create"]()
-    return r["context_id"], r["page_id"]
+    r = await gavel_tools["context_create"]()
+    return r["context_id"], r["active_page_id"]
 
 
 async def test_navigate_compact_returns_text_without_diff_or_anchors(gavel_tools, webapp_server):
@@ -130,10 +130,10 @@ async def test_snapshot_compact_keeps_input_affordances(gavel_tools, webapp_serv
 
 
 async def test_open_without_session_reuses_default(gavel_tools, webapp_server):
-    """连续无 session 的 open 必须复用同一个默认会话/上下文。"""
+    """连续无参数的 open 必须复用同一个默认上下文。"""
     a = await _call("page", op="open", url=f"{webapp_server}/basic.html", text_chars=50)
     b = await _call("page", op="open", url=f"{webapp_server}/tiny.html", text_chars=50)
-    assert a["session_id"] == b["session_id"], (a, b)
+    assert a["context_id"] == b["context_id"], (a, b)
     assert a["context_id"] == b["context_id"], (a, b)
     status = await gavel_tools["browser_status"]()
-    assert status["counts"]["sessions"] == 1, status
+    assert status["counts"]["contexts"] == 1, status

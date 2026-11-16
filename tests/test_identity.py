@@ -8,44 +8,40 @@ from agent_gavel.runtime.artifacts import ArtifactStore
 
 async def test_shared_container_identity(gavel_tools):
     T = gavel_tools
-    a = await T["session_create"]()
-    b = await T["session_create"]()
+    a = await T["context_create"]()
+    b = await T["context_create"]()
     assert a["context_id"] == b["context_id"]
-    assert a["page_id"] == b["page_id"]
-    assert b["shared_container"] is True
-
+    assert a["active_page_id"] == b["active_page_id"]
     listing = await T["page_list"]()
-    page = [p for p in listing["items"] if p["page_id"] == a["page_id"]][0]
-    # 两个租约共享同一容器：页面不伪造单一 session 归属
-    assert "session_id" not in page
-    assert page["creator_session_id"] == a["session_id"]
+    page = [p for p in listing["items"] if p["page_id"] == a["active_page_id"]][0]
+    assert page["context_id"] == a["context_id"]
 
-    await T["session_close"](session_id=a["session_id"])
-    await T["session_close"](session_id=b["session_id"])
+    await T["context_close"](context_id=a["context_id"])
+    await T["context_close"](context_id=b["context_id"])
 
 
 async def test_recording_follows_context(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
-    a = await T["session_create"]()
-    b = await T["session_create"]()
-    await T["page_navigate"](page_id=b["page_id"], url=f"{base}/basic.html")
-    await T["workflow_record_start"](session_id=b["session_id"], page_id=b["page_id"])
+    a = await T["context_create"]()
+    b = await T["context_create"]()
+    await T["page_navigate"](page_id=b["active_page_id"], url=f"{base}/basic.html")
+    await T["workflow_record_start"](context_id=b["context_id"], page_id=b["active_page_id"])
     await T["locator_fill"](
-        page_id=b["page_id"], target={"by": "css", "value": "#text-input"}, value="identity"
+        page_id=b["active_page_id"], target={"by": "css", "value": "#text-input"}, value="identity"
     )
     stop = await T["workflow_record_stop"](site="identity", name="rec", desc="identity")
     assert stop["recorded_steps"] == 1, stop
     await T["workflow_delete"](template_id=stop["template_id"])
 
-    await T["session_close"](session_id=a["session_id"])
-    await T["session_close"](session_id=b["session_id"])
+    await T["context_close"](context_id=a["context_id"])
+    await T["context_close"](context_id=b["context_id"])
 
 
 async def test_shared_context_run_is_exclusive(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
-    a = await T["session_create"]()
-    b = await T["session_create"]()
-    await T["page_navigate"](page_id=a["page_id"], url=f"{base}/basic.html")
+    a = await T["context_create"]()
+    b = await T["context_create"]()
+    await T["page_navigate"](page_id=a["active_page_id"], url=f"{base}/basic.html")
     tmpl = {
         "template_id": "identity_busy",
         "steps": [
@@ -62,31 +58,31 @@ async def test_shared_context_run_is_exclusive(gavel_tools, webapp_server):
     }
     await T["workflow_save"](template=tmpl)
     r1, r2 = await asyncio.gather(
-        T["workflow_run"](name_or_id="identity_busy", session_id=a["session_id"]),
-        T["workflow_run"](name_or_id="identity_busy", session_id=b["session_id"]),
+        T["workflow_run"](name_or_id="identity_busy", context_id=a["context_id"]),
+        T["workflow_run"](name_or_id="identity_busy", context_id=b["context_id"]),
     )
     reasons = {r1.get("reason"), r2.get("reason")}
     assert "context_busy" in reasons, (r1, r2)
 
     await T["workflow_delete"](template_id="identity_busy")
-    await T["session_close"](session_id=a["session_id"])
-    await T["session_close"](session_id=b["session_id"])
+    await T["context_close"](context_id=a["context_id"])
+    await T["context_close"](context_id=b["context_id"])
 
 
 async def test_page_resolution_is_explicit(gavel_tools, webapp_server):
     T, base = gavel_tools, webapp_server
-    a = await T["session_create"]()
-    await T["page_navigate"](page_id=a["page_id"], url=f"{base}/basic.html")
-    second = await T["context_create"](session_id=a["session_id"])
+    a = await T["context_create"]()
+    await T["page_navigate"](page_id=a["active_page_id"], url=f"{base}/basic.html")
+    second = await T["context_create"](isolated=True)
     assert second["status"] == "ok"
 
-    ambiguous = await T["page_navigate"](url=f"{base}/basic.html")
-    assert ambiguous["status"] == "error"
-    assert ambiguous["reason"] == "ambiguous_page"
-    assert set(ambiguous["detail"]["contexts"]) >= {a["context_id"], second["context_id"]}
+    # 默认容器优先：后台多了隔离容器，不该让主流程报歧义
+    r = await T["page_navigate"](url=f"{base}/basic.html")
+    assert r["status"] == "ok", r
+    assert r["context_id"] == a["context_id"], r
 
     await T["context_close"](context_id=second["context_id"])
-    await T["session_close"](session_id=a["session_id"])
+    await T["context_close"](context_id=a["context_id"])
 
 
 def test_artifact_index_concurrent_writes(tmp_path):

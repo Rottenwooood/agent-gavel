@@ -24,7 +24,6 @@ def _env(data: pathlib.Path) -> dict:
     return {
         **os.environ,
         "AGENT_GAVEL_DATA_DIR": str(data),
-        "AGENT_GAVEL_BROWSER_PROFILE": str(data / "profile"),
         "AGENT_GAVEL_BROWSER_PROFILES": str(data / "profiles"),
         "AGENT_GAVEL_WORKFLOWS_DIR": str(data / "workflows"),
         "AGENT_GAVEL_HEADLESS": os.environ.get("AGENT_GAVEL_HEADLESS", "0"),
@@ -46,10 +45,10 @@ _GROUPED = {
     "page_navigate": ("page", "navigate", {}),
     "page_read": ("page", "read", {}),
     "locator_fill": ("locator", "fill", {}),
-    "session_create": ("session", "create", {}),
-    "session_close": ("session", "close", {}),
     "workflow_save": ("workflow", "save", {}),
     "workflow_run": ("workflow", "run", {}),
+    "context_create": ("context", "create", {}),
+    "context_close": ("context", "close", {}),
 }
 
 
@@ -101,16 +100,16 @@ async def test_one_daemon_many_adapters(data_dir, webapp_server):
         counts = {len(t.tools) for t in tool_sets}
         assert len(counts) == 1 and counts.pop() > 0
         names = {t.name for t in tool_sets[0].tools}
-        assert {"browser", "session", "workflow"} <= names
+        assert {"browser", "context", "workflow"} <= names
 
         statuses = await asyncio.gather(*[_rpc(s, "browser_status") for s in sessions])
         daemon_pids = {st["daemon_pid"] for st in statuses}
         assert len(daemon_pids) == 1, daemon_pids
         assert all(st["adapters"] == 4 for st in statuses), statuses
 
-        created = await _rpc(sessions[0], "session_create")
+        created = await _rpc(sessions[0], "context_create")
         assert created["status"] == "ok", created
-        page_id, session_id = created["page_id"], created["session_id"]
+        page_id, session_id = created["active_page_id"], created["context_id"]
         nav = await _rpc(
             sessions[0], "page_navigate", {"page_id": page_id, "url": f"{webapp_server}/basic.html"}
         )
@@ -165,13 +164,13 @@ async def test_one_daemon_many_adapters(data_dir, webapp_server):
         saved = await _rpc(sessions[0], "workflow_save", {"template": tmpl})
         assert saved["status"] == "ok", saved
         r1, r2 = await asyncio.gather(
-            _rpc(sessions[1], "workflow_run", {"name_or_id": "mp_busy", "session_id": session_id}),
-            _rpc(sessions[2], "workflow_run", {"name_or_id": "mp_busy", "session_id": session_id}),
+            _rpc(sessions[1], "workflow_run", {"name_or_id": "mp_busy", "context_id": session_id}),
+            _rpc(sessions[2], "workflow_run", {"name_or_id": "mp_busy", "context_id": session_id}),
         )
         reasons = {r1.get("reason"), r2.get("reason")}
-        assert "session_busy" in reasons, (r1, r2)
+        assert "context_busy" in reasons, (r1, r2)
 
-        await _rpc(sessions[0], "session_close", {"session_id": session_id})
+        await _rpc(sessions[0], "context_close", {"context_id": session_id})
 
         final = await _rpc(sessions[3], "browser_status")
         assert len(final["processes"]) == 1
@@ -186,12 +185,12 @@ async def test_daemon_crash_recovery(data_dir, webapp_server):
         session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
 
-        created = await _rpc(session, "session_create")
+        created = await _rpc(session, "context_create")
         assert created["status"] == "ok", created
         nav = await _rpc(
             session,
             "page_navigate",
-            {"page_id": created["page_id"], "url": f"{webapp_server}/basic.html"},
+            {"page_id": created["active_page_id"], "url": f"{webapp_server}/basic.html"},
         )
         assert nav["status"] == "ok", nav
 
@@ -230,12 +229,12 @@ async def test_daemon_crash_recovery(data_dir, webapp_server):
         assert other["daemon_pid"] == pid2
 
         # 新 daemon 仍能正常驱动浏览器
-        created2 = await _rpc(session, "session_create")
+        created2 = await _rpc(session, "context_create")
         assert created2["status"] == "ok", created2
         nav2 = await _rpc(
             session,
             "page_navigate",
-            {"page_id": created2["page_id"], "url": f"{webapp_server}/basic.html"},
+            {"page_id": created2["active_page_id"], "url": f"{webapp_server}/basic.html"},
         )
         assert nav2["status"] == "ok", nav2
         final = await _rpc(session, "browser_status")
@@ -249,7 +248,7 @@ async def test_daemon_shutdown_and_restart(data_dir, webapp_server):
         session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
 
-        created = await _rpc(session, "session_create")
+        created = await _rpc(session, "context_create")
         assert created["status"] == "ok", created
         before = await _rpc(session, "browser_status")
         pid1 = before["daemon_pid"]
@@ -278,11 +277,11 @@ async def test_daemon_shutdown_and_restart(data_dir, webapp_server):
         assert status is not None and status.get("status") == "ok", status
         assert status["daemon_pid"] != pid1
 
-        created2 = await _rpc(session, "session_create")
+        created2 = await _rpc(session, "context_create")
         assert created2["status"] == "ok", created2
         nav = await _rpc(
             session,
             "page_navigate",
-            {"page_id": created2["page_id"], "url": f"{webapp_server}/basic.html"},
+            {"page_id": created2["active_page_id"], "url": f"{webapp_server}/basic.html"},
         )
         assert nav["status"] == "ok", nav

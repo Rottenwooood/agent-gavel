@@ -15,6 +15,7 @@ def register_browser_tools(catalog):
         proxy: dict = None,
         browser_mode: str = None,
         cdp_endpoint: str = None,
+        user_data_dir: str = None,
     ):
         "managed持久Chrome/CDP；attach接管现有；playwright直接启动。"
         rt = rt_get()
@@ -24,6 +25,7 @@ def register_browser_tools(catalog):
             proxy=proxy,
             browser_mode=browser_mode,
             cdp_endpoint=cdp_endpoint,
+            user_data_dir=user_data_dir,
         )
         out = {
             "status": "ok",
@@ -46,9 +48,12 @@ def register_browser_tools(catalog):
         return {"status": "ok", **(await rt.status(detail=detail))}
 
     @catalog.operation(returns="BrowserClosed")
-    async def browser_close():
-        "关闭所有浏览器进程与资源（runtime 仍可继续用，下次调用会重拉）。"
+    async def browser_close(profile: str = None):
+        "关闭浏览器进程；给 profile 只关那一个，不给则全关。"
         rt = rt_get()
+        if profile:
+            closed = await rt.close_profile(profile)
+            return {"status": "ok", "closed": bool(closed), "profile": profile}
         await rt.shutdown()
         rt.mark_open()
         return {"status": "ok", "closed": True}

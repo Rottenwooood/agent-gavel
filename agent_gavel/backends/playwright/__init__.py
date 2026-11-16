@@ -186,7 +186,10 @@ class PlaywrightBackend(LocatorMixin, ReaderMixin):
         from .actions import handler
         from .observation import Observation
 
-        async with Observation(self, handle, target=target, action=action) as obs:
+        follow = kw.pop("follow_popup", True)
+        async with Observation(
+            self, handle, target=target, action=action, follow_popup=follow
+        ) as obs:
             result = await handler(action)(self, handle, target, timeout_s=timeout_s, **kw)
         if obs.diff:
             result["diff"] = obs.diff

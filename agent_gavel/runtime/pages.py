@@ -33,14 +33,10 @@ class PageHandle:
         info = {
             "page_id": self.page_id,
             "context_id": self.context_id,
-            "creator_session_id": self.context.creator_session_id,
             "url": self._safe_url(),
             "opener_page_id": self.opener_page_id,
             "page_status": self.status,
         }
-        lease = self.context.lease_session_id()
-        if lease:
-            info["session_id"] = lease
         try:
             info["closed"] = self.page.is_closed()
         except Exception:
@@ -55,9 +51,6 @@ class PageHandle:
 
     def _emit(self, event, **kw):
         payload = {"event": event, "context_id": self.context_id, "page_id": self.page_id}
-        lease = self.context.lease_session_id()
-        if lease:
-            payload["session_id"] = lease
         payload.update(kw)
         self.runtime.events.emit(payload)
 
@@ -83,7 +76,7 @@ class PageHandle:
             self.runtime.schedule(
                 self.runtime.artifacts.capture_download(
                     download,
-                    session_id=self.context.lease_session_id(),
+                    context_id=self.context_id,
                     page_id=self.page_id,
                     policies=self.runtime.policies,
                     events=self.runtime.events,
@@ -243,6 +236,10 @@ class PageManager:
         contexts = [c for c in self.runtime.contexts.values() if c.page_ids]
         if not contexts:
             raise GavelError("no_page", "当前没有打开的 page", hint="先 page(op=open)")
+        # 默认容器优先：后台任务开了隔离容器，不该让主流程报歧义
+        defaults = [c for c in contexts if c.container == "default"]
+        if len(defaults) == 1:
+            return self._active_of(defaults[0])
         if len(contexts) == 1:
             return self._active_of(contexts[0])
         raise GavelError(

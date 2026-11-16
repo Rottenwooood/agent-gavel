@@ -6,9 +6,9 @@
 
 
 async def test_navigator_webdriver_off(gavel_tools):
-    r = await gavel_tools["session_create"]()
+    r = await gavel_tools["context_create"]()
     rd = await gavel_tools["page_read"](
-        page_id=r["page_id"],
+        page_id=r["active_page_id"],
         page_features={
             "wd": "navigator.webdriver",
             "headless_ua": "/HeadlessChrome/.test(navigator.userAgent)",

@@ -90,7 +90,7 @@ async def interactions(client, pid, cid, sid, base, data):
         client.ok("locator", op="click", page_id=pid, target={"css": "#download"}),
     )
     aid = download["artifact_id"]
-    filtered = await client.ok("artifact", op="list", kind="download", page_id=pid, session_id=sid)
+    filtered = await client.ok("artifact", op="list", kind="download", page_id=pid, context_id=sid)
     assert aid in {item["artifact_id"] for item in filtered["items"]}
     await client.ok("artifact", op="get", artifact_id=aid, expected_kind="download")
     text = await client.ok("artifact", op="read_text", artifact_id=aid)
@@ -114,9 +114,9 @@ async def interactions(client, pid, cid, sid, base, data):
     )
     assert any(cookie["name"] == "e2e" for cookie in cookies["cookies"])
     state_path = str(Path(data, "state.json"))
-    await client.ok("session", op="export_state", session_id=sid, path=state_path)
-    clone = await client.ok("session", op="import_state", path=state_path)
-    await client.ok("session", op="close", session_id=clone["session_id"])
+    await client.ok("context", op="export_state", context_id=sid, path=state_path)
+    clone = await client.ok("context", op="import_state", path=state_path)
+    await client.ok("context", op="close", context_id=clone["context_id"])
     await client.ok("context", op="cookies_clear", context_id=cid)
 
     await client.ok("page", op="navigate", page_id=pid, url=f"{base}/basic.html")
@@ -139,20 +139,20 @@ async def workflow_controls(client, sid, pid, base):
     await client.ok("workflow", op="save", template=slow)
     one, two = await asyncio.gather(
         client.call(
-            "workflow", op="run", name_or_id="e2e_slow", session_id=sid, run_id="e2e_first"
+            "workflow", op="run", name_or_id="e2e_slow", context_id=sid, run_id="e2e_first"
         ),
         client.call(
-            "workflow", op="run", name_or_id="e2e_slow", session_id=sid, run_id="e2e_second"
+            "workflow", op="run", name_or_id="e2e_slow", context_id=sid, run_id="e2e_second"
         ),
     )
-    assert "session_busy" in {one[0].get("reason"), two[0].get("reason")}, (one[0], two[0])
+    assert "context_busy" in {one[0].get("reason"), two[0].get("reason")}, (one[0], two[0])
     await client.ok("workflow", op="delete", template_id="e2e_slow")
     slow["template_id"] = "e2e_control"
     slow["steps"][1]["action"]["timeout_s"] = 2
     await client.ok("workflow", op="save", template=slow)
     run = asyncio.create_task(
         client.call(
-            "workflow", op="run", name_or_id="e2e_control", session_id=sid, run_id="controlled"
+            "workflow", op="run", name_or_id="e2e_control", context_id=sid, run_id="controlled"
         )
     )
     deadline = time.monotonic() + 1

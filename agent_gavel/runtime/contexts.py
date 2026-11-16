@@ -1,13 +1,13 @@
-"""BrowserContext 资源（docs/tech-plan.md §5.5）。
+"""BrowserContext 资源（三层模型：profile → context → page）。
 
 一个 context = 一个隔离面（cookie/storage/locale/device）。context 创建后
 自动登记一只 about:blank 页面作为 active page，使"省略 page_id"立刻可用。
 
-容器策略（对应 profile 资源）：
-- **default**（默认）：直接用浏览器资料目录的**默认容器**。它读写的就是 profile
-  本体，因此**继承 profile 的登录/cookie，且改动会累积回 profile**（可迭代）。
-- **isolated**（可选）：新建隔离容器，**继承 profile 的 cookie**（把资料里的 cookie
-  注入进来），但**不写回 profile**（关掉即弃）。用于并行/多账号而不污染身份底座。
+容器策略：
+- **default**（默认）：直接用该资料目录的**默认容器**，读写 profile 本体，
+  继承登录态且改动累积回磁盘。
+- **isolated**（显式）：新建隔离容器，继承 profile 的 cookie 但不写回，
+  关掉即弃；返回里带 ephemeral_warning。
 """
 
 import asyncio
@@ -28,15 +28,13 @@ _CONTEXT_KEYS = (
 
 
 class Context:
-    def __init__(self, context_id, session, browser_context, container="default"):
+    def __init__(self, context_id, browser_handle, browser_context, container="default"):
         self.context_id = context_id
-        self.creator_session_id = session.session_id
-        self.browser_handle = session.handle
+        self.browser_handle = browser_handle
         self.browser_context = browser_context
         self.container = container  # default | isolated
         self.page_ids = []
         self.active_page_id = None
-        self.session_ids = {session.session_id}
         self._run_owner = None
         self._run_lock = asyncio.Lock()
         self._page_handler = None
@@ -50,12 +48,6 @@ class Context:
                 self.browser_context.remove_listener("page", handler)
             except Exception:
                 pass  # silent-ok: best-effort，失败不影响主流程
-
-    def lease_session_id(self):
-        """只有一个租约时返回它；多个会话共享时返回 None。"""
-        if len(self.session_ids) == 1:
-            return next(iter(self.session_ids))
-        return None
 
     async def acquire_run(self, run_id):
         async with self._run_lock:
@@ -73,15 +65,16 @@ class Context:
             self._run_owner = None
 
     def to_dict(self):
-        return {
+        out = {
             "context_id": self.context_id,
-            "creator_session_id": self.creator_session_id,
-            "session_ids": sorted(self.session_ids),
             "container": self.container,
             "page_ids": list(self.page_ids),
             "active_page_id": self.active_page_id,
             "busy_owner": self._run_owner,
         }
+        if self.container == "isolated":
+            out["ephemeral_warning"] = "isolated 容器内的扫码与新登录不会写回磁盘"
+        return out
 
 
 class ContextManager:
@@ -124,8 +117,8 @@ class ContextManager:
             kw["storage_state"] = config["storage_state"]
         return kw
 
-    def _default_bc(self, session):
-        browser = getattr(session.handle, "browser", None)
+    def _default_bc(self, handle):
+        browser = getattr(handle, "browser", None)
         if browser is None:
             return None
         try:
@@ -148,60 +141,67 @@ class ContextManager:
                 pass  # silent-ok: best-effort，失败不影响主流程
         return len(cookies)
 
-    async def create(self, session, config, *, context_id=None, storage_state=None):
-        cid = context_id or self.runtime.next_id("ctx")
-        container = (config.get("container") or "default").strip().lower()
-        default_bc = self._default_bc(session)
-        browser = getattr(session.handle, "browser", None)
-        # 没有可用的 profile 默认容器时，default 无意义，按隔离处理（避免容器泄漏）
-        if container == "default" and (default_bc is None or browser is None):
-            container = "isolated"
-
+    async def ensure(self, profile=None, isolated=False, config=None):
+        """取（或创建）一个 context：default 复用资料目录默认容器，isolated 新开。"""
+        config = dict(config or {})
+        handle = await self.runtime.ensure_browser(profile=profile)
+        container = "isolated" if isolated else "default"
         if container == "default":
-            # 复用同一个 profile 默认容器（跨会话共享，读写直达 profile）
-            key = id(browser)
-            hit = self._defaults.get(key)
-            if hit is not None and hit[0] is browser:
-                existing = hit[1]
-                existing.session_ids.add(session.session_id)
-                if existing.context_id not in session.context_ids:
-                    session.context_ids.append(existing.context_id)
-                if not existing.page_ids or existing.active_page_id is None:
-                    await self.runtime.page_mgr.open(existing)
-                return existing
-            ctx = await self.adopt(session, default_bc, context_id=cid, container="default")
-            self._defaults[key] = (browser, ctx)
-            return ctx
+            default_bc = self._default_bc(handle)
+            browser = getattr(handle, "browser", None)
+            if default_bc is None or browser is None:
+                container = "isolated"
+            else:
+                key = id(browser)
+                hit = self._defaults.get(key)
+                if hit is not None and hit[0] is browser:
+                    existing = hit[1]
+                    if not existing.page_ids or existing.active_page_id is None:
+                        await self.runtime.page_mgr.open(existing)
+                    return existing
+                ctx = await self.adopt(handle, default_bc, container="default")
+                self._defaults[key] = (browser, ctx)
+                return ctx
 
-        # 隔离容器（或没有可用的默认容器）
         kw = self._new_context_kwargs(config)
         if "user_agent" not in kw:
-            ua = (getattr(session.handle, "opts", None) or {}).get("default_user_agent")
+            ua = (getattr(handle, "opts", None) or {}).get("default_user_agent")
             if ua:
                 kw["user_agent"] = ua
-        if storage_state is not None:
-            kw["storage_state"] = storage_state
-        browser = session.handle.browser
-        bc = await browser.new_context(**kw)
-        ctx = await self.adopt(session, bc, context_id=cid, container="isolated")
-        await self._seed_from_profile(bc, default_bc)
+        if config.get("storage_state") is not None:
+            kw["storage_state"] = config["storage_state"]
+        bc = await handle.browser.new_context(**kw)
+        ctx = await self.adopt(handle, bc, container="isolated")
+        await self._seed_from_profile(bc, self._default_bc(handle))
         return ctx
 
-    async def adopt(self, session, browser_context, *, context_id=None, container="default"):
+    async def adopt(self, handle, browser_context, *, context_id=None, container="default"):
         cid = context_id or self.runtime.next_id("ctx")
-        ctx = Context(cid, session, browser_context, container=container)
+        ctx = Context(cid, handle, browser_context, container=container)
         self.runtime.contexts[cid] = ctx
         self._by_bc[id(browser_context)] = ctx
-        session.context_ids.append(cid)
         # 域名白名单：拦截 popup / target=_blank / window.open / 重定向的顶层导航
         if self.runtime.policies.domain_restricted:
             await self._install_domain_guard(ctx)
         handler = self._on_new_page(ctx)
         ctx._page_handler = handler
         browser_context.on("page", handler)
-        pages = browser_context.pages
+        pages = list(browser_context.pages)
         if pages:
-            await self.runtime.page_mgr.register(ctx, pages[0], activate=True)
+            # 重连后把已有标签页全部收编，并把最后一个有内容的页设为当前
+            for pw_page in pages:
+                await self.runtime.page_mgr.register(ctx, pw_page)
+            chosen = pages[-1]
+            for pw_page in reversed(pages):
+                try:
+                    if (pw_page.url or "") not in ("about:blank", ""):
+                        chosen = pw_page
+                        break
+                except Exception:
+                    continue
+            handle_ = self.runtime.page_mgr.find_by_pw_page(chosen)
+            if handle_ is not None:
+                ctx.active_page_id = handle_.page_id
         else:
             await self.runtime.page_mgr.open(ctx)
         return ctx
@@ -225,7 +225,6 @@ class ContextManager:
                         rt.events.emit(
                             {
                                 "event": "policy_blocked",
-                                "session_id": page_ctx.lease_session_id() if page_ctx else None,
                                 "context_id": page_ctx.context_id if page_ctx else None,
                                 "url": request.url,
                                 "host": (urlparse(request.url).hostname or "").lower(),
@@ -255,21 +254,14 @@ class ContextManager:
 
         return handler
 
-    async def close(self, context_id, session_id=None):
+    async def close(self, context_id):
         ctx = self.get(context_id)
-        leases = {session_id} if ctx.container == "default" and session_id else set(ctx.session_ids)
-        for sid in leases:
-            ctx.session_ids.discard(sid)
-            session = self.runtime.sessions.get(sid)
-            if session is not None and context_id in session.context_ids:
-                session.context_ids.remove(context_id)
-        # 默认容器 = profile 本体：不关闭（保留窗口与磁盘身份），只解绑会话，便于复用与累积
+        # 默认容器 = profile 本体：不关闭（保留窗口与磁盘身份），只解绑
         if ctx.container == "default":
             return {
                 "context_id": context_id,
                 "detached": True,
                 "container": "default",
-                "leases": len(ctx.session_ids),
             }
         for pid in list(ctx.page_ids):
             await self.runtime.page_mgr.close(pid, already_closed=True)

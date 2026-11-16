@@ -40,14 +40,14 @@
 ## 资源与生命周期
 
 - 默认 C1：自起加固 Chrome + 持久资料目录；`browser_mode="attach"` 是接管用户真实环境，调用前必须征得用户同意。
-- 一个 session 是租约与执行锁，不是一个窗口；窗口是 context，标签页是 page。
+- 没有 session 这一层：profile 决定进程与磁盘目录，context 是 cookie 分区，page 是标签页；run 独占由 context 锁承担。
 - 同页动作串行，跨页并行；不要在同一个标签上并发发起互相依赖的动作。
 - 关闭浏览器、切换资料副本、删除副本都可能影响正在运行的任务，先确认没有在跑的 workflow。
 
 ## 模板与资料
 
-- 模板存 `~/.config/agent-gavel/workflows/`，由 `loader` 唯一负责读写；写入只接受精确 id。
-- 资料副本存 `~/.config/agent-gavel/browser-profiles/`，`ACTIVE` 文件决定 C1 使用哪一份。
+- 模板存 `<数据根>/workflows/`（默认 `~/.local/share/agent-gavel/workflows/`），由 `loader` 唯一负责读写；写入只接受精确 id。
+- 资料目录存 `<数据根>/profiles/<name>/`，默认名 `primary`；没有 `ACTIVE` 指针，不传名字就落 primary。
 - 定位优先用语义锚点（role / label / text / testid），css 只作为兜底；不要写死坐标。
 - 模板里的等待用 `wait_for_text` / `wait_for_selector`，不要用固定 sleep。
 

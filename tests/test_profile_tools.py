@@ -60,7 +60,8 @@ def test_copy_default_tier(monkeypatch, tmp_path):
     pref = json.loads((dest / "Default" / "Preferences").read_text())
     assert "sync" not in pref and pref["homepage"] == "h"
     # 第一个副本自动成为当前
-    assert res["became_active"] is True and res["active"] == "t1"
+    assert res["created"] == "t1"
+    assert [x["name"] for x in res["profiles"]] == ["t1"]
 
 
 def test_copy_strict_excludes_credentials(monkeypatch, tmp_path):
@@ -89,18 +90,34 @@ def test_copy_no_history(monkeypatch, tmp_path):
     assert not (tmp_path / "profiles" / "nh" / "Default" / "History").exists()
 
 
-def test_active_switch_and_delete(monkeypatch, tmp_path):
+def test_named_profiles_and_delete(monkeypatch, tmp_path):
     _use_tmp_profiles(monkeypatch, tmp_path)
     src = _make_source(tmp_path)
     profiles.copy_profile(source=str(src), name="a")
     profiles.copy_profile(source=str(src), name="b")
-    assert profiles.active_name() == "a"  # 首个成为当前，第二个不改
-    profiles.set_active("b")
-    assert profiles.active_name() == "b"
     names = {p["name"] for p in profiles.list_profiles()}
     assert names == {"a", "b"}
-    profiles.delete_profile("b")
-    assert profiles.active_name() == "a"  # 删当前后回退到剩余
+    # 默认名永远是 primary，与存在哪些目录无关
+    assert profiles.DEFAULT_PROFILE == "primary"
+    profiles.delete_profile("a")
+    assert {p["name"] for p in profiles.list_profiles()} == {"b"}
+
+
+def test_resolve_dir_prefers_explicit_then_name(monkeypatch, tmp_path):
+    """显式目录 > 命名 profile > 默认 primary。"""
+    _use_tmp_profiles(monkeypatch, tmp_path)
+    assert profiles.resolve_dir() == str(tmp_path / "profiles" / "primary")
+    assert profiles.resolve_dir(profile="work") == str(tmp_path / "profiles" / "work")
+    assert profiles.resolve_dir(str(tmp_path / "explicit")) == str(tmp_path / "explicit")
+
+
+def test_ensure_profile_is_idempotent(monkeypatch, tmp_path):
+    _use_tmp_profiles(monkeypatch, tmp_path)
+    src = _make_source(tmp_path)
+    first = profiles.ensure_profile(source=str(src), name="login", tier="default")
+    assert first["created"] == "login" and first["reused"] is False
+    again = profiles.ensure_profile(source=str(src), name="login", tier="default")
+    assert again["reused"] is True and again["created"] is None
 
 
 def test_bad_name_rejected(monkeypatch, tmp_path):
@@ -118,3 +135,18 @@ def test_missing_source(monkeypatch, tmp_path):
 
     with pytest.raises(GavelError):
         profiles.copy_profile(source=str(tmp_path / "nope"), name="x")
+
+
+def test_primary_forbids_headless(monkeypatch, tmp_path):
+    """默认资料目录禁止无头启动：会污染登录指纹。"""
+    from agent_gavel.core.errors import GavelError
+    from agent_gavel.runtime import browser_process
+
+    _use_tmp_profiles(monkeypatch, tmp_path)
+    monkeypatch.delenv("AGENT_GAVEL_TEST_ISOLATED", raising=False)
+    target = profiles.default_profile_dir()
+    with pytest.raises(GavelError) as exc:
+        browser_process._guard_primary_headless(target, True)
+    assert exc.value.code == "headless_forbidden_on_primary"
+    # 有头不拦
+    browser_process._guard_primary_headless(target, False)

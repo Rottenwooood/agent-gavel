@@ -29,7 +29,7 @@ def register_screenshot_tools(catalog):
             kind="screenshot",
             mime_type="image/png",
             source_url=captured["url"],
-            session_id=handle.context.lease_session_id(),
+            context_id=handle.context_id,
             page_id=handle.page_id,
         )
         result = {

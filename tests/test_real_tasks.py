@@ -23,8 +23,8 @@ async def test_task_supplier_invoice_end_to_end(gavel_tools, webapp_server, tmp_
     """任务：登录供应商后台 → 挑出最新发票 → 下载 → 校验内容 → 落盘去重。"""
     call, _ = _counted(gavel_tools)
     base = webapp_server
-    r = await call("session_create")
-    pid = r["page_id"]
+    r = await call("context_create")
+    pid = r["active_page_id"]
 
     # 1. 登录（真实填值 + 点击 + 断言已跳转）
     nav = await call(
@@ -94,8 +94,8 @@ async def test_task_shop_search_open_check_price(gavel_tools, webapp_server):
     """任务：搜索商品 → 打开结果 → 读价格并判定落在合理区间。"""
     call, _ = _counted(gavel_tools)
     base = webapp_server
-    r = await call("session_create")
-    pid = r["page_id"]
+    r = await call("context_create")
+    pid = r["active_page_id"]
     await call("page_navigate", page_id=pid, url=f"{base}/portal/shop.html")
 
     await call("locator_fill", page_id=pid, target={"by": "css", "value": "#q"}, value="widget")
@@ -130,8 +130,8 @@ async def test_task_missing_element_is_explained(gavel_tools, webapp_server):
     """任务失败可解释：点到不存在的元素要返回结构化错误 + 可恢复提示，而非崩溃。"""
     call, _ = _counted(gavel_tools)
     base = webapp_server
-    r = await call("session_create")
-    pid = r["page_id"]
+    r = await call("context_create")
+    pid = r["active_page_id"]
     await call("page_navigate", page_id=pid, url=f"{base}/portal/invoice_A-2026-09-30.html")
     bad = await call("locator_click", page_id=pid, target={"by": "css", "value": "#no-such-button"})
     assert bad["status"] == "error" and bad["reason"] == "locator_not_found", bad
@@ -141,7 +141,7 @@ async def test_task_missing_element_is_explained(gavel_tools, webapp_server):
 async def test_task_repair_after_page_changed(gavel_tools, webapp_server):
     """页面改版（按钮 id 变化）→ 模板定位失败 → 局部修复换锚点 → 通过并发布新版。"""
     T, base = gavel_tools, webapp_server
-    r = await T["session_create"]()
+    r = await T["context_create"]()
     tmpl = {
         "template_id": "portal_shop_repair",
         "site": "portal",
@@ -170,7 +170,7 @@ async def test_task_repair_after_page_changed(gavel_tools, webapp_server):
     }
     await T["workflow_save"](template=tmpl)
     res = await T["workflow_run"](
-        name_or_id="portal_shop_repair", session_id=r["session_id"], verbosity="steps"
+        name_or_id="portal_shop_repair", context_id=r["context_id"], verbosity="steps"
     )
     assert res["status"] == "pass", res
     assert any(s.get("repaired") for s in res["steps"]), res
@@ -184,7 +184,7 @@ async def test_task_repair_after_page_changed(gavel_tools, webapp_server):
     assert acc["status"] == "ok", acc
     # 已完成的步骤不重复；修复后重跑应无需再修
     res2 = await T["workflow_run"](
-        name_or_id="portal_shop_repair", session_id=r["session_id"], verbosity="steps"
+        name_or_id="portal_shop_repair", context_id=r["context_id"], verbosity="steps"
     )
     assert res2["status"] == "pass", res2
     assert not any(s.get("repaired") for s in res2["steps"]), res2
@@ -194,8 +194,8 @@ async def test_task_replay_cheaper_than_explore(gavel_tools, webapp_server):
     """重放闭环：同一任务，探索跑 vs 模板一次重放，往返次数与回传量显著下降。"""
     base = webapp_server
     explore, estats = _counted(gavel_tools)
-    r = await explore("session_create")
-    pid = r["page_id"]
+    r = await explore("context_create")
+    pid = r["active_page_id"]
     await explore("page_navigate", page_id=pid, url=f"{base}/portal/shop.html")
     await explore("locator_fill", page_id=pid, target={"by": "css", "value": "#q"}, value="widget")
     await explore(

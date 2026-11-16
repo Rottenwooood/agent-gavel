@@ -1,6 +1,6 @@
 """顶层运行时单例（docs/tech-plan.md §5.3）。
 
-持有全部注册表与生命周期：processes / sessions / contexts / pages，
+持有全部注册表与生命周期：processes / contexts / pages，
 以及 events / metrics / policies / artifacts。tools 层只与本类交互。
 """
 
@@ -15,7 +15,6 @@ from .metrics import MetricsRecorder
 from .pages import PageManager
 from .policies import PolicyManager
 from .recorder import Recorder
-from .sessions import SessionManager
 from .tracing import NetworkRecorder, Tracer
 
 
@@ -30,13 +29,11 @@ class BrowserRuntime:
         self.network = NetworkRecorder()
         self.recorder = Recorder()
 
-        self.sessions = {}
         self.contexts = {}
         self.pages = {}
         self.runs = {}
         self._counters = defaultdict(int)
 
-        self.session_mgr = SessionManager(self)
         self.context_mgr = ContextManager(self)
         self.page_mgr = PageManager(self)
 
@@ -59,23 +56,17 @@ class BrowserRuntime:
         return await self.ensure_browser()
 
     async def ensure_browser(self, **opts):
-        """按需启动/复用默认浏览器；参数一致时幂等，模式由调用方或配置决定。"""
-        explicit = any(v is not None for v in opts.values())
+        """按资料目录启动/复用浏览器；不同 profile 各自常驻，不互相驱逐。"""
+        from .profiles import resolve_dir
+
+        udd = resolve_dir(
+            explicit=opts.pop("user_data_dir", None), profile=opts.pop("profile", None)
+        )
         async with self._default_lock:
-            current = self._default_handle
-            if not explicit:
-                if current is None or not current.alive:
-                    if current is not None:
-                        await self.processes.close(current)
-                    current = await self.processes.launch()
-                    self._default_handle = current
-                return current
-            if current is not None and self.processes.matches(current, **opts):
-                return current
-            if current is not None:
-                await self.processes.close(current)
-            self._default_handle = await self.processes.launch(**opts)
-            return self._default_handle
+            handle = await self.processes.ensure(udd, **opts)
+            if self._default_handle is None or udd == resolve_dir():
+                self._default_handle = handle
+            return handle
 
     # ---- 异步任务调度（事件回调里用）----
     def schedule(self, coro):
@@ -87,7 +78,6 @@ class BrowserRuntime:
         result = {
             "processes": processes,
             "counts": {
-                "sessions": len(self.sessions),
                 "contexts": len(self.contexts),
                 "pages": len(self.pages),
                 "processes": len(processes),
@@ -100,10 +90,20 @@ class BrowserRuntime:
             },
             "recording": self.recorder.active,
         }
+        try:
+            from . import profiles as _profiles
+
+            pdir = self.processes.profile_dir()
+            result["profile"] = {
+                "name": _profiles.DEFAULT_PROFILE,
+                "dir": pdir,
+                "default": pdir == _profiles.default_profile_dir(),
+            }
+        except Exception:
+            pass  # silent-ok: 资料信息失败不影响状态查询
         if detail == "full":
             result.update(
                 os_browsers=await asyncio.to_thread(self.processes.os_browsers),
-                sessions=[session.to_dict() for session in self.sessions.values()],
                 events=self.events.stats(),
                 metrics=self.metrics.snapshot(),
             )
@@ -111,18 +111,13 @@ class BrowserRuntime:
 
     # ---- 生命周期 ----
     async def soft_reset(self):
-        """清理所有 session/context/page 与运行期计数，保留浏览器进程。
+        """清理所有 context/page 与运行期计数，保留浏览器进程。
 
         仅供测试与同一进程内的重复初始化；生产路径用 shutdown()。
         """
         for pid in list(self.pages):
             try:
                 await self.page_mgr.close(pid)
-            except Exception:
-                pass  # silent-ok: best-effort，失败不影响主流程
-        for sid in list(self.sessions):
-            try:
-                await self.session_mgr.close(sid)
             except Exception:
                 pass  # silent-ok: best-effort，失败不影响主流程
         for cid in list(self.contexts):
@@ -143,7 +138,7 @@ class BrowserRuntime:
         except Exception:
             pass  # silent-ok: best-effort，失败不影响主流程
 
-    async def shutdown(self):
+    async def shutdown(self, keep_browsers=False):
         if self._closed:
             return
         self._closed = True
@@ -159,10 +154,29 @@ class BrowserRuntime:
                 pass  # silent-ok: best-effort，失败不影响主流程
         self.page_mgr.reset_state()
         self.context_mgr.reset_state()
-        self.sessions.clear()
         self.runs.clear()
         self._default_handle = None
-        await self.processes.stop_all()
+        if keep_browsers:
+            # 只断开 Playwright 连接，受管 Chrome 继续常驻；下次启动由
+            # _reconcile 读 state 文件重新接上，登录态与已开页面都不丢。
+            await self.processes.disconnect_all()
+        else:
+            await self.processes.stop_all()
+
+    async def close_profile(self, profile):
+        """只关掉某个资料目录的浏览器，其它 profile 不受影响。"""
+        from .profiles import resolve_dir
+
+        udd = resolve_dir(profile=profile)
+        key = self.processes._udd_key(udd)
+        handle = self.processes._by_udd.get(key)
+        if handle is None:
+            return False
+        await self.processes.close(handle)
+        self.processes._by_udd.pop(key, None)
+        if self._default_handle is handle:
+            self._default_handle = None
+        return True
 
     def mark_open(self):
         self._closed = False
@@ -179,17 +193,17 @@ def get_runtime() -> BrowserRuntime:
     return _RUNTIME
 
 
-async def shutdown_runtime():
+async def shutdown_runtime(keep_browsers=False):
     global _RUNTIME
     if _RUNTIME is not None:
-        await _RUNTIME.shutdown()
+        await _RUNTIME.shutdown(keep_browsers=keep_browsers)
         _RUNTIME = None
 
 
 async def reset_runtime(keep_browser=False) -> BrowserRuntime:
     """仅供测试：重置运行时。
 
-    keep_browser=True 时只清 session/context/page 与计数，保留浏览器进程，
+    keep_browser=True 时只清 context/page 与计数，保留浏览器进程，
     避免每个用例都冷启动一次 Chrome；进程退出时由调用方统一回收。
     """
     global _RUNTIME
