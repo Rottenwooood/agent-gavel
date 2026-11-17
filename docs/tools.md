@@ -1,4 +1,4 @@
-# MCP 工具参考（0.5）
+# MCP 工具参考
 
 由操作契约生成；不要手工修改参数或结果表。
 定位支持{by,value,name?,exact?,strict?,nth?,has_text?,frame?}和{css:...}等短写；frame可为iframe选择器数组。
@@ -18,7 +18,7 @@
 launch(headless:bool=null, channel:str=null, proxy:dict=null, browser_mode:str=null, cdp_endpoint:str=null, user_data_dir:str=null) -> Browser
   managed持久Chrome/CDP；attach接管现有；playwright直接启动。
 status() -> BrowserStatus
-  资源概况；full再含会话配置、OS进程、事件与指标。
+  资源概况；full再含容器配置、OS进程、事件与指标。
 close(profile:str=null) -> BrowserClosed
   关闭浏览器进程；给 profile 只关那一个，不给则全关。
 profile_copy(source:str=null, name:str=null, tier:"strict"|"default"|"full"="default", include_history:bool=true, include_extensions:bool=false, force:bool=false) -> ProfileCopied
@@ -36,7 +36,7 @@ profile_delete(name!:str) -> ProfileDeleted
 
 ```text
 create(profile:str=null, locale:str=null, timezone_id:str=null, viewport:dict=null, device:str=null, permissions:list=null, extra_http_headers:dict=null, storage_state:dict=null, container:"default"|"isolated"="default", isolated:bool=null) -> Context
-  container默认isolated，继承profile登录态但不写回；default复用并写回。
+  默认default复用资料并写回；isolated新建隔离容器、继承cookie但不写回。
 close(context_id!:str) -> ContextClosed
 cookies_get(context_id!:str, url:str=null) -> Cookies
   含登录态，仅在用户授权下读取，不外传。
@@ -60,7 +60,7 @@ import_state(path!:str, profile:str=null) -> Context
 list() -> Pages
 get(page_id!:str) -> Page
 select(page_id!:str) -> Page
-  设置active page；省略page_id时按现有上下文解析，歧义报错。
+  把指定page_id设为active；显式page_id的其他操作无需先select。
 close(page_id!:str) -> PageClosed
 reload(page_id:str=null, timeout_s:float=30.0) -> Location
 go_back(page_id:str=null, timeout_s:float=30.0) -> Location
@@ -68,9 +68,9 @@ go_forward(page_id:str=null, timeout_s:float=30.0) -> Location
 navigate(page_id:str=null, url!:str, wait_until:"load"|"domcontentloaded"|"networkidle"|"commit"="domcontentloaded", timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0, fail_on_http_error:bool=false, min_text_chars:int=null, text_chars:int=4000) -> Navigation
   HTTP错误可设失败；min_text_chars防空页；默认带回正文摘要，text_chars=0关闭。
 open(context_id:str=null, profile:str=null, isolated:bool=null, url!:str, activate:bool=true, wait_until:"load"|"domcontentloaded"|"networkidle"|"commit"="domcontentloaded", timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0, fail_on_http_error:bool=false, min_text_chars:int=null, text_chars:int=4000) -> Navigation
-  新建标签页并加载；入参与返回同 navigate，activate=False不抢active。
+  新建标签页并加载；加载参数与返回同navigate，另可选context/profile/isolated；activate=False不抢active。
 snapshot(page_id:str=null, level:"summary"|"compact"|"interactive"|"full"="summary", limit:int=50) -> Snapshot
-  summary摘要/compact锚点/interactive元素/full再含HTML；compact下元素只留tag/text/href/anchor。
+  summary摘要/compact锚点/interactive元素/full再含HTML；compact保留tag/text/anchor及非空href/type/placeholder。
 text(page_id:str=null, selector:str=null, mode:"text"|"content"|"html"|"links"="text", max_chars:int=50000, max_links:int=500) -> Text
   text=innerText/content=textContent；links整页且忽略selector/max_chars。
 read(page_id:str=null, page_features!:dict, selector:str=null) -> Read
@@ -112,9 +112,9 @@ click(page_id:str=null, target!:Target, button:"left"|"middle"|"right"="left", c
 fill(page_id:str=null, target!:Target, value:str="", timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0, humanize:bool=false) -> Action
   替换输入；humanize=先移动鼠标再逐字输入。
 type(page_id:str=null, target!:Target, text:str="", delay_ms:int=0, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0, humanize:bool=false) -> Action
-  逐键追加输入；humanize=未显式给 delay_ms 时用 40-120ms 随机间隔。
+  逐键追加输入，delay_ms控制间隔；humanize当前对此操作不生效。
 press(page_id:str=null, target!:Target, keys:str="Enter", timeout_s:float=30.0, wait_navigation:bool=false, assertions:dict=null, wait_s:float=6.0, humanize:bool=false) -> Action
-  按键或组合键；humanize=按下前加短抖动。
+  按键或组合键；humanize当前对此操作不生效。
 hover(page_id:str=null, target!:Target, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0) -> Action
 focus(page_id:str=null, target!:Target, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0) -> Action
 clear(page_id:str=null, target!:Target, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0) -> Action

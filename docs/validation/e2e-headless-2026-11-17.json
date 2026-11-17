@@ -1,0 +1,1651 @@
+{
+  "mode": "headless",
+  "status": "passed",
+  "scope": "browser",
+  "browser_checks": "passed",
+  "environment": {
+    "display": ":0",
+    "tcp_loopback": "available",
+    "unix_socket": "available"
+  },
+  "stage": "complete",
+  "tools": {
+    "count": 13,
+    "bytes": 25752
+  },
+  "protocol_checks": "passed",
+  "browser_started": true,
+  "browser_created": true,
+  "screenshots": [
+    {
+      "scope": {},
+      "width": 1920,
+      "height": 941,
+      "bytes": 23626,
+      "path": "/tmp/gavel-docs-headless-final-images/capture-1.png"
+    },
+    {
+      "scope": {
+        "full_page": true
+      },
+      "width": 1905,
+      "height": 1849,
+      "bytes": 29874,
+      "path": "/tmp/gavel-docs-headless-final-images/capture-2.png"
+    },
+    {
+      "scope": {
+        "selector": "#delayed",
+        "save_to": "/tmp/gavel-mcp-e2e-a26n2xff"
+      },
+      "width": 65,
+      "height": 22,
+      "bytes": 1056,
+      "path": "/tmp/gavel-docs-headless-final-images/capture-3.png"
+    }
+  ],
+  "interaction_checks": "passed",
+  "profile_checks": "passed",
+  "calls": [
+    {
+      "tool": "locator",
+      "op": "fill",
+      "status": "error",
+      "reason": "bad_args",
+      "isError": true,
+      "wall_ms": 1.04,
+      "json_bytes": 145,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "fill",
+      "status": "error",
+      "reason": "bad_args",
+      "isError": true,
+      "wall_ms": 1.02,
+      "json_bytes": 150,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "list",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.15,
+      "json_bytes": 26,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "browser",
+      "op": "status",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.79,
+      "json_bytes": 255,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "performance_metrics",
+      "op": null,
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.62,
+      "json_bytes": 28,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "list",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.73,
+      "json_bytes": 36,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "list",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.06,
+      "json_bytes": 26,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "console_get",
+      "op": null,
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.66,
+      "json_bytes": 53,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "assertion",
+      "op": "schema",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.8,
+      "json_bytes": 1229,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "browser",
+      "op": "status",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.82,
+      "json_bytes": 255,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "browser",
+      "op": "status",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 11.09,
+      "json_bytes": 413,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "browser",
+      "op": "launch",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 659.12,
+      "json_bytes": 246,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "create",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 2.51,
+      "json_bytes": 130,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "navigate",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 103.65,
+      "json_bytes": 332,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "read",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 6.85,
+      "json_bytes": 157,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "fill",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 40.1,
+      "json_bytes": 490,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "click",
+      "status": "pass",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 58.14,
+      "json_bytes": 537,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "assertion",
+      "op": "check",
+      "status": "pass",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 4.32,
+      "json_bytes": 173,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "assertion",
+      "op": "check",
+      "status": "fail",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 53.95,
+      "json_bytes": 171,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "click",
+      "status": "error",
+      "reason": "locator_not_found",
+      "isError": true,
+      "wall_ms": 8.19,
+      "json_bytes": 192,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "snapshot",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 3.42,
+      "json_bytes": 253,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "snapshot",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 16.27,
+      "json_bytes": 825,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "snapshot",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 14.3,
+      "json_bytes": 975,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "snapshot",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 16.47,
+      "json_bytes": 1945,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "get",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.89,
+      "json_bytes": 148,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "meta",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 4.37,
+      "json_bytes": 245,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "text",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 8.69,
+      "json_bytes": 1000,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "explore",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 13.68,
+      "json_bytes": 945,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "text",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 2.59,
+      "json_bytes": 279,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "find_text",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 4.0,
+      "json_bytes": 173,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "wait_for_load",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.44,
+      "json_bytes": 142,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "wait_for_url",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.23,
+      "json_bytes": 127,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "wait_for_selector",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 5.28,
+      "json_bytes": 95,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "wait_for_text",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 5.84,
+      "json_bytes": 160,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "navigate",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 74.8,
+      "json_bytes": 393,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "screenshot",
+      "op": null,
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 94.21,
+      "json_bytes": 155,
+      "content_types": [
+        "text",
+        "image"
+      ]
+    },
+    {
+      "tool": "screenshot",
+      "op": null,
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 112.55,
+      "json_bytes": 156,
+      "content_types": [
+        "text",
+        "image"
+      ]
+    },
+    {
+      "tool": "screenshot",
+      "op": null,
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 67.48,
+      "json_bytes": 203,
+      "content_types": [
+        "text",
+        "image"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "get",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.2,
+      "json_bytes": 373,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "get",
+      "status": "error",
+      "reason": "not_a_download",
+      "isError": true,
+      "wall_ms": 0.87,
+      "json_bytes": 108,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "export",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.93,
+      "json_bytes": 106,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "pdf",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 24.75,
+      "json_bytes": 107,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "get",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.11,
+      "json_bytes": 374,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "navigate",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 74.27,
+      "json_bytes": 393,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "fill",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 28.18,
+      "json_bytes": 435,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "press",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 30.72,
+      "json_bytes": 193,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "type",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 22.86,
+      "json_bytes": 450,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "read",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.66,
+      "json_bytes": 104,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "focus",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 19.87,
+      "json_bytes": 193,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "hover",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 64.36,
+      "json_bytes": 193,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "clear",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 20.25,
+      "json_bytes": 447,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "check",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 48.88,
+      "json_bytes": 310,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "uncheck",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 48.95,
+      "json_bytes": 195,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "select",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 23.57,
+      "json_bytes": 347,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "upload",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 23.37,
+      "json_bytes": 382,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "drag",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 103.35,
+      "json_bytes": 302,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "scroll",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 2.12,
+      "json_bytes": 121,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "scroll",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 45.77,
+      "json_bytes": 194,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "read",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 4.98,
+      "json_bytes": 179,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "select",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 21.33,
+      "json_bytes": 342,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "read",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 2.02,
+      "json_bytes": 100,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "click",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 39.45,
+      "json_bytes": 246,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "wait_for_text",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 78.14,
+      "json_bytes": 165,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "handle_dialog",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.98,
+      "json_bytes": 96,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "click",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 60.95,
+      "json_bytes": 311,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "handle_dialog",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 2.21,
+      "json_bytes": 91,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "wait_for_popup",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 51.32,
+      "json_bytes": 369,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "click",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 58.89,
+      "json_bytes": 255,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "close",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 9.21,
+      "json_bytes": 50,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "wait_for_event",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.17,
+      "json_bytes": 229,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "wait_for_download",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 38.01,
+      "json_bytes": 239,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "click",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 67.38,
+      "json_bytes": 365,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "list",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.05,
+      "json_bytes": 371,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "get",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.82,
+      "json_bytes": 349,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "read_text",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.93,
+      "json_bytes": 125,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "export",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 2.06,
+      "json_bytes": 100,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "export",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.67,
+      "json_bytes": 159,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "delete",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.43,
+      "json_bytes": 59,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "cookies_set",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 3.46,
+      "json_bytes": 48,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "cookies_get",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 2.9,
+      "json_bytes": 190,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "export_state",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 2.37,
+      "json_bytes": 86,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "import_state",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 48.32,
+      "json_bytes": 211,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "close",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 7.26,
+      "json_bytes": 75,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "cookies_clear",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 8.44,
+      "json_bytes": 53,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "navigate",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 76.0,
+      "json_bytes": 332,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "navigate",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 72.6,
+      "json_bytes": 393,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "go_back",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 9.98,
+      "json_bytes": 104,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "go_forward",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 11.16,
+      "json_bytes": 109,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "validate",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.53,
+      "json_bytes": 1263,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "save",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.32,
+      "json_bytes": 261,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "run",
+      "status": "pass",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 141.36,
+      "json_bytes": 166,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "read",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 2.18,
+      "json_bytes": 108,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "get",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.07,
+      "json_bytes": 1212,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "save",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.09,
+      "json_bytes": 115,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "run",
+      "status": "error",
+      "reason": "context_busy",
+      "isError": true,
+      "wall_ms": 1.48,
+      "json_bytes": 235,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "run",
+      "status": "error",
+      "reason": "internal",
+      "isError": true,
+      "wall_ms": 1022.7,
+      "json_bytes": 809,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "delete",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.23,
+      "json_bytes": 55,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "save",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.96,
+      "json_bytes": 121,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "browser",
+      "op": "status",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.81,
+      "json_bytes": 401,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "browser",
+      "op": "status",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 2.83,
+      "json_bytes": 463,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "pause",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.37,
+      "json_bytes": 51,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "browser",
+      "op": "status",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.28,
+      "json_bytes": 462,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "resume",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.86,
+      "json_bytes": 52,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "cancel",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.74,
+      "json_bytes": 54,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "run",
+      "status": "cancelled",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 25.31,
+      "json_bytes": 217,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "delete",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.08,
+      "json_bytes": 58,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "record_start",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.88,
+      "json_bytes": 86,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "locator",
+      "op": "fill",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 67.56,
+      "json_bytes": 500,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "record_stop",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.91,
+      "json_bytes": 830,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "stats",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.86,
+      "json_bytes": 185,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "delete",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.67,
+      "json_bytes": 59,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "publish",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.18,
+      "json_bytes": 91,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "network",
+      "op": "start",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.67,
+      "json_bytes": 53,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "trace",
+      "op": "start",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 10.74,
+      "json_bytes": 53,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "page",
+      "op": "reload",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 17.81,
+      "json_bytes": 104,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "network",
+      "op": "stop",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.15,
+      "json_bytes": 386,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "trace",
+      "op": "stop",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 16.62,
+      "json_bytes": 86,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "get",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.9,
+      "json_bytes": 256,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "set_headers",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 3.28,
+      "json_bytes": 62,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "set_permissions",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 2.4,
+      "json_bytes": 55,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "create",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 45.91,
+      "json_bytes": 211,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "close",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 5.86,
+      "json_bytes": 75,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "workflow",
+      "op": "delete",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.24,
+      "json_bytes": 55,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "delete",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 1.45,
+      "json_bytes": 59,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "close",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.67,
+      "json_bytes": 76,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "artifact",
+      "op": "cleanup",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.98,
+      "json_bytes": 97,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "browser",
+      "op": "close",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 170.62,
+      "json_bytes": 29,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "browser",
+      "op": "profile_copy",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 23.13,
+      "json_bytes": 666,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "browser",
+      "op": "profile_list",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 4.57,
+      "json_bytes": 411,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "context",
+      "op": "create",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 654.8,
+      "json_bytes": 130,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "browser",
+      "op": "close",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 116.24,
+      "json_bytes": 50,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "browser",
+      "op": "profile_delete",
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 16.52,
+      "json_bytes": 197,
+      "content_types": [
+        "text"
+      ]
+    },
+    {
+      "tool": "daemon_shutdown",
+      "op": null,
+      "status": "ok",
+      "reason": null,
+      "isError": false,
+      "wall_ms": 0.96,
+      "json_bytes": 51,
+      "content_types": [
+        "text"
+      ]
+    }
+  ],
+  "adapter_stderr": ""
+}

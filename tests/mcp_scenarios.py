@@ -186,12 +186,14 @@ async def profile_copy(client, data):
     await client.ok(
         "browser",
         op="profile_copy",
-        source=str(Path(data, "browser-profile")),
+        source=str(Path(data, "browser-profiles", "primary")),
         name="e2e-copy",
         tier="strict",
     )
     await client.ok("browser", op="profile_list")
-    await client.ok("browser", op="profile_use", name="e2e-copy")
+    copied = await client.ok("context", op="create", profile="e2e-copy")
+    assert copied["container"] == "default" and copied["active_page_id"], copied
+    await client.ok("browser", op="close", profile="e2e-copy")
     await client.ok("browser", op="profile_delete", name="e2e-copy")
 
 

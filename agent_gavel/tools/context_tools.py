@@ -23,7 +23,7 @@ def register_context_tools(catalog):
         container: str = "default",
         isolated: bool = None,
     ):
-        "container默认isolated，继承profile登录态但不写回；default复用并写回。"
+        "默认default复用资料并写回；isolated新建隔离容器、继承cookie但不写回。"
         rt = rt_get()
         config = dict(
             locale=locale,

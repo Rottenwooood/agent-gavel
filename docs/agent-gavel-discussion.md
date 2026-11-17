@@ -1,6 +1,8 @@
 > **历史文档**：本文是 0.4 时期的设计讨论记录，其中的扁平工具名（`page_read`、
 > `locator_click`、`workflow_run` 等）已在 0.5 收敛为 `page(op=read)`、
-> `locator(op=click)`、`workflow(op=run)`。当前接口以 [工具参考](tools.md) 为准。
+> `locator(op=click)`、`workflow(op=run)`。其中session资源层、资料切换与生命周期描述
+> 已被0.6的profile/context/page模型取代；市场比较、比例、性能目标和演示计划保留当时讨论语境，
+> 不代表当前实现或测量。当前接口以 [工具参考](tools.md) 为准。
 
 # agent-gavel 讨论整理
 

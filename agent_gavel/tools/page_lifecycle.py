@@ -21,7 +21,7 @@ def register_page_lifecycle_tools(catalog):
 
     @catalog.operation(returns="Page")
     async def page_select(page_id: str):
-        "设置active page；省略page_id时按现有上下文解析，歧义报错。"
+        "把指定page_id设为active；显式page_id的其他操作无需先select。"
         rt = rt_get()
         handle = rt.page_mgr.get(page_id)
         handle.context.active_page_id = page_id

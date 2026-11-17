@@ -68,7 +68,7 @@ async def exercise(client, env, options, report):
     await client.ok("browser", op="launch", headless=options.headless)
     report["browser_started"] = True
     created = await client.ok("context", op="create")
-    sid, pid, cid = created["context_id"], created["page_id"], created["context_id"]
+    sid, pid, cid = created["context_id"], created["active_page_id"], created["context_id"]
     report["browser_created"] = True
     base = (ROOT / "tests" / "webapp").as_uri()
     await client.ok("page", op="navigate", page_id=pid, url=f"{base}/basic.html")
@@ -210,11 +210,11 @@ async def main(options):
                 "AGENT_GAVEL_ARTIFACT_DIR": f"{data}/artifacts",
                 "AGENT_GAVEL_WORKFLOWS_DIR": f"{data}/workflows",
                 "AGENT_GAVEL_BROWSER_PROFILES": f"{data}/browser-profiles",
-                "AGENT_GAVEL_PROFILE_DIR": f"{data}/profiles",
                 "AGENT_GAVEL_ALLOW_DOMAINS": "",
                 "AGENT_GAVEL_DOMAIN_GUARD": "0",
                 "AGENT_GAVEL_EXTRA_ARGS": "",
                 "AGENT_GAVEL_HEADLESS": "1" if options.headless else "0",
+                "AGENT_GAVEL_TEST_ISOLATED": "1",
                 "AGENT_GAVEL_ALLOW_PATHS": data,
                 "PYTHONDONTWRITEBYTECODE": "1",
                 "PYTHONPATH": str(ROOT),

@@ -1,64 +1,61 @@
-# 反检测调研：为什么 Playwright 版本更容易被风控
+# 浏览器启动、资料持久化与自动化特征
 
-> 本机实测，2026-10。结论来自直接对比"Playwright 自管启动"与"手动启动 Chrome +
-> connect_over_cdp（重构前的做法）"两种方式下页面能读到的指纹。
+本文按0.6.0源码说明默认行为。减小自动化特征的措施，不等同于真实站点的识别率测试结果。
 
-## 1. 根因（按影响排序）
+## 默认启动路径
 
-| # | 特征 | Playwright 启动（修复前） | 手动 Chrome + CDP（旧版） | 说明 |
-|---|---|---|---|---|
-| 1 | `navigator.webdriver` | **True** | **False** | 页面第一眼就能判定自动化，最廉价、最致命 |
-| 2 | WebGL 渲染器 | `ANGLE ... SwiftShader`（软件渲染） | 真实 GPU（有头时 `AMD Radeon 680M`） | 我们默认加了 `--disable-gpu`，逼成软件渲染 |
-| 3 | UA | 无头含 `HeadlessChrome` | `--headless=new` 无此标记 | 无头场景直接暴露 |
-| 4 | profile | `--user-data-dir=/tmp/playwright_chromiumdev_profile-*` | 持久真实目录（累积 cookie/历史） | 全新临时 profile = "从没用过的浏览器" |
-| 5 | 启动参数 | 一大批 `--disable-*`、`--remote-debugging-pipe`、`--enable-unsafe-swiftshader`、`--disable-extensions` | 少量自定义参数 | 部分是进程可见；部分有 JS 可观测后果 |
-| 6 | CDP 附着 | 是（`Runtime.enable`） | 是（同一 CDP） | 两者都有；本机探针未触发该泄漏，需更强工具测 |
+默认managed模式由runtime/browser_process.py启动系统Chrome，再通过CDP连接；默认有头。
+首次page(op=open/navigate)可以惰性启动，不要求模型先launch或创建context。
+资料默认落在 `<资料根>/primary/`，资料根由core/config.browser_profiles_root()解析。
+不传profile和容器时使用持久default容器，扫码与登录写回磁盘，不需要另做export。
 
-`navigator.webdriver` 与 WebGL/UA 这三项是页面**无需特殊技巧即可读到**的，所以是主因。
+同一资料目录已运行的Chrome优先复用/重连；daemon退出保留浏览器和页面。
+browser(op=close)显式关闭进程，给profile只关闭该目录。账号登录是否仍有效由站点决定。
 
-## 2. 已做的修复
+## 源码中已有的措施
 
-- **关闭 `navigator.webdriver`**：启动参数加 `--disable-blink-features=AutomationControlled`
-  （实测 True → False）。
-- **不再默认 `--disable-gpu`**：有头时用真实 GPU（实测 WebGL 恢复为 `AMD Radeon 680M`）；
-  无 GPU 环境可用 `AGENT_GAVEL_DISABLE_GPU=1` 显式加回。
-- **无头 UA 去掉 `HeadlessChrome`**：启动后取一次真实 UA、把 `HeadlessChrome` 换成
-  `Chrome`，作为默认 context 的 UA。
-- **留出扩展口**：`AGENT_GAVEL_EXTRA_ARGS`（空格分隔）追加自定义启动参数。
-- **回归测试**：`tests/test_stealth.py` 断言 `navigator.webdriver` 非 True、UA 无
-  `HeadlessChrome`、`window.chrome` 存在。
+- _launch_args()包含 `--disable-blink-features=AutomationControlled`；默认不加 `--disable-gpu`。
+- 默认启动参数已移除 `--no-sandbox`、`--disable-dev-shm-usage`、`--keep-alive-for-test`。
+  保活依靠保留默认容器标签页；CDP的remote-debugging-port继续保留。
+- managed无头启动从浏览器版本构造桌面UA，其他后端路径也处理HeadlessChrome标记。
+  primary目录禁止以managed无头模式启动；测试使用独立资料并显式设置隔离测试标记。
+- locator(op=click/fill, humanize=true)已向后端传递开关：click先移动鼠标，fill先定位点击再逐字输入。
+  默认关闭。type/press虽暴露humanize参数，当前工具入口未传给后端，不能将后端分支视为入口已生效。
+- Linux启动环境会在需要时补用户会话DBus地址，并在可用时选择gnome-libsecret，
+  用于访问Chrome资料的系统钥匙串；这不是自动刷新凭据的机制。
 
-修复后实测：
+对应检查包括test_stealth.py、test_single_browser.py和test_daemon_idle.py。
+这些检查验证具体指纹属性与生命周期，不衡量淘宝等站点的识别率。
 
-```
-有头: webdriver=False  headless_ua=False  webgl=AMD Radeon 680M（真实）
-无头: webdriver=False  headless_ua=False  webgl=SwiftShader（无 GPU，不可避免）
-```
+## 资料与隔离
 
-## 3. 仍未解决 / 需要决策
+browser(op=profile_copy)复制经授权的本机Chrome资料。strict不包含cookie与站点本地态；
+default包含站点状态，full可再包含扩展；各档均剔除密码、自动填充与同步等配置中的隐私项。
+源Chrome应关闭以保持一致性；已有目标目录默认不覆盖，需要显式force。
+profile_ensure在目标已存在时直接复用，并不是每次任务的必需步骤。
 
-- **profile 的历史累积**：managed 模式已默认使用持久资料目录（`_default_profile_dir()`），
-  不再每次从空 profile 启动；临时上下文只出现在 `container="isolated"` 等显式隔离场景。
-  仍待解决的是资料副本之间的登录态与 cookie 是否可审计、可迁移（`browser(op=profile_*)` 提供
-  复制/切换/删除，但不做内容审计）。
-- **无头 WebGL**：无 GPU 时只能软件渲染，属无头固有特征；对风控敏感的站点应使用**有头**。
-- **接管用户自己的浏览器**：已实现为 `browser_mode="attach"` / `AGENT_GAVEL_CDP_ENDPOINT`：
-  只连接用户已启动的 Chrome，不拥有进程、不负责关闭，默认复用其第一个 context，没有 context
-  时才新建；调用前必须取得授权。与 managed 的区别是资料目录与启动参数由用户决定，本工具
-  不再为其做加固。
-- **CDP `Runtime.enable` 泄漏**：本机探针未触发；需要用 creepjs 之类的真实检测页做
-  L4 层度量。
-- **真实站点 A/B 度量**：同一站、同一任务，对比"Playwright 启动 / 手动启动+CDP /
-  接管用户 Chrome"的识别率。这是计划中的 gym L4 层，尚未搭建。
+没有ACTIVE或profile_use；名字省略固定使用primary。AGENT_GAVEL_BROWSER_PROFILE已删除。
+container=isolated创建独立内存容器并继承所选profile默认容器的cookie；
+它不完整复制localStorage/IndexedDB，也不把新登录写回。需要长期分离账号时使用不同profile。
 
-## 4. 配置速查
+## 配置入口
+
+环境变量与默认路径由core/config.py唯一解析：
 
 | 变量 | 作用 |
 |---|---|
-| `AGENT_GAVEL_HEADLESS=1` | 无头（更易被检测；风控敏感场景建议有头） |
-| `AGENT_GAVEL_CHROME_CHANNEL` | 指定 Chrome 通道；空 = 用自带 chromium |
-| `AGENT_GAVEL_DISABLE_GPU=1` | 加回 `--disable-gpu`（软件渲染） |
-| `AGENT_GAVEL_EXTRA_ARGS` | 追加自定义启动参数（空格分隔） |
-| `AGENT_GAVEL_BROWSER_MODE` | `managed`（默认，自起加固 Chrome + 持久资料）/ `attach`（连已有 Chrome）/ `playwright`（Playwright 直接 launch） |
-| `AGENT_GAVEL_CDP_ENDPOINT` | 已有 Chrome 的调试地址；设置后走 attach 语义 |
-| `AGENT_GAVEL_BROWSER_PROFILE` | managed 模式使用的资料目录 |
+| AGENT_GAVEL_DATA_DIR | 覆盖平台用户级数据根，派生daemon、profiles和workflows目录 |
+| AGENT_GAVEL_BROWSER_PROFILES | 单独覆盖命名资料目录的根 |
+| AGENT_GAVEL_CHROME_USER_DATA | 资料复制的来源，不改变默认启动资料目录 |
+| AGENT_GAVEL_HEADLESS | 请求无头模式，仍受primary守卫约束 |
+| AGENT_GAVEL_CHROME_BIN | managed模式的浏览器可执行文件 |
+| AGENT_GAVEL_CHROME_CHANNEL | Playwright模式的channel；空字符串表示不指定 |
+| AGENT_GAVEL_DISABLE_GPU | 显式禁用GPU |
+| AGENT_GAVEL_EXTRA_ARGS | 追加以空格分隔的启动参数 |
+| AGENT_GAVEL_BROWSER_MODE | managed、attach或playwright |
+| AGENT_GAVEL_CDP_ENDPOINT | attach使用的已有浏览器调试端点 |
+| AGENT_GAVEL_IDLE_EXIT | 无adapter连接后的daemon空闲退出阈值；0禁用 |
+
+attach只连接经用户授权的已有浏览器，不拥有其进程，也不改变它的启动参数。
+managed、attach、playwright不能视为同一组启动指纹。实际站点仍可能因账号、网络、操作频率、
+浏览器特征或凭据过期要求登录、验证码或拒绝访问；这些结果须在具体站点与任务上验证。

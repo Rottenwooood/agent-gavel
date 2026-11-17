@@ -10,16 +10,16 @@ AI 声明动作 + "做完后页面应该长什么样" → 工具执行、等待�
 
 ## 内测范围
 
-- **可用**：资源模型（session/context/page）、基础 + 高级浏览器能力、工作流
+- **可用**：资源模型（profile/context/page）、基础 + 高级浏览器能力、工作流
   录制/重放/局部修复、产物（下载/截图/PDF/trace）、安全加固。
 - **已归档不运行**：旧的裸 CDP 网页通道与 AT-SPI 桌面通道（`legacy/`）。
 - **未做**：视觉/坐标后端（M6）、跨站模板市场。
 
-## 工具分组（14 个入口，工具名无前缀）
+## 工具分组（13个入口，工具名无前缀）
 
 | 组 | 代表操作 | 用途 |
 |---|---|---|
-| 资源 | `session(op=create)` `context(op=create)` `page(op=open/list)` | 建隔离环境、管页面 |
+| 资源 | `context(op=create, isolated=true)` `page(op=open/list)` | 显式建隔离容器、管页面；默认open可惰性初始化 |
 | 读 | `page(op=navigate/text/read/explore/snapshot)` | 导航、取值/正文、找锚点 |
 | 动 | `locator(op=click/fill/type/press…)` | 动作（可带断言） |
 | 断言 | `assertion(op=check)`、`page(op=wait_for_url/selector/text/load/response/download/popup/event)` | 独立断言、等响应/加载/下载/事件 |
@@ -29,8 +29,8 @@ AI 声明动作 + "做完后页面应该长什么样" → 工具执行、等待�
 
 ## 使用要点
 
-1. 动作能带断言就带断言——这是省 token 的关键。
-2. 写窄了/指错了会返回 `ambiguous` + diff 证据，看证据再决定，不要无脑重试。
+1. 动作与导航可带断言，执行、等待、判定一次返回，减少模型为判断结果而追加的调用。其他减少往返的设计见[README](../README.md#怎样减少模型往返)。
+2. 检查未通过、且动作期间观测到有意义的DOM变化时返回ambiguous及diff；否则检查未通过为fail。看证据再决定，不要无脑重试。
 3. 陌生站先用 `page(op=explore)` 或 `page(op=text)` 的 `anchors` 拿稳定锚点，再动作；跑通后录成模板。
 4. 副作用步骤（提交/删除/支付）默认需确认，别为省事关掉。
 5. 失败先看结构化 `reason` 和 `hint`，多数情况直接告诉你怎么修。
@@ -45,7 +45,6 @@ AI 声明动作 + "做完后页面应该长什么样" → 工具执行、等待�
 ## 自检
 
 ```bash
-uv run pytest -q                      # 全绿
-uv run python tests/bench_tasks.py    # 真实任务（可 AGENT_GAVEL_BENCH_OFFLINE=1 跳真站）
-uv run python tests/mcp_live_smoke.py # 真实 MCP 协议联调
+AGENT_GAVEL_HEADLESS=0 uv run pytest -q
+uv run python tests/e2e_mcp.py --output /tmp/gavel-headed-e2e.json
 ```

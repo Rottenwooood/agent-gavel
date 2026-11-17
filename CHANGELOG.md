@@ -5,7 +5,7 @@
 ### 破坏性变更：三层资源模型
 
 - 删除 session 层：`runtime/sessions.py` 与 `tools/session_tools.py` 移除，工具 14 → 13、
-  操作 85 → 80。并发独占改由 context 的 run 锁承担，错误码 `session_busy` → `context_busy`；
+  当前操作数为84（按catalog生成的工具参考计数）。并发独占改由 context 的 run 锁承担，错误码 `session_busy` → `context_busy`；
   `session(op=export_state/import_state)` 移到 `context`。
 - 资源 id 与事件、产物归属全部收敛到 `context_id`；页面响应不再有会话字段。
 - `context(op=create)` 响应只返回 `active_page_id`，不再同时给 `page_id`。
@@ -30,13 +30,20 @@
 
 - 启动参数去掉 `--no-sandbox`、`--disable-dev-shm-usage`、`--keep-alive-for-test`；
   进程保活改为"默认容器永远保留一个标签页"。
-- 新增 `humanize` 布尔参数（click/fill/type/press，默认关）：真实鼠标轨迹与随机输入间隔。
+- 新增 `humanize` 布尔参数（默认关）：click/fill入口已传到后端，分别提供鼠标轨迹与逐字输入。
+  type/press入口虽暴露此参数，当前未向后端传递，不能宣称这两个入口已启用人性化输入。
 
 ### 交互语义
 
-- 点击/按键弹出的新页，opener 是当前页时自动跟随，返回 `switched_to_new_tab: true`；
+- 点击/按键弹出的新页，opener 是动作所在页时自动跟随，返回 `diff.switched_to_new_tab: true`；
   `follow_popup=false` 可关。
 - 省略 `page_id` 时优先默认容器，不再因后台隔离容器报 `ambiguous_page`。
+
+### 文档勘误
+
+- README、架构约束、内测与贡献指南对齐profile/context/page和默认资料目录；工具参考从声明重新生成。
+- 按调用实现说明动作内联断言、导航带正文、正文带锚点、diff、条件等待和模板整条执行等减少模型往返的设计，不对未指定任务承诺调用轮数。
+- 旧方案和验收报告保留为带日期的历史记录，不作为0.6验收结论。
 
 ## 0.5.2 — 2026-11-14
 

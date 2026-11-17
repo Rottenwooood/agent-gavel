@@ -43,7 +43,7 @@ def register_browser_tools(catalog):
 
     @catalog.operation(returns="BrowserStatus")
     async def browser_status(detail: str = "compact"):
-        "资源概况；full再含会话配置、OS进程、事件与指标。"
+        "资源概况；full再含容器配置、OS进程、事件与指标。"
         rt = rt_get()
         return {"status": "ok", **(await rt.status(detail=detail))}
 

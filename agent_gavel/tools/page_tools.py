@@ -216,7 +216,7 @@ def register_page_tools(catalog):
         text_chars: int = 4000,
         detail: str = "compact",
     ):
-        "新建标签页并加载；入参与返回同 navigate，activate=False不抢active。"
+        "新建标签页并加载；加载参数与返回同navigate，另可选context/profile/isolated；activate=False不抢active。"
         rt = get_runtime()
         ctx = await _resolve_context(context_id, profile=profile, isolated=isolated)
         handle = await rt.page_mgr.open(ctx, None, activate=activate)
@@ -251,7 +251,7 @@ def register_page_tools(catalog):
     async def page_snapshot(
         page_id: str = None, level: str = "summary", limit: int = 50, detail: str = "compact"
     ):
-        "summary摘要/compact锚点/interactive元素/full再含HTML；compact下元素只留tag/text/href/anchor。"
+        "summary摘要/compact锚点/interactive元素/full再含HTML；compact保留tag/text/anchor及非空href/type/placeholder。"
         from ..runtime import get_runtime
 
         rt = get_runtime()

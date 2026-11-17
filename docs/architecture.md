@@ -1,6 +1,6 @@
 # agent-gavel 架构与修改约束
 
-本文是项目的约束性文件。它同时描述目标架构、必须保持的不变量、以及为达成目标而执行的分阶段计划。
+本文是项目的约束性文件，描述当前架构、不变量与修改规则。第6节保留已完成的历史收敛步骤；历史条款中的接口、资源模型和生命周期由第0.6节及第13节的后续修订取代，不作为待实施计划。
 
 任何实现与本文冲突时，以本文为准；本文与代码不一致时，视为缺陷，需要在同一次变更中修好其中一方。
 
@@ -8,7 +8,7 @@
 
 ## 0.5 工具接口修订（2026-11-10）
 
-本节记录经用户授权的0.5接口变更，取代下文历史阶段计划中“保留旧工具名”的冻结条款。
+本节记录经用户授权的分组接口变更，入口清单已按0.6删除session后的实现更新。它取代下文历史阶段计划中“保留旧工具名”的冻结条款。
 
 - 公共入口固定为13个：browser、context、page、locator、workflow、artifact、assertion、trace、network、console_get、performance_metrics、daemon_shutdown、screenshot。95个旧操作的能力通过操作合并或迁移保留，不注册旧名。
 - `tools/catalog.py` 是操作声明、路由及错误封装的唯一入口；`tools/schemas.py` 从声明生成公共参数类型和操作差异约束。操作选择不实现领域行为。
@@ -19,7 +19,7 @@
 - 输出中的status仍由common.envelope归一。图像与元数据使用core/results.py的传输无关值，core不依赖MCP或Playwright。
 - 模板、断言三态、权限、资源id、daemon锁与同页串行机制不变。写路径删除模板修正为精确id，不在工具层执行宽松resolve_id。
 - `docs/tools.md` 由`python -m agent_gavel.tools.describe --markdown docs/tools.md`生成。公开schema与文档来自同一操作声明，禁止维护第二份参数默认值表。
-- 对外工具数量快照改为14；本轮验收使用`tests/e2e_mcp.py`通过真实MCP stdio和独立daemon调用真实浏览器。内部函数测试和语法检查不能作为端到端通过的证据。环境拒绝socket绑定或无法打开显示会话时，验收必须记录失败，不能宣告浏览器路径通过。
+- 当前对外工具数量快照为13；操作数量以catalog生成的`docs/tools.md`为准。验收使用`tests/e2e_mcp.py`通过真实MCP stdio和独立daemon调用真实浏览器。内部函数测试和语法检查不能作为端到端通过的证据。环境拒绝socket绑定或无法打开显示会话时，验收必须记录失败，不能宣告浏览器路径通过。
 
 ## 0.6 资料目录与默认落点（2026-11-16）
 
@@ -27,10 +27,13 @@
 
 - **唯一数据根**：`AGENT_GAVEL_DATA_DIR` 优先；否则按平台取标准目录（Windows `%LOCALAPPDATA%\agent-gavel`、macOS `~/Library/Application Support/agent-gavel`、Linux `$XDG_DATA_HOME` 或 `~/.local/share/agent-gavel`）。发行包不硬编码绝对路径。
 - **资料目录按名字寻址**：`profiles/<name>/`，默认名固定为 `primary`。没有 `ACTIVE` 文件，`profile_use` 操作随之取消；解析顺序为"显式 `user_data_dir` > 命名 `profile` > `primary`"。
-- **默认零参数可用**：不传 profile/容器时，惰性会话落在 `primary` 的默认容器（`browser.contexts[0]`），登录态直接读写磁盘。`isolated` 仅在显式要求时创建，且不写回。
-- **主资料目录禁止无头**：目标是 `primary` 且请求 headless 时抛 `headless_forbidden_on_primary`；显式指定资料目录或 `AGENT_GAVEL_TEST_ISOLATED=1` 时豁免（CI 需要）。
-- **弹窗跟随**：`click`/`press` 产生的新页，若 opener 是当前页，自动把该 context 的 `active_page_id` 切到新页，并在结果顶层给 `switched_to_new_tab: true`；显式传 `page_id` 的动作不受影响。
+- **默认初始化**：`page(op=open/navigate)` 不传profile/容器时，惰性初始化落在 `primary` 的默认容器（`browser.contexts[0]`），登录态直接读写磁盘。`isolated` 仅在显式要求时创建，仅继承cookie且不写回；它仍使用所选profile的浏览器，不是绕过primary无头限制的开关。
+- **主资料目录禁止无头**：managed启动目标路径等于primary目录且请求headless时抛 `headless_forbidden_on_primary`；显式传同一路径不豁免，`AGENT_GAVEL_TEST_ISOLATED=1` 允许隔离测试使用无头。已有浏览器与显式请求的headless不一致时报 `headless_mismatch`。
+- **弹窗跟随**：`click`/`press` 产生的新页，若opener是动作所在页且 `follow_popup=true`，自动把该context的 `active_page_id` 切到新页，在 `diff.switched_to_new_tab` 给出true并在 `diff.pages.active` 记录切换。显式page_id始终指定本次动作对象；后续省略page_id时才使用更新后的active页。
 - **三层语义**：profile 决定用哪个 Chrome 进程与磁盘目录；context 是 cookie 分区；page 是标签页。没有 session 这一层——并发独占由 context 的 run 锁承担。不同 profile 各自一个 Chrome 进程，`ensure_browser` 按资料目录缓存句柄，互不驱逐。
+- **页面解析**：显式page_id优先；调用入口接受context_id时可限定context。无显式作用域时，优先唯一default容器；只有一个持有页面的context时使用它；其余多义情况报 `ambiguous_page`。存在多个default容器时不会凭profile名字猜一个。
+- **生命周期**：adapter退出不关闭daemon或浏览器；没有adapter连接达到 `AGENT_GAVEL_IDLE_EXIT` 阈值后daemon退出，默认阈值由config定义。daemon退出保留受管Chrome与页面，下次按资料目录重连；`browser(op=close)` 才显式关闭，给profile只关该目录。不同启动参数是否可复用由 `BrowserProcessManager` 判定。
+- **路径范围**：数据根派生daemon文件、profiles与workflows；`AGENT_GAVEL_BROWSER_PROFILES`、`AGENT_GAVEL_WORKFLOWS_DIR` 可分别覆盖。产物默认位于系统临时目录的 `agent-gavel/artifacts`，可用 `AGENT_GAVEL_ARTIFACT_DIR` 覆盖，不默认派生于数据根。
 
 ## 0. 适用范围
 
@@ -75,7 +78,7 @@ MCP 客户端（opencode 等）会为同一用户拉起**多个** agent-gavel �
 - **adapter**：面向 MCP 客户端的 stdio 进程。不导入 Playwright、不持有任何运行时状态，只负责把工具调用转发给 daemon 并回传结果。
 - **串行化只发生在 daemon 内部**：PageActor 负责同页串行，context 的 run 锁负责独占。因此不存在"跨进程动作交错"这一类别的问题。
 - **并行发生在 daemon 内部的 context/page 之间**；adapter 数量不影响浏览器数量。
-- **资源预算**：一个数据根一个 Chrome；context 与 page 是廉价并行单位；adapter 必须保持轻量（不得因导入工具模块而加载 Playwright）。
+- **资源预算**：一个数据根一个daemon，同一资料目录一个Chrome；不同profile允许独立进程。context与page是进程内的并行单位；adapter必须保持轻量（不得因导入工具模块而加载Playwright）。
 
 ### 2.2 I7 的完整含义
 
@@ -119,7 +122,7 @@ agent_gavel/
 
   runtime/
     browser_process.py # 进程：ensure / close / reconcile（全异步）
-    contexts.py        # 窗口：cookie 空间 + active page 的唯一真相
+    contexts.py        # cookie 分区 + active page 与run锁的唯一真相
     pages.py           # 标签页：事件绑定 + actor
     queue.py           # 每页串行队列
     events.py
@@ -182,7 +185,7 @@ agent_gavel/
 | 断言读取类型、比较操作、解析 | `core/checks.py` | `schema`、`backend`、`assertion_schema` 工具 |
 | active page | `Context.active_page_id` | `BrowserRuntime` |
 | 页面归属 | `PageHandle.context_id` | — |
-| 响应中的会话标识 | `tools/common.envelope`（按本次调用解析） | 页面对象、backend |
+| 页面响应中的资源归属 | `tools/common.ids`（从PageHandle取context_id/page_id） | 额外推导身份或引入session标识 |
 | 运行独占 | `Context.acquire_run` | — |
 | 默认容器复用 | `ContextManager`（按浏览器分槽） | 单槽全局变量 |
 | 进程启动幂等 | `BrowserProcessManager.ensure()` | 工具层 |
@@ -201,7 +204,7 @@ agent_gavel/
 | 契约 | 内容 |
 |---|---|
 | 模板格式 | `schema_version=2`；字段名、`$VAR` 语义、checkpoint 类型、`failure_policy` 键保持不变 |
-| 保留工具名 | 0.5使用第0.5节的14个规范入口；旧名仅见迁移文档，不在服务端注册 |
+| 保留工具名 | 0.6使用第0.5节更新后的13个规范入口；旧名仅见迁移文档，不在服务端注册 |
 | 错误码 | 现有 `GavelError.code` 字符串不得重命名；新增错误码集中登记在 `core/errors.py` |
 | 断言三态 | `pass` / `fail` / `ambiguous` 的判定条件不变；`ambiguous` 必须附带有意义的变化证据 |
 | 并发语义 | 同页串行、跨页并行；`context_busy` |
@@ -212,9 +215,9 @@ agent_gavel/
 
 ---
 
-## 6. 分阶段实现计划
+## 6. 历史收敛阶段
 
-阶段顺序不可颠倒。每个阶段结束时，门禁必须为绿；未绿不得进入下一阶段。
+以下保留原有实施顺序：每个阶段结束时门禁必须为绿，未绿不得进入下一阶段。它们是历史过程记录；当前接口与行为按第0.6节、第13节执行，包括多profile进程、daemon空闲退出、popup跟随和多页模板引用。
 
 ### 阶段 0：冻结行为
 
@@ -536,7 +539,7 @@ pytest -q   # 配置 pytest-timeout，单测上限 90s
 
 其中 `pytest` 必须包含：
 
-- `tests/test_invariants.py`：第 2 节的八条检查，含 `BLOCKING_INVENTORY` 与 `silent-ok` 标注检查
+- `tests/test_invariants.py`：第2节的不变量门禁，含 `BLOCKING_INVENTORY` 与 `silent-ok` 标注检查
 - `tests/test_vocabulary.py`：动作、读取类型、比较操作的三方一致性
 - `tests/test_contract_snapshot.py`：对外响应外形
 - `tests/test_identity.py`：资源归属与并发
@@ -564,9 +567,9 @@ pytest -q   # 配置 pytest-timeout，单测上限 90s
 5. backend 拆分后每个文件少于 300 行；工具层只有一份 guard 与一个 backend 实例。
 6. 环境变量只出现在 `core/config.py`；仓库根不再产生运行期目录。
 7. 浏览器关闭期间，其他调用不被阻塞（有测试证明）。
-8. 对外响应均经 `envelope`，`status` 取值受限，包含 `operation_id` 与 `elapsed_ms`。
-9. `README`、`CHANGELOG`、`docs/tech-plan.md` 与实现一致。
-10. 进程模型达标：一个数据根只有一个 daemon、一个 Chrome；adapter 不持有浏览器与注册表。
+8. 对外响应均经 `envelope`，`status` 取值受限；完整响应含 `operation_id` 与 `elapsed_ms`，compact按结果契约投影，不要求总是保留诊断字段。
+9. `README`、`CHANGELOG`、生成的工具参考与实现一致；`docs/tech-plan.md`和讨论稿明确标为历史背景。
+10. 进程模型达标：一个数据根只有一个daemon、同一资料目录只有一个Chrome；不同profile允许各自进程；adapter不持有浏览器与注册表。
 
 ---
 
@@ -576,7 +579,7 @@ pytest -q   # 配置 pytest-timeout，单测上限 90s
 
 | 项 | 状态 |
 |---|---|
-| 多标签模板（打开、切换、等待 popup 作为模板步骤） | 暂不做；阶段 2 仅让录制记录 `page_id`，不实现执行 |
+| 新增多页模板动作 | 现有page0/new:N引用与按diff绑定已实现；不以此为由新增未定义的模板动作 |
 | 参数化助手（自动提示可参数化字段） | 不做；参数化由录制入口显式传入 |
 | 模板社区征集 | 冻结，仅保持格式不变 |
 | 并行步骤组 | 不做 |
@@ -614,7 +617,7 @@ pytest -q   # 配置 pytest-timeout，单测上限 90s
 
 **导航管线（open / navigate 共用）**
 
-- `open` 与 `navigate` 入参、返回完全一致，只有「新建标签页 vs 复用当前页」的差别；`open` 另有 `activate` 控制是否抢占 active page。
+- `open` 与 `navigate` 共用加载参数和返回契约；`open`另有context_id/profile/isolated/activate，决定新页归属与是否设置active，`navigate`复用指定或解析到的页面。
 - `text_chars` 默认 4000：加载 URL 即带回正文摘要，`0` 关闭。`compact` 下**不返回 diff、不返回 anchors**（导航必然整页替换，diff 是噪声；anchors 用 `page(op=text)` 取）。
 - 软拦截：`redirected` 且 final_url 命中 `/auth|/login|/sso|/ipauth|/error|/403|/denied`，或正文 <150 字且含「没有访问/仅限校内/请先登录/访问受限/验证码/无权限」→ `page_status="blocked"`、`warning="access_restricted"`，`status` 仍为 ok。
 - 正文 <100 字、`text_chars>0` 且页面存在附件/下载链接 → `warning="sparse_content"`（避免短页面误报）。阈值一律用**去噪后**的正文长度（剔除 header/nav/footer/script/style），不用整页 innerText。
@@ -627,11 +630,15 @@ pytest -q   # 配置 pytest-timeout，单测上限 90s
 - 报错里的 `hint` 一律写 0.5 的分组形式：`page(op=open)`、`context(op=create)`、`workflow(op=list)`；不得出现 0.4 的扁平工具名（门禁：`tests/test_schema_compat.py::test_hints_use_grouped_tool_names`）。
 - `page(op="links")` 已并入 `page(op="text", mode="links")`（返回 `links` + `total`），避免 anchors/links 两份同源数据。
 
-**单步降轮数**：读与点合并在一次返回里。
+**减少往返的设计**：返回足够的内容、定位线索和执行证据，减少为补齐信息而追加调用。
 
-- `page(op="text")` 除正文外返回 `anchors`：`[{tag,text,target,href}]`，`target` 可直接喂给 `locator(op="click"|"fill")`，省掉 `text → find_text → click` 两次往返。
-- `page(op="navigate", text_chars=N)` 在同一次返回里带回正文前 N 字与 `anchors`，省掉导航后立刻补一次 `text`。
-- 两者都是**增量字段**，不新增工具、不改既有 op 名。
+- `page(op="text")` 除正文外返回 `anchors`：`[{tag,text,target,href}]`，`target` 可直接用于 `locator(op="click"|"fill")`，减少正文读取之后再查询定位线索的调用；点击仍是下一次动作。
+- `page(op="open"|"navigate", text_chars=N)` 在同一次返回里带回正文前N字，省去导航后立即补一次text；只有detail=full且读取到anchors时才附带它们。
+- 元素动作与导航可内联assertions，后端在wait_s内等待并三态求值；无需模型另发读取来判断已声明的条件。专用条件等待也在工具内等待，避免模型轮询。
+- 动作返回Observation采集的非空diff，直接给出已观测到的新页、产物和页面变化；popup跟随规则见第0.6节。
+- workflow一次调用执行动作链与检查点，默认summary不返回逐步成功细节；observe只控制结果中的观测信息，不在执行中调用模型。失败保留现场并支持从失败步续跑。
+- catalog从操作签名生成schema、必填提示与首行op索引；结果投影减少每轮信息量。工具入口数量、返回体大小与任务调用轮次分别衡量，不互相替代，不给未指定任务承诺固定轮数。
+- page.read接受命名表达式映射，一次读取多字段；screenshot同次返回原生图片与元数据，省去另发调用读取图片。它们的实际结果分别由reader和screenshot工具契约约束。
 
 **模板编辑**：模板就是一份 JSON，不额外长编辑工具。
 

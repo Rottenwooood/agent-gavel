@@ -13,7 +13,7 @@ from .results import RESULT_TYPES
 def reference(catalog):
     tools = catalog.schemas()
     lines = [
-        "# MCP 工具参考（0.5）",
+        "# MCP 工具参考",
         "",
         "由操作契约生成；不要手工修改参数或结果表。",
         "定位支持{by,value,name?,exact?,strict?,nth?,has_text?,frame?}和{css:...}等短写；frame可为iframe选择器数组。",

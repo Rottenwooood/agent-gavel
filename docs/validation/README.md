@@ -1,4 +1,39 @@
-# 0.5 接口改造验收记录
+# 接口与浏览器验收记录
+
+报告只说明对应日期、版本和运行方式。0.6已删除session，旧0.5记录中的工具数、字段与目录不能当作新版结论。
+
+## 2026-11-17：0.6文档核对与有头黑盒验收
+
+基于43e177e工作区，生产代码只修正工具说明和文档标题，没有改变执行逻辑。
+先实际运行旧黑盒脚本，复现context仍取page_id的失败；修正为active_page_id后，
+又复现资料复制仍指向browser-profile及调用已删profile_use的旧路径。
+脚本现按临时browser-profiles/primary取资料，复制后通过context(create, profile=...)验证命名目录，再显式关闭并删除测试副本。
+无头命令还复现了headless_forbidden_on_primary：旧脚本未声明隔离测试标记，现只在自己的临时资料环境中设置AGENT_GAVEL_TEST_ISOLATED=1。
+
+命令：
+
+```sh
+.venv/bin/python tests/e2e_mcp.py --output /tmp/gavel-docs-headed-final.json
+.venv/bin/python tests/e2e_mcp.py --headless --output /tmp/gavel-docs-headless-final.json
+```
+
+结果：status=passed、stage=complete；protocol_checks、browser_checks、interaction_checks与profile_checks均为passed。
+真实MCP stdio → 独立daemon → 有头Chrome，共133次调用；覆盖13个入口、页面动作与断言、
+三种原生PNG、下载、工作流、双adapter共享资源与资料副本。记录见
+[0.6有头黑盒报告](e2e-headed-2026-11-17.json)。无头黑盒亦完整通过133次调用，见
+[0.6无头黑盒报告](e2e-headless-2026-11-17.json)。截图是当次/tmp下的辅助产物，不随文档归档。
+该验收使用独立临时资料，不访问用户登录资料；它不代表真实站点风控验收。
+
+同轮门禁与受影响测试：test_invariants.py、test_vocabulary.py、test_schema_compat.py、
+test_contract_snapshot.py、test_navigation_contract.py、test_observation_edit.py、test_retry_diff_wait.py。
+AGENT_GAVEL_HEADLESS=1时60 passed；AGENT_GAVEL_HEADLESS=0时56 passed、4 failed，
+四项失败为contract_main_flow、sparse_content_requires_attachment、diff_reports_dialog、
+edit_json_add_parameterized_assertion，均涉及BrowserContext.new_page的TargetClosedError及其后续缺字段。
+该有头pytest问题仍未修复；不将无头通过或黑盒通过替换成有头pytest全绿。
+
+生成的工具参考与catalog逐字一致（13工具、84操作）；修改文件通过Ruff检查与格式检查、git diff --check。
+
+## 0.5历史验收
 
 实现提交：`b1359b2`；黑盒验收脚本提交：`6d59ecd`。
 

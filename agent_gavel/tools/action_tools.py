@@ -111,7 +111,7 @@ def register_action_tools(catalog):
         wait_s: float = 6.0,
         humanize: bool = False,
     ):
-        "逐键追加输入；humanize=未显式给 delay_ms 时用 40-120ms 随机间隔。"
+        "逐键追加输入，delay_ms控制间隔；humanize当前对此操作不生效。"
         return await _run_target(
             page_id,
             "type",
@@ -135,7 +135,7 @@ def register_action_tools(catalog):
         wait_s: float = 6.0,
         humanize: bool = False,
     ):
-        "按键或组合键；humanize=按下前加短抖动。"
+        "按键或组合键；humanize当前对此操作不生效。"
         return await _run_target(
             page_id,
             "press",
