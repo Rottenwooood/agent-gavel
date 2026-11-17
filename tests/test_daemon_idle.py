@@ -49,7 +49,8 @@ async def test_idle_exit_keeps_browser_alive(monkeypatch, tmp_path):
     assert pids, "没有启动受管 Chrome"
 
     await rt.shutdown(keep_browsers=True)
-    await asyncio.sleep(0.5)
+    # driver 退出是异步的：等够时间再断言，否则会漏掉"稍后才被杀"的情况
+    await asyncio.sleep(3.0)
     alive = [p for p in pids if os.path.exists(f"/proc/{p}")]
     assert alive == pids, f"空闲退出杀掉了 Chrome：{pids} -> {alive}"
 

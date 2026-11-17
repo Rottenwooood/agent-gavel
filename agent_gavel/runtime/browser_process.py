@@ -768,17 +768,30 @@ class BrowserProcessManager:
         return handle
 
     async def disconnect_all(self):
-        """只断开连接、保留受管 Chrome 进程（空闲退出用）。"""
+        """只断开连接、保留受管 Chrome 进程（daemon 退出用）。
+
+        注意：不能走 Playwright 的 `stop()` —— 它会向 CDP 连接发 Browser.close，
+        把我们刻意保留的 Chrome 一起关掉。这里直接 SIGKILL driver 进程，
+        让 websocket 自然断开，Chrome 不受影响。
+        """
         for handle in list(self._handles.values()):
             handle._closed = True
         self._handles.clear()
         self._by_udd.clear()
-        if self._pw is not None:
+        pw, self._pw = self._pw, None
+        if pw is None:
+            return
+        driver_pid = None
+        try:
+            transport = pw._impl_obj._connection._transport
+            driver_pid = getattr(getattr(transport, "_proc", None), "pid", None)
+        except Exception:
+            driver_pid = None
+        if driver_pid:
             try:
-                await asyncio.wait_for(self._pw.stop(), timeout=5)
-            except Exception:
-                pass  # silent-ok: best-effort，失败不影响主流程
-            self._pw = None
+                os.kill(int(driver_pid), signal.SIGKILL)
+            except OSError:
+                pass  # silent-ok: 已经退出就不用管
 
     async def stop_all(self):
         for handle in list(self._handles.values()):

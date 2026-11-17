@@ -142,16 +142,20 @@ class BrowserRuntime:
         if self._closed:
             return
         self._closed = True
-        for pid in list(self.pages):
-            try:
-                await self.page_mgr.close(pid)
-            except Exception:
-                pass  # silent-ok: best-effort，失败不影响主流程
-        for cid in list(self.contexts):
-            try:
-                await self.context_mgr.close(cid)
-            except Exception:
-                pass  # silent-ok: best-effort，失败不影响主流程
+        # keep_browsers 时不能关页面：关掉最后一个标签页浏览器就会退出
+        # （我们已经去掉了 --keep-alive-for-test）。注册表直接丢弃即可，
+        # 下次接管时 adopt 会把现有标签页重新登记。
+        if not keep_browsers:
+            for pid in list(self.pages):
+                try:
+                    await self.page_mgr.close(pid)
+                except Exception:
+                    pass  # silent-ok: best-effort，失败不影响主流程
+            for cid in list(self.contexts):
+                try:
+                    await self.context_mgr.close(cid)
+                except Exception:
+                    pass  # silent-ok: best-effort，失败不影响主流程
         self.page_mgr.reset_state()
         self.context_mgr.reset_state()
         self.runs.clear()
