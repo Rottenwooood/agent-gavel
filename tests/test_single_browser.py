@@ -32,7 +32,7 @@ async def test_reuse_without_state_file(monkeypatch, tmp_path):
     h2 = await rt2.ensure_browser()
     assert h2.pid == pid, (pid, h2.pid)
     assert len(_managed_pids(str(tmp_path / "profiles" / "primary"))) == 1
-    await rt2.shutdown(keep_browsers=True)
+    await rt2.shutdown(keep_browsers=False)
     _kill(pid)
 
 
@@ -52,7 +52,7 @@ async def test_dead_browser_is_replaced(monkeypatch, tmp_path):
     h2 = await rt.ensure_browser()
     assert h2.pid != pid
     assert len(_managed_pids(str(tmp_path / "profiles" / "primary"))) == 1
-    await rt.shutdown(keep_browsers=True)
+    await rt.shutdown(keep_browsers=False)
     _kill(h2.pid)
 
 
@@ -68,5 +68,5 @@ async def test_leftover_without_registry_is_reused(monkeypatch, tmp_path):
     h2 = await rt2.ensure_browser()
     assert h2.pid == pid, (pid, h2.pid)
     assert len(_managed_pids(str(tmp_path / "profiles" / "primary"))) == 1
-    await rt2.shutdown(keep_browsers=True)
+    await rt2.shutdown(keep_browsers=False)
     _kill(pid)

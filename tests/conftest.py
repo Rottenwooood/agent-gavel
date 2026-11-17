@@ -55,7 +55,10 @@ def _kill_test_chrome():
 
     if not os.path.isdir("/proc"):
         return
-    markers = ("--user-data-dir=/tmp/agent-gavel-test-",)
+    markers = (
+        "--user-data-dir=/tmp/agent-gavel-test-",
+        "--user-data-dir=/tmp/pytest-",
+    )
     for name in os.listdir("/proc"):
         if not name.isdigit():
             continue
