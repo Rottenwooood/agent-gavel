@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.6.0 — 2026-11-17
+
+### 破坏性变更：三层资源模型
+
+- 删除 session 层：`runtime/sessions.py` 与 `tools/session_tools.py` 移除，工具 14 → 13、
+  操作 85 → 80。并发独占改由 context 的 run 锁承担，错误码 `session_busy` → `context_busy`；
+  `session(op=export_state/import_state)` 移到 `context`。
+- 资源 id 与事件、产物归属全部收敛到 `context_id`；页面响应不再有会话字段。
+- `context(op=create)` 响应只返回 `active_page_id`，不再同时给 `page_id`。
+
+### 资料目录
+
+- 数据根改为跨平台用户级目录：`AGENT_GAVEL_DATA_DIR` 优先，否则 Windows `%LOCALAPPDATA%`、
+  macOS `Application Support`、Linux `$XDG_DATA_HOME`。
+- 资料目录按名字寻址：`profiles/<name>/`，默认名固定 `primary`；删除 `ACTIVE` 指针、
+  `profile_use` 操作与 `AGENT_GAVEL_BROWSER_PROFILE`。
+- `profile_copy` 对已存在目录需要显式 `force`；`profile_ensure` 幂等。
+
+### 浏览器生命周期
+
+- daemon 退出（空闲、`daemon_shutdown`、服务重启）不再杀 Chrome，只断开连接；
+  下一个 daemon 按 state 文件或 `/proc` 扫描重新接管同一进程。
+- 同一资料目录保证只有一个 Chrome：活着就复用，死了才重开，启动前后各对账一次。
+- `browser(op=close, profile=x)` 只关某个资料目录，并摘掉它名下的 context/page。
+- 默认资料目录禁止无头启动；同一目录 headless 不一致直接报 `headless_mismatch`。
+
+### 风控相关
+
+- 启动参数去掉 `--no-sandbox`、`--disable-dev-shm-usage`、`--keep-alive-for-test`；
+  进程保活改为"默认容器永远保留一个标签页"。
+- 新增 `humanize` 布尔参数（click/fill/type/press，默认关）：真实鼠标轨迹与随机输入间隔。
+
+### 交互语义
+
+- 点击/按键弹出的新页，opener 是当前页时自动跟随，返回 `switched_to_new_tab: true`；
+  `follow_popup=false` 可关。
+- 省略 `page_id` 时优先默认容器，不再因后台隔离容器报 `ambiguous_page`。
+
 ## 0.5.2 — 2026-11-14
 
 ### 变更
