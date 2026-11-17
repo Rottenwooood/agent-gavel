@@ -67,15 +67,14 @@ def _launch_args():
       需要软件渲染用 AGENT_GAVEL_DISABLE_GPU=1。
     - AGENT_GAVEL_EXTRA_ARGS：追加自定义参数（空格分隔）。
     """
-    # --keep-alive-for-test：关闭最后一个标签页时不退出浏览器进程。
-    # 自动化场景下"关标签"不等于"关浏览器"，否则复用连接会拿到已退出的进程。
+    # 不再带 --keep-alive-for-test / --no-sandbox / --disable-dev-shm-usage：
+    # 这三个都是可枚举的自动化特征。保持进程存活改为"永远保留一个标签页"
+    # （见 PageManager.close）。
     args = [
         "--no-first-run",
         "--disable-blink-features=AutomationControlled",
-        "--keep-alive-for-test",
     ]
     if sys.platform.startswith("linux"):
-        args += ["--no-sandbox", "--disable-dev-shm-usage"]
         # 复制来的资料里 cookie 是钥匙串密钥加密的（v10/v11）；不显式指定
         # 密码存储，Chrome 会按默认探测失败并静默丢弃这批 cookie —— 登录态就没了。
         if shutil.which("secret-tool"):

@@ -4,7 +4,24 @@
 由 PlaywrightBackend.act 按动作类型分发。
 """
 
+import asyncio
+import random
+
 from ...core.errors import GavelError
+
+
+async def _human_move(backend, handle, loc, timeout_s=30.0):
+    """把鼠标先移到元素附近再按下：真实点击前一定有移动轨迹。
+
+    humanize=False 时完全不调用；调用方只在需要时走这里。
+    """
+    box = await loc.bounding_box(timeout=timeout_s * 1000)
+    if not box:
+        return
+    x = box["x"] + box["width"] * random.uniform(0.3, 0.7)
+    y = box["y"] + box["height"] * random.uniform(0.3, 0.7)
+    await handle.page.mouse.move(x, y, steps=random.randint(6, 12))
+    await asyncio.sleep(random.uniform(0.05, 0.18))
 
 
 def _done(handle, action, url_before, *, wait_navigation=False, timeout_s=30.0):
@@ -20,6 +37,8 @@ def _done(handle, action, url_before, *, wait_navigation=False, timeout_s=30.0):
 async def do_click(backend, handle, target, *, timeout_s=30.0, **kw):
     loc = await backend.resolve(handle, target)
     url_before = handle.page.url
+    if kw.get("humanize"):
+        await _human_move(backend, handle, loc, timeout_s)
     await loc.click(
         button=kw.get("button", "left"),
         click_count=kw.get("count", 1),
@@ -32,7 +51,14 @@ async def do_click(backend, handle, target, *, timeout_s=30.0, **kw):
 async def do_fill(backend, handle, target, *, timeout_s=30.0, **kw):
     loc = await backend.resolve(handle, target)
     url_before = handle.page.url
-    await loc.fill(kw.get("value", ""), timeout=timeout_s * 1000)
+    value = kw.get("value", "")
+    if kw.get("humanize"):
+        await _human_move(backend, handle, loc, timeout_s)
+        await loc.click(timeout=timeout_s * 1000)
+        await loc.fill("", timeout=timeout_s * 1000)
+        await loc.press_sequentially(value, delay=random.randint(40, 120), timeout=timeout_s * 1000)
+    else:
+        await loc.fill(value, timeout=timeout_s * 1000)
     return _done(handle, "fill", url_before)
 
 
@@ -41,6 +67,8 @@ async def do_type(backend, handle, target, *, timeout_s=30.0, **kw):
     url_before = handle.page.url
     text = kw.get("value", "")
     delay = kw.get("delay_ms", 0)
+    if kw.get("humanize") and not delay:
+        delay = random.randint(40, 120)
     try:
         await loc.press_sequentially(text, delay=delay, timeout=timeout_s * 1000)
     except AttributeError:
@@ -51,6 +79,8 @@ async def do_type(backend, handle, target, *, timeout_s=30.0, **kw):
 async def do_press(backend, handle, target, *, timeout_s=30.0, **kw):
     loc = await backend.resolve(handle, target)
     url_before = handle.page.url
+    if kw.get("humanize"):
+        await asyncio.sleep(random.uniform(0.05, 0.2))
     await loc.press(kw.get("keys", "Enter"), timeout=timeout_s * 1000)
     result = _done(handle, "press", url_before)
     if kw.get("wait_navigation"):

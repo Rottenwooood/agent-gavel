@@ -323,4 +323,8 @@ class PageManager:
             ctx.page_ids.remove(page_id)
         if ctx.active_page_id == page_id:
             ctx.active_page_id = ctx.page_ids[-1] if ctx.page_ids else None
+        if not ctx.page_ids and ctx.container == "default":
+            # 默认容器必须至少留一个标签页，否则 Chrome 会退出；
+            # 这也是不依赖 --keep-alive-for-test 的原因。
+            await self.open(ctx)
         return {"page_id": page_id, "closed": True}

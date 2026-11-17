@@ -107,14 +107,14 @@ errors(page_id:str=null, limit:int=100) -> Events
 元素动作，可附断言；strict默认唯一；frame支持嵌套iframe选择器。
 
 ```text
-click(page_id:str=null, target!:Target, button:"left"|"middle"|"right"="left", count:int=1, force:bool=false, wait_navigation:bool=false, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0, follow_popup:bool=true) -> Action
-  count=2双击；follow_popup=False不跟随新弹出的标签页。
-fill(page_id:str=null, target!:Target, value:str="", timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0) -> Action
-  替换输入。
-type(page_id:str=null, target!:Target, text:str="", delay_ms:int=0, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0) -> Action
-  逐键追加输入。
-press(page_id:str=null, target!:Target, keys:str="Enter", timeout_s:float=30.0, wait_navigation:bool=false, assertions:dict=null, wait_s:float=6.0) -> Action
-  按键或组合键。
+click(page_id:str=null, target!:Target, button:"left"|"middle"|"right"="left", count:int=1, force:bool=false, wait_navigation:bool=false, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0, follow_popup:bool=true, humanize:bool=false) -> Action
+  count=2双击；follow_popup=False不跟随新弹出的标签页；humanize=真实鼠标轨迹。
+fill(page_id:str=null, target!:Target, value:str="", timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0, humanize:bool=false) -> Action
+  替换输入；humanize=先移动鼠标再逐字输入。
+type(page_id:str=null, target!:Target, text:str="", delay_ms:int=0, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0, humanize:bool=false) -> Action
+  逐键追加输入；humanize=未显式给 delay_ms 时用 40-120ms 随机间隔。
+press(page_id:str=null, target!:Target, keys:str="Enter", timeout_s:float=30.0, wait_navigation:bool=false, assertions:dict=null, wait_s:float=6.0, humanize:bool=false) -> Action
+  按键或组合键；humanize=按下前加短抖动。
 hover(page_id:str=null, target!:Target, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0) -> Action
 focus(page_id:str=null, target!:Target, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0) -> Action
 clear(page_id:str=null, target!:Target, timeout_s:float=30.0, assertions:dict=null, wait_s:float=6.0) -> Action
