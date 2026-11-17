@@ -258,9 +258,10 @@ async def _run(lock_fd):
         try:
             from .runtime import shutdown_runtime
 
-            await asyncio.wait_for(
-                shutdown_runtime(keep_browsers=bool(stop.is_set() and _idle_flag())), timeout=8
-            )
+            # daemon 退出（空闲或显式 shutdown）都不杀受管 Chrome：
+            # 登录态与已开页面留在内存与磁盘里，下一个 daemon 按 state 文件重连。
+            # 只有 browser(op=close) 才真正关浏览器。
+            await asyncio.wait_for(shutdown_runtime(keep_browsers=True), timeout=8)
         except Exception:
             pass  # silent-ok: best-effort，失败不影响主流程
         try:

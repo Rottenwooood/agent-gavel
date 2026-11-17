@@ -158,11 +158,19 @@ async def _kill_tree(pid, grace_s=3.0):
 
 
 def _pid_alive(pid):
+    """进程是否还活着；僵尸（defunct）按已死处理。"""
     try:
-        os.kill(pid, 0)
-        return True
+        os.kill(int(pid), 0)
     except OSError:
         return False
+    if sys.platform.startswith("linux"):
+        try:
+            with open(f"/proc/{int(pid)}/stat", "rb") as f:
+                state = f.read().rsplit(b")", 1)[1].split()[0]
+            return state != b"Z"
+        except Exception:
+            return True
+    return True
 
 
 def _proc_cmdline(pid):
@@ -204,12 +212,13 @@ def _managed_pids(udd):
         parts = _proc_cmdline(pid)
         if not parts or "chrome" not in os.path.basename(parts[0]).lower():
             continue
-        if (
-            f"--user-data-dir={udd}" in parts
-            and "--disable-blink-features=AutomationControlled" in parts
-            and "--remote-allow-origins=*" in parts
-        ):
-            pids.append(int(pid))
+        if f"--user-data-dir={udd}" not in parts:
+            continue
+        if any(a.startswith("--type=") for a in parts):
+            continue  # 只要主进程，子进程会继承同一份参数
+        if not any(a.startswith("--remote-debugging-port=") for a in parts):
+            continue
+        pids.append(int(pid))
     return pids
 
 
@@ -274,6 +283,8 @@ def _reuse_existing(udd):
             continue
         if f"--user-data-dir={udd}" not in parts:
             continue
+        if any(a.startswith("--type=") for a in parts):
+            continue  # 只要主进程
         port = None
         for a in parts:
             if a.startswith("--remote-debugging-port="):
@@ -296,8 +307,13 @@ async def _reconcile(udd):
     if pids:
         for pid in pids:
             await _kill_tree(pid, grace_s=3.0)
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if not await asyncio.to_thread(_managed_pids, udd):
+                break
+            await asyncio.sleep(0.2)
         _clear_singletons(udd)
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.2)
     return None
 
 
@@ -327,6 +343,8 @@ class BrowserHandle:
     @property
     def alive(self) -> bool:
         if self._closed:
+            return False
+        if self.owned_pid and not _pid_alive(self.owned_pid):
             return False
         if self.browser is not None:
             try:
@@ -430,6 +448,14 @@ class BrowserProcessManager:
         deadline = time.monotonic() + 12
         while time.monotonic() < deadline:
             if await asyncio.to_thread(_cdp_ready, port):
+                # 兜底：同一目录只允许一个主进程，多出来的立刻清掉
+                others = [
+                    p
+                    for p in await asyncio.to_thread(_managed_pids, udd)
+                    if p != proc.pid
+                ]
+                for p in others:
+                    await _kill_tree(p, grace_s=2.0)
                 _write_state(udd, proc.pid, port)
                 return proc, port
             await asyncio.sleep(0.2)
@@ -719,7 +745,12 @@ class BrowserProcessManager:
         """按资料目录取浏览器：内存里有活句柄就复用，否则启动/重连。"""
         key = self._udd_key(udd)
         hit = self._by_udd.get(key)
-        if hit is not None and hit.alive:
+        if hit is not None and not hit.alive:
+            # 句柄已死：从两张表里摘掉，避免以后误判成"还活着"
+            self._by_udd.pop(key, None)
+            self._handles.pop(hit.process_id, None)
+            hit = None
+        if hit is not None:
             want = opts.get("headless")
             if want is not None and bool((hit.opts or {}).get("headless")) != bool(want):
                 raise GavelError(
@@ -730,6 +761,9 @@ class BrowserProcessManager:
                 )
             if self.matches(hit, **opts):
                 return hit
+            # 参数不一致（channel/proxy 等）：先关掉旧的，再起新的，绝不并存
+            await self.close(hit)
+            self._by_udd.pop(key, None)
         handle = await self.launch(user_data_dir=udd, **opts)
         self._by_udd[key] = handle
         return handle

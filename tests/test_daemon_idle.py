@@ -58,3 +58,27 @@ async def test_idle_exit_keeps_browser_alive(monkeypatch, tmp_path):
             os.kill(pid, signal.SIGTERM)
         except Exception:
             pass
+
+
+async def test_new_daemon_reattaches_running_chrome(monkeypatch, tmp_path):
+    """daemon 退出后不杀 Chrome；下一个 runtime 按 state 文件重连同一个进程。"""
+    import os
+    import signal
+
+    from agent_gavel.runtime.browser_runtime import BrowserRuntime
+
+    monkeypatch.setenv("AGENT_GAVEL_BROWSER_PROFILES", str(tmp_path / "profiles"))
+    rt1 = BrowserRuntime()
+    h1 = await rt1.ensure_browser()
+    pid = h1.pid
+    await rt1.shutdown(keep_browsers=True)
+
+    rt2 = BrowserRuntime()
+    h2 = await rt2.ensure_browser()
+    assert h2.pid == pid, (pid, h2.pid)
+    await rt2.shutdown(keep_browsers=True)
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except Exception:
+        pass
