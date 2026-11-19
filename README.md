@@ -13,16 +13,16 @@
 
 ## 它是什么
 
-agent-gavel 给 AI agent 提供完整的浏览器操作能力：多 session、多 context、多标签页、网页交互、文件上传下载、新窗口、嵌入页面和网页对话框处理，以及程序化断言。
+agent-gavel 给 AI agent 提供完整的浏览器操作能力：多 context、多标签页、网页交互、文件上传下载、新窗口、嵌入页面和网页对话框处理，以及程序化断言。
 
 它有两种使用方式：
 
 - **即时操作**：AI 现场探索页面，执行动作，并在同一次调用中验证结果。
-- **Workflow 重放**：把探索过的流程录制、参数化并保存。之后一次 `workflow_run` 完成整条流程，减少重复探索、MCP 往返和上下文消耗。
+- **Workflow 重放**：把探索过的流程录制、参数化并保存。之后一次 `workflow(op="run")` 完成整条流程，减少重复探索、MCP 往返和上下文消耗。
 
 ```text
 第一次：探索 → 操作 → 断言 → 录制 workflow
-以后：  workflow_run(params) → 浏览器执行 → 检查点验证 → 结果摘要
+以后：  workflow(op="run", params) → 浏览器执行 → 检查点验证 → 结果摘要
 页面变化：从失败步骤重新探索 → 局部修复 → 发布新版本
 ```
 
@@ -116,16 +116,18 @@ MCP 客户端通过 stdio 拉起 agent-gavel。使用 PyPI 版本时：
 }
 ```
 
+默认资料目录 `primary` 禁止无头启动（会污染登录指纹）；无头任务要显式指定另一个资料目录，例如 `page(op="open", profile="ci", url=...)`，它会启动 `profiles/ci` 下的无头浏览器。
+
 ### 进程模型
 
 MCP 客户端（opencode 等）可能同时拉起多个 agent-gavel 进程。agent-gavel 用
 **adapter + daemon** 处理：
 
-- **daemon** 是唯一持有浏览器、session/context/page、队列与产物索引的进程；
+- **daemon** 是唯一持有浏览器、context/page、队列与产物索引的进程；
 - **adapter** 是 stdio 入口，只转发工具调用，不加载 Playwright；
-- 一个数据目录只有一个 daemon 和一个 Chrome；`browser_status` 返回 `daemon_pid` 与 `adapters`；
+- 一个数据根只有一个 daemon；一个资料目录只有一个 Chrome；`browser(op="status")` 返回 `daemon_pid` 与 `adapters`；
 - `daemon_shutdown(confirm=True)` 可停止 daemon（有运行中的 workflow 时需 `force=True`），下一次调用会自动拉起；
-- 因此跨 adapter 的 session/page id 一致，同一 session 的并发 workflow 由 daemon 统一裁决。
+- 因此跨 adapter 的 context/page id 一致，同一 context 的并发 workflow 由 daemon 统一裁决。
 
 ## 配置
 
@@ -137,7 +139,7 @@ MCP 客户端（opencode 等）可能同时拉起多个 agent-gavel 进程。age
 | `AGENT_GAVEL_ALLOW_DOMAINS` | 允许访问的域名，逗号分隔 |
 | `AGENT_GAVEL_DOMAIN_GUARD` | `1` 时启用严格域名限制 |
 | `AGENT_GAVEL_ALLOW_PATHS` | 允许上传和导出的本地目录，逗号分隔 |
-| `AGENT_GAVEL_DATA_DIR` | session/profile 等运行数据目录 |
+| `AGENT_GAVEL_DATA_DIR` | profiles/workflows 等运行数据目录 |
 | `AGENT_GAVEL_ARTIFACT_DIR` | 下载、截图、PDF 等产物目录 |
 | `AGENT_GAVEL_WORKFLOWS_DIR` | 用户 workflow 模板目录 |
 | `AGENT_GAVEL_MAX_DOWNLOAD_BYTES` | 单个下载大小上限 |
@@ -147,68 +149,67 @@ MCP 客户端（opencode 等）可能同时拉起多个 agent-gavel 进程。age
 | `AGENT_GAVEL_DISABLE_GPU` | `1` 加回 `--disable-gpu`（软件渲染，一般不需要） |
 | `AGENT_GAVEL_BROWSER_MODE` | 浏览器来源：`managed`（默认，自启加固 Chrome）/ `playwright` |
 | `AGENT_GAVEL_CDP_ENDPOINT` | 接管一个已存在的浏览器（C2，如 `http://127.0.0.1:9222`） |
-| `AGENT_GAVEL_BROWSER_PROFILE` | C1 用的资料目录（覆盖当前副本） |
-| `AGENT_GAVEL_BROWSER_PROFILES` | 资料副本存放目录 |
+| `AGENT_GAVEL_BROWSER_PROFILES` | 命名资料目录的根（默认 `<数据根>/profiles`） |
 | `AGENT_GAVEL_CHROME_USER_DATA` | 复制来源：用户本机 Chrome 资料目录 |
 | `AGENT_GAVEL_CHROME_BIN` | 指定 Chrome/Chromium 可执行文件 |
 
-默认用户目录：
+默认目录：
 
 ```text
-~/.config/agent-gavel/workflows/
+<数据根>/workflows/
+<数据根>/profiles/<name>/
 ```
 
-运行数据和 artifact 默认位于系统临时目录下的 `agent-gavel/`。密码、token、cookie 和 storage state 不应提交到仓库或模板社区。
+数据根默认是用户级目录：Linux `~/.local/share/agent-gavel`、macOS `~/Library/Application Support/agent-gavel`、Windows `%LOCALAPPDATA%\agent-gavel`，可用 `AGENT_GAVEL_DATA_DIR` 覆盖。artifact 默认位于系统临时目录下的 `agent-gavel/artifacts/`。密码、token、cookie 和 storage state 不应提交到仓库或模板社区。
 
 ## 浏览器与身份
 
 默认（**C1**）：agent-gavel 自己启动一台加固过的 Chrome（持久真实资料目录），再用 Playwright 连接它——已关闭 `navigator.webdriver`、无头 UA 去标记、有头用真实 GPU。在这之上：
 
-**容器策略**（`session_create(container=...)`）：
+**容器策略**（`context(op="create", container=...)`）：
 
 - `default`（默认）：用资料目录的**默认容器**，继承其中的登录/cookie，改动**累积回**资料目录（可迭代）。
 - `isolated`：新建隔离容器，**继承**资料目录的 cookie，但**不写回**（并行/多账号不污染身份）。
-- `context_create` 与 `clone` 默认用 `isolated`。
+- `context(op="create")` 默认用 `default`；`container="isolated"` 或 `isolated=true` 时不写回资料目录。
 
 **资料副本**（把你本机 Chrome 的身份复制成我们自己的，可多份切换）：
 
 ```text
-browser_profile_copy(tier="default")   # 从 ~/.config/google-chrome 复制一份
-browser_profile_list()                  # 列出所有副本 + 当前使用的
-browser_profile_use(name)               # 切换当前副本
-browser_profile_delete(name)            # 删除副本（不动用户原目录）
+browser(op="profile_copy", tier="default")   # 从用户 Chrome 资料目录复制一份
+browser(op="profile_list")                   # 列出所有副本
+browser(op="profile_delete", name=...)       # 删除副本（不动用户原目录）
 ```
 
-`tier`：`strict`（不含 cookie/站点态，隐私最好）/ `default`（含 cookie/历史/站点态，推荐）/ `full`（再加扩展代码）。始终剔除密码、自动填充、同步、设备标识与缓存。首个副本自动成为当前，默认存放在 `~/.config/agent-gavel/browser-profiles/`。可反复调用 = 从用户当前资料目录再拍一份新快照。
+`tier`：`strict`（不含 cookie/站点态，隐私最好）/ `default`（含 cookie/历史/站点态，推荐）/ `full`（再加扩展代码）。始终剔除密码、自动填充、同步、设备标识与缓存。默认使用 `primary`，副本存放在 `<数据根>/profiles/<name>/`；多个身份靠显式名字切换。可反复调用 = 从用户当前资料目录再拍一份新快照。
 
 **接管已有浏览器（C2）**：
 
 ```text
-browser_launch(browser_mode="attach", cdp_endpoint="http://127.0.0.1:9222")
+browser(op="launch", browser_mode="attach", cdp_endpoint="http://127.0.0.1:9222")
 ```
 
 只连接、不负责关闭，返回会带 `warning`（真实账号暴露在本机调试口）。`browser_mode="playwright"` 回到 Playwright 直接启动。
 
-**生命周期**：启动前会对账——复用已有同资料目录的 Chrome（含 MCP 重启后靠状态文件 re-attach），或清理我们自己遗留的进程并删除单例锁后干净启动；`browser_launch` 幂等；`browser_status.os_browsers` 报告 OS 里真实在用我们资料目录的 Chrome。
+**生命周期**：启动前会对账——复用已有同资料目录的 Chrome（含 MCP 重启后靠状态文件 re-attach），或清理我们自己遗留的进程并删除单例锁后干净启动；`browser(op="launch")` 幂等；`browser(op="status", detail="full")` 的 `os_browsers` 报告 OS 里真实在用我们资料目录的 Chrome。
 
 > 复制资料副本会把**真实 cookie/登录态**落到本地副本目录；不需要登录身份时用 `strict` 档。对风控敏感的站点建议**有头** + 复用持久资料。
 >
-> **隐私约定**：`browser_profile_copy`、`browser_mode="attach"`、`context_cookies_get`、`session_export_state`/`import_state` 等涉及真实 cookie/登录态或写入本地文件的工具，在 MCP 描述里都标了 **⚠ 隐私敏感**；**agent 调用前应先向用户说明并取得同意**。
+> **隐私约定**：`browser(op="profile_copy")`、`browser_mode="attach"`、`context(op="cookies_get")`、`context(op="export_state")`/`context(op="import_state")` 等涉及真实 cookie/登录态或写入本地文件的工具，在 MCP 描述里都标了 **⚠ 隐私敏感**；**agent 调用前应先向用户说明并取得同意**。
 
 ## 最小使用流程
 
-工具调用时，始终优先使用返回的 `session_id`、`context_id` 和 `page_id`，多个页面并行时不要依赖“当前页面”。
+工具调用时，始终优先使用返回的 `context_id` 和 `page_id`，多个页面并行时不要依赖“当前页面”。
 
 ### 现场操作
 
 ```text
-session_create()
-page_navigate(page_id, url, assertions?)
-page_explore(page_id, tag?, text_contains?, head?, tail?)
-locator_fill(page_id, target, value, assertions?)
-locator_click(page_id, target, assertions?)
-locator_press(page_id, target, keys, assertions?)
-page_read(page_id, page_features)
+context(op="create")
+page(op="navigate", page_id, url, assertions?)
+page(op="explore", page_id, tag?, text_contains?, head?, tail?)
+locator(op="fill", page_id, target, value, assertions?)
+locator(op="click", page_id, target, assertions?)
+locator(op="press", page_id, target, keys, assertions?)
+page(op="read", page_id, page_features)
 ```
 
 常用字段：
@@ -218,7 +219,7 @@ page_read(page_id, page_features)
   - 映射：`{"u": {"read":"url","op":"contains","value":"baidu.com"}}`
   - 扁平：`{"url_contains":"baidu.com","text_contains":"保研","count_gte":1}`
   - 顶层 op：`{"title":"百度","op":"contains"}`
-  `read` 取 url|title|text|value|count|html|expr|attr（缺省按名字或 selector 推断，判断不出会**报错**而不是拿标题去比）；`op` 取 eq|neq|contains|not_contains|regex|exists|not_exists|gt|lt|gte|lte|count_eq|count_gte|count_gt；`value`/`expected` 等价。`assertion_schema()` 可查全套。
+  `read` 取 url|title|text|value|count|html|expr|attr（缺省按名字或 selector 推断，判断不出会**报错**而不是拿标题去比）；`op` 取 eq|neq|contains|not_contains|regex|exists|not_exists|gt|lt|gte|lte|count_eq|count_gte|count_gt；`value`/`expected` 等价。`assertion(op="schema")` 可查全套。
 - `page_features`：名称到 JavaScript 表达式的映射。
 
 例如：
@@ -243,10 +244,10 @@ page_read(page_id, page_features)
 ### 录制和重放
 
 ```text
-workflow_record_start(page_id?)
-→ 执行一组 page_* / locator_* 操作
-workflow_record_stop(site?, desc?, template_id?, parameterize?, sensitive?)
-workflow_run(name_or_id, params?, session_id?, verbosity?, confirm?)
+workflow(op="record_start", page_id?)
+→ 执行一组 page / locator 操作
+workflow(op="record_stop", site?, desc?, template_id?, parameterize?, sensitive?)
+workflow(op="run", name_or_id, params?, context_id?, verbosity?, confirm?)
 ```
 
 workflow 会保存参数、步骤、检查点和副作用策略。执行结果默认返回摘要；需要排查时可使用 `verbosity="steps"` 或 `verbosity="full"`。
@@ -255,7 +256,7 @@ workflow 会保存参数、步骤、检查点和副作用策略。执行结果�
 
 | 范畴 | 能力 |
 |---|---|
-| 浏览器资源 | browser、session、context、page，临时/持久/克隆 session |
+| 浏览器资源 | browser、context、page；默认容器（持久）/ 隔离容器 |
 | 页面 | 导航、读取、正文、链接、探索、截图、PDF、前进后退、刷新 |
 | 交互 | click、fill、type、press、hover、scroll、check、select、drag、upload |
 | 页面结构 | 多标签页、新窗口、嵌入页面 iframe、网页 alert/confirm/prompt 对话框 |
@@ -267,11 +268,11 @@ workflow 会保存参数、步骤、检查点和副作用策略。执行结果�
 | Workflow | 录制、编译、参数化、检查点、重放、暂停、恢复、取消、局部修复 |
 | 诊断 | trace、网络记录、console、页面错误、性能指标 |
 
-同一 page 的动作会串行执行；不同 page、context 和 session 可以并行执行。
+同一 page 的动作会串行执行；不同 page 和 context 可以并行执行。
 
 ## Workflow 模板
 
-模板保存在用户目录中，用户层优先于随包模板。模板可以通过 `workflow_save`、`workflow_validate`、`workflow_get`、`workflow_list`、`workflow_publish` 和 `workflow_stats` 管理。
+模板保存在用户目录中，用户层优先于随包模板。模板可以通过 `workflow(op="save")`、`workflow(op="validate")`、`workflow(op="get")`、`workflow(op="list")`、`workflow(op="publish")` 和 `workflow(op="stats")` 管理。
 
 模板适合保存：
 
@@ -319,7 +320,7 @@ Playwright 负责元素等待和动作执行，agent-gavel 负责结果验证。
 | 热调用 | 约 1.5ms |
 | click p95 | 约 34ms |
 | fill p95 | 约 5.5ms |
-| page_explore p95 | 约 13ms |
+| page(op="explore") p95 | 约 13ms |
 | 跨 page 并行相对串行 | 约 2 倍 |
 
 任务级 benchmark 还会比较探索和模板重放的调用次数与返回数据量。当前本地固定流程的一次结果是：探索 5 次工具调用、回传 1681B；模板重放 1 次调用、回传 192B，约减少 80% 的回传数据。回传数据量只是 token 的代理指标，不等于真实模型 token；真实网站会受到网络、登录态和反爬策略影响。
@@ -337,7 +338,6 @@ Playwright 负责元素等待和动作执行，agent-gavel 负责结果验证。
 uv run pytest -q
 uv run python tests/bench_runtime.py
 uv run python tests/bench_tasks.py
-uv run python tests/bench_real.py
 uv run python tests/mcp_live_smoke.py
 ```
 
@@ -358,7 +358,7 @@ uv run python tests/mcp_live_smoke.py
 
 - 站点和任务目标。
 - 参数和敏感参数。
-- 是否依赖已登录 session。
+- 是否依赖已登录资料目录。
 - 使用的 locator 和检查点。
 - 多组参数的运行结果。
 - 已知失效点和外部副作用。
